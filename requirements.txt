@@ -1,0 +1,38 @@
+# OpenAI Agents SDK - основной фреймворк
+openai-agents
+
+# Управление переменными окружения
+python-dotenv
+
+# Веб-поиск и парсинг
+requests
+beautifulsoup4
+lxml
+
+# Работа с данными и валидация
+pydantic
+pandas
+
+# Асинхронные операции
+aiohttp
+
+# Работа с файлами и форматами
+markdown
+pypdf2
+
+# Логирование и мониторинг
+loguru
+
+# Тестирование (для разработки)
+pytest
+pytest-asyncio
+
+# Дополнительно для качественного анализа текста
+textstat
+spacy
+
+# HTTP клиент для API запросов
+httpx
+
+# Парсинг и обработка текста
+nltk 

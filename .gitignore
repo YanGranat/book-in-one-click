@@ -1,3 +1,7 @@
+# AI Assistant local files
+.cursorrules
+project_notes.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -211,3 +215,19 @@ __marimo__/
 
 # Cursor rules directory
 .cursor/rules/
+
+# Project development notes
+project_notes.md
+
+# Documentation files
+OpenAI Agents SDK Documentation.md
+
+# Virtual environment
+venv/
+.venv/
+
+# Generated content
+output/
+
+# Documentation files (local only)
+OpenAI Agents SDK Documentation.md
