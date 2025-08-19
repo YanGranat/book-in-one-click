@@ -106,9 +106,5 @@ See `output_example/` folder for sample generated content.
 - **Permission errors:** Check file/directory permissions
 - **Path issues:** Project uses pathlib for cross-platform compatibility
 
-## 📚 Documentation
-
-- `Project_Notes/` - Project notes (e.g., agents SDK research)
-- `memory-bank/` - Core context (brief, product/system/tech, progress)
-- `.cursorrules` - Project-specific development rules
+ 
  
