@@ -1,6 +1,7 @@
-# AI Assistant local files
+# AI Assistant local files (local docs, not for Git)
 .cursorrules
-project_notes.md
+memory-bank/
+Project_Notes/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -219,7 +220,7 @@ __marimo__/
 # Project development notes
 project_notes.md
 
-# Documentation files
+# Documentation files (local only)
 OpenAI Agents SDK Documentation.md
 
 # Virtual environment
@@ -229,5 +230,4 @@ venv/
 # Generated content
 output/
 
-# Documentation files (local only)
-OpenAI Agents SDK Documentation.md
+ 

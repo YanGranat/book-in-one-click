@@ -31,7 +31,15 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 ### 3. Run Simple Test
 ```bash
-python simple_test.py
+python scripts/simple_test.py
+```
+
+### 4. Run Generators (Windows CMD)
+```bat
+venv\Scripts\python.exe scripts\Popular_science_post.py
+venv\Scripts\python.exe scripts\deep_popular_science_article.py
+venv\Scripts\python.exe scripts\deep_popular_science_book.py
+venv\Scripts\python.exe scripts\simple_test.py
 ```
 
 Enter any topic and get a generated page of educational content!
@@ -40,10 +48,20 @@ Enter any topic and get a generated page of educational content!
 
 ```
 Book_in_one_click/
-├── simple_test.py          # Simple one-agent test (start here)
-├── output/                 # Generated content (auto-created)
+├── scripts/                # Entry-point scripts
+│   ├── Popular_science_post.py
+│   ├── deep_popular_science_article.py
+│   ├── deep_popular_science_book.py
+│   └── simple_test.py
+├── pipelines/              # Pipelines per scenario (post/article/book)
+├── prompts/                # System prompts for agents (e.g., writing/article.md)
+│   └── writing/
+├── llm_agents/             # Agent roles (research/planning/writing/review)
+├── utils/                  # Helpers (env, io, slug, config)
+├── output/                 # Generated content (gitignored)
 ├── output_example/         # Example outputs for demo
-├── project_notes.md        # Detailed SDK documentation
+├── memory-bank/            # Project memory (context docs)
+├── Project_Notes/          # Local project notes (gitignored)
 ├── requirements.txt        # Python dependencies
 ├── .env                    # API keys (create manually)
 └── venv/                   # Python virtual environment
@@ -53,8 +71,8 @@ Book_in_one_click/
 
 - **Input:** Any educational topic (e.g., "Photosynthesis", "Machine Learning")
 - **Output:** Structured educational content (~300-500 words)
-- **Structure:** Introduction → Main content → Conclusion
-- **Format:** Markdown with metadata
+- **Structure:** Title → Introduction → Main content → Conclusion
+- **Format:** Markdown (content only)
 
 ## 📋 Requirements
 
@@ -90,5 +108,7 @@ See `output_example/` folder for sample generated content.
 
 ## 📚 Documentation
 
-- `project_notes.md` - Detailed OpenAI Agents SDK documentation
+- `Project_Notes/` - Project notes (e.g., agents SDK research)
+- `memory-bank/` - Core context (brief, product/system/tech, progress)
 - `.cursorrules` - Project-specific development rules
+ 
