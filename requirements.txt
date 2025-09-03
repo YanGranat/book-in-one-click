@@ -46,3 +46,4 @@ aiogram==2.25.1
 sqlalchemy>=2.0
 asyncpg
 aiosqlite
+redis

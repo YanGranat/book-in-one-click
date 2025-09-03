@@ -14,7 +14,7 @@ from utils.env import load_env_from_root
 from utils.lang import detect_lang_from_text
 from services.generation.post import generate_post
 from .db import SessionLocal
-from .credits import ensure_user_with_credits, charge_credits
+from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
 
 
 def _load_env():
@@ -89,22 +89,24 @@ def create_dispatcher() -> Dispatcher:
         topic = data.get("topic", "")
         lang = data.get("lang", "auto")
 
-        # Charge 1 credit before starting
+        # Charge 1 credit before starting (DB if configured, else Redis KV)
         from sqlalchemy.exc import SQLAlchemyError
         try:
-            if SessionLocal is None:
-                await message.answer("Service misconfigured: DB_URL not set.")
-                await state.finish()
-                return
-            async with SessionLocal() as session:
-                user = await ensure_user_with_credits(session, message.from_user.id)  # type: ignore
-                ok, remaining = await charge_credits(session, user, 1, reason="post")
+            charged = False
+            if SessionLocal is not None:
+                async with SessionLocal() as session:
+                    user = await ensure_user_with_credits(session, message.from_user.id)  # type: ignore
+                    ok, remaining = await charge_credits(session, user, 1, reason="post")
+                    if ok:
+                        await session.commit()
+                        charged = True
+            if not charged:
+                ok, remaining = await charge_credits_kv(message.from_user.id, 1)  # type: ignore
                 if not ok:
                     await message.answer("Insufficient credits. Ask admin to /topup.")
                     await state.finish()
                     return
-                await session.commit()
-        except SQLAlchemyError as e:
+        except SQLAlchemyError:
             await message.answer("Temporary DB error. Try later.")
             await state.finish()
             return

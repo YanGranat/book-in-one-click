@@ -8,7 +8,7 @@ from aiogram import Dispatcher, types
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .db import SessionLocal, init_db
-from .credits import topup_credits
+from .credits import topup_credits, topup_credits_kv, get_balance_kv_only
 
 
 ADMIN_IDS: List[int] = []
@@ -23,9 +23,10 @@ if _env:
 def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker):
     @dp.message_handler(commands=["balance"])  # type: ignore
     async def balance_cmd(message: types.Message):
-        from sqlalchemy import select
-        from .db import User
-
+        if session_factory is None:
+            bal = await get_balance_kv_only(message.from_user.id)  # type: ignore
+            await message.answer(f"Your balance: {bal} credits")
+            return
         async with session_factory() as session:
             from .db import get_or_create_user
             user = await get_or_create_user(session, message.from_user.id)  # type: ignore
@@ -42,6 +43,10 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
             return
         telegram_id = int(parts[1])
         amount = int(parts[2])
+        if session_factory is None:
+            new_balance = await topup_credits_kv(telegram_id, amount)
+            await message.answer(f"OK. New balance for {telegram_id}: {new_balance}")
+            return
         async with session_factory() as session:
             new_balance = await topup_credits(session, telegram_id, amount)
             await session.commit()
