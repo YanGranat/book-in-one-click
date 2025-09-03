@@ -24,9 +24,10 @@ def load_config(current_file: str) -> Dict[str, Any]:
         "generator_label": "OpenAI Agents SDK",
         "format": "md",
         "metadata": {
-            "include_generator": True,
-            "include_pipeline": True,
-            "include_timestamp": True,
+            "include_title": False,
+            "include_generator": False,
+            "include_pipeline": False,
+            "include_timestamp": False,
         },
         "pipelines": {
             "post": {

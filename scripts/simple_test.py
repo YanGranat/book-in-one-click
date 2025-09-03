@@ -57,6 +57,21 @@ def next_available_filepath(directory: Path, filename_base: str, ext: str = ".md
             return candidate
         idx += 1
 
+
+def detect_lang_from_text(text: str) -> str:
+    """Very simple language heuristic: return 'ru' if Cyrillic letters present, else 'en'.
+
+    This is intentionally lightweight (no external deps). It is sufficient for the
+    smoke test where the topic is a short phrase like "Transposons" or "Транспозоны".
+    """
+    has_cyrillic = False
+    for ch in text:
+        lower = ch.lower()
+        if 'а' <= lower <= 'я' or lower == 'ё':
+            has_cyrillic = True
+            break
+    return 'ru' if has_cyrillic else 'en'
+
 def main() -> None:
     load_env_from_root()
 
@@ -79,22 +94,28 @@ def main() -> None:
     print("⏳ Это займет 30–60 секунд...")
 
     try:
+        lang = detect_lang_from_text(topic)
+
+        instructions = (
+            f"Язык вывода: {lang}.\n"
+            "Напиши информативную страницу текста на заданную тему.\n\n"
+            "Структура:\n"
+            "1. Заголовок\n"
+            "2. Краткое введение (1 абзац)\n"
+            "3. Основная часть (2–3 абзаца с подробностями)\n"
+            "4. Заключение или практические выводы (1 абзац)\n\n"
+            "Стиль: образовательный, понятный, с примерами.\n"
+            "Объем: примерно 300–500 слов (страница текста)."
+        )
+
         agent = Agent(
             name="Content Writer",
-            instructions=(
-                "Напиши информативную страницу текста на заданную тему.\n\n"
-                "Структура:\n"
-                "1. Заголовок\n"
-                "2. Краткое введение (1 абзац)\n"
-                "3. Основная часть (2–3 абзаца с подробностями)\n"
-                "4. Заключение или практические выводы (1 абзац)\n\n"
-                "Стиль: образовательный, понятный, с примерами.\n"
-                "Объем: примерно 300–500 слов (страница текста)."
-            ),
+            instructions=instructions,
             model="gpt-5",
         )
 
-        result = Runner.run_sync(agent, f"Напиши страницу текста на тему: {topic}")
+        # Pass only the topic as the user message to avoid biasing the language.
+        result = Runner.run_sync(agent, topic)
         content = getattr(result, "final_output", "")
 
         if not content:

@@ -2,30 +2,42 @@
   "generator_label": "OpenAI Agents SDK",
   "format": "md",
   "metadata": {
-    "include_generator": true,
-    "include_pipeline": true,
-    "include_timestamp": true
+    "include_title": false,
+    "include_generator": false,
+    "include_pipeline": false,
+    "include_timestamp": false
   },
   "pipelines": {
     "post": {
       "model": "gpt-4o",
-      "word_count_min": 400,
+      "word_count_min": 250,
       "word_count_max": 800,
       "output_subdir": "popular_science_post",
       "style_pack": "pop_sci"
     },
     "article": {
       "model": "gpt-4o",
-      "word_count_min": 1200,
-      "word_count_max": 2000,
+      "word_count_min": 15000,
+      "word_count_max": 45000,
       "output_subdir": "deep_popular_science_article",
       "style_pack": "pop_sci"
     },
     "book": {
       "model": "gpt-4o",
+      "word_count_min": 60000,
+      "word_count_max": 180000,
       "output_subdir": "deep_popular_science_book",
       "style_pack": "pop_sci"
+    },
+    "summary": {
+      "model": "gpt-4o",
+      "word_count_min": 3000,
+      "word_count_max": 8000,
+      "output_subdir": "topic_summary",
+      "style_pack": "pop_sci"
     }
-  }
+  },
+  "fast_model": "gpt-5-mini",
+  "research": {}
 }
 

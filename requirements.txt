@@ -36,3 +36,13 @@ httpx
 
 # Парсинг и обработка текста
 nltk 
+ 
+# Web server and bot
+fastapi
+uvicorn
+aiogram==2.25.1
+
+# Database
+sqlalchemy>=2.0
+asyncpg
+aiosqlite

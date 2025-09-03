@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: bio1c-bot
+    env: python
+    plan: starter
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m server.run
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: DB_URL
+        sync: false
+      - key: DB_TABLE_PREFIX
+        value: bio1c_
+  - type: worker
+    name: bio1c-bot-worker
+    env: python
+    plan: starter
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m server.bot_runner
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: DB_URL
+        sync: false
+      - key: DB_TABLE_PREFIX
+        value: bio1c_
+
+
