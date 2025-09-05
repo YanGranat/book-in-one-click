@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict
+from typing import Dict, Set
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -49,6 +49,9 @@ def build_yesno_keyboard() -> ReplyKeyboardMarkup:
 def create_dispatcher() -> Dispatcher:
     bot = Bot(token=TELEGRAM_TOKEN)
     dp = Dispatcher(bot, storage=MemoryStorage())
+
+    # Simple in-memory guard to avoid duplicate generation per chat
+    RUNNING_CHATS: Set[int] = set()
 
     @dp.message_handler(commands=["start", "help"])  # type: ignore
     async def cmd_start(message: types.Message):
@@ -97,6 +100,13 @@ def create_dispatcher() -> Dispatcher:
         topic = data.get("topic", "")
         lang = data.get("lang", "auto")
 
+        chat_id = message.chat.id
+        if chat_id in RUNNING_CHATS:
+            warn = "Уже есть запущенная задача, подождите завершения." if lang == "ru" else "A job is already running, please wait."
+            await message.answer(warn)
+            return
+        RUNNING_CHATS.add(chat_id)
+
         # Charge 1 credit before starting (DB if configured, else Redis KV)
         from sqlalchemy.exc import SQLAlchemyError
         try:
@@ -119,6 +129,7 @@ def create_dispatcher() -> Dispatcher:
             warn = "Временная ошибка БД. Попробуйте позже." if lang == "ru" else "Temporary DB error. Try later."
             await message.answer(warn, reply_markup=ReplyKeyboardRemove())
             await state.finish()
+            RUNNING_CHATS.discard(chat_id)
             return
 
         working = "Генерирую. Это может занять несколько минут..." if lang == "ru" else "Working on it. This may take a few minutes..."
@@ -144,6 +155,7 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(err)
 
         await state.finish()
+        RUNNING_CHATS.discard(chat_id)
 
     return dp
 
