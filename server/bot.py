@@ -102,8 +102,7 @@ def create_dispatcher() -> Dispatcher:
 
         chat_id = message.chat.id
         if chat_id in RUNNING_CHATS:
-            warn = "Уже есть запущенная задача, подождите завершения." if lang == "ru" else "A job is already running, please wait."
-            await message.answer(warn)
+            # Silently ignore duplicate start while previous job is running
             return
         RUNNING_CHATS.add(chat_id)
 
