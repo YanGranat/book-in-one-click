@@ -14,7 +14,7 @@ pydantic
 pandas
 
 # Асинхронные операции
-aiohttp
+aiohttp<3.10
 
 # Работа с файлами и форматами
 markdown
