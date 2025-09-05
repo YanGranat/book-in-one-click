@@ -41,6 +41,9 @@ nltk
 fastapi
 uvicorn
 aiogram==2.25.1
+uvicorn[standard]
+httptools<0.7
+aiohttp==3.9.5
 
 # Database
 sqlalchemy>=2.0
