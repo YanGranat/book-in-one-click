@@ -14,7 +14,7 @@ pydantic
 pandas
 
 # Асинхронные операции
-aiohttp<3.10
+aiohttp==3.8.6
 
 # Работа с файлами и форматами
 markdown
@@ -39,11 +39,9 @@ nltk
  
 # Web server and bot
 fastapi
-uvicorn
 aiogram==2.25.1
 uvicorn[standard]
 httptools<0.7
-aiohttp==3.9.5
 
 # Database
 sqlalchemy>=2.0
