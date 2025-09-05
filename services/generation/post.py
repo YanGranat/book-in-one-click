@@ -39,7 +39,7 @@ def generate_post(
     factcheck: bool = True,
     factcheck_max_items: int = 0,
     research_iterations: int = 2,
-    research_concurrency: int = 3,
+    research_concurrency: int = 6,
     output_subdir: str = "popular_science_post",
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> Path:
