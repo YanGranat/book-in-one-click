@@ -40,6 +40,11 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/")
+async def root():
+    return {"ok": True}
+
+
 @app.post("/webhook/{secret}")
 async def telegram_webhook(secret: str, request: Request):
     if not TELEGRAM_TOKEN:
@@ -47,14 +52,19 @@ async def telegram_webhook(secret: str, request: Request):
     if WEBHOOK_SECRET and secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    data = await request.json()
-    # Aiogram v2 expects Update constructed from dict via kwargs
-    update = types.Update(**data)
-    # Ensure aiogram context is set in webhook execution
-    Bot.set_current(DP.bot)
-    Dispatcher.set_current(DP)
-    await DP.process_update(update)
-    return JSONResponse({"ok": True})
+    try:
+        data = await request.json()
+        # Aiogram v2 expects Update constructed from dict via kwargs
+        update = types.Update(**data)
+        # Ensure aiogram context is set in webhook execution
+        Bot.set_current(DP.bot)
+        Dispatcher.set_current(DP)
+        await DP.process_update(update)
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        # Avoid Telegram retries storm; log and return ok
+        print(f"webhook error: {e}")
+        return JSONResponse({"ok": True})
 
 
 
