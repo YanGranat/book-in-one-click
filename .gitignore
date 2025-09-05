@@ -3,6 +3,9 @@
 memory-bank/
 Project_Notes/
 
+# Prevent accidental credential temp file from being committed
+%TMP_CRED%
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
