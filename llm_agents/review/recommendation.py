@@ -18,10 +18,14 @@ def try_import_sdk():
 
 def build_recommendation_agent() -> Any:
     Agent = try_import_sdk()
+    # Use fast model for quicker per-point decisions
+    from utils.config import load_config
+    cfg = load_config(__file__)
+    fast_model = cfg.get("fast_model", "gpt-5-mini")
     return Agent(
         name="Per-Point Recommendation",
         instructions=_load_prompt(),
-        model="gpt-5",
+        model=fast_model,
         output_type=Recommendation,
     )
 
