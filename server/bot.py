@@ -31,6 +31,7 @@ class GenerateStates(StatesGroup):
     ChoosingLanguage = State()
     WaitingTopic = State()
     ChoosingFactcheck = State()
+    ChoosingDepth = State()
 
 
 def build_lang_keyboard() -> ReplyKeyboardMarkup:
@@ -44,6 +45,12 @@ def build_lang_keyboard() -> ReplyKeyboardMarkup:
 def build_yesno_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("Yes"), KeyboardButton("No"))
+    return kb
+
+
+def build_depth_keyboard() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("1"), KeyboardButton("2"), KeyboardButton("3"))
     return kb
 
 
@@ -102,6 +109,14 @@ def create_dispatcher() -> Dispatcher:
         topic = data.get("topic", "")
         lang = data.get("lang", "auto")
 
+        # If fact-checking is enabled, ask for depth first
+        if factcheck:
+            await state.update_data(factcheck=True)
+            prompt = "Выберите глубину проверки (1–3):" if lang == "ru" else "Select research depth (1–3):"
+            await message.answer(prompt, reply_markup=build_depth_keyboard())
+            await GenerateStates.ChoosingDepth.set()
+            return
+
         chat_id = message.chat.id
         if chat_id in RUNNING_CHATS:
             # Silently ignore duplicate start while previous job is running
@@ -148,7 +163,80 @@ def create_dispatcher() -> Dispatcher:
                 lambda: generate_post(
                     topic,
                     lang=lang,
-                    factcheck=factcheck,
+                    factcheck=False,
+                ),
+            )
+            with open(path, "rb") as f:
+                cap = f"Готово: {path.name}" if lang == "ru" else f"Done: {path.name}"
+                await message.answer_document(f, caption=cap)
+        except Exception as e:
+            err = f"Ошибка: {e}" if lang == "ru" else f"Error: {e}"
+            await message.answer(err)
+
+        await state.finish()
+        RUNNING_CHATS.discard(chat_id)
+
+    @dp.message_handler(state=GenerateStates.ChoosingDepth)  # type: ignore
+    async def choose_depth(message: types.Message, state: FSMContext):
+        txt = (message.text or "").strip()
+        data = await state.get_data()
+        lang = data.get("lang", "auto")
+        topic = data.get("topic", "")
+        if txt not in {"1", "2", "3"}:
+            prompt = "Выберите 1, 2 или 3:" if lang == "ru" else "Please choose 1, 2 or 3:"
+            await message.answer(prompt, reply_markup=build_depth_keyboard())
+            return
+        depth = int(txt)
+        await state.update_data(research_iterations=depth)
+
+        chat_id = message.chat.id
+        if chat_id in RUNNING_CHATS:
+            return
+        RUNNING_CHATS.add(chat_id)
+
+        # Charge 1 credit before starting (DB if configured, else Redis KV)
+        from sqlalchemy.exc import SQLAlchemyError
+        try:
+            charged = False
+            # Admins generate for free
+            if message.from_user and message.from_user.id in ADMIN_IDS:
+                charged = True
+            if SessionLocal is not None:
+                async with SessionLocal() as session:
+                    user = await ensure_user_with_credits(session, message.from_user.id)  # type: ignore
+                    ok, remaining = await charge_credits(session, user, 1, reason="post")
+                    if ok:
+                        await session.commit()
+                        charged = True
+            if not charged:
+                ok, remaining = await charge_credits_kv(message.from_user.id, 1)  # type: ignore
+                if not ok:
+                    warn = "Недостаточно кредитов" if lang == "ru" else "Insufficient credits"
+                    await message.answer(warn, reply_markup=ReplyKeyboardRemove())
+                    await state.finish()
+                    RUNNING_CHATS.discard(chat_id)
+                    return
+        except SQLAlchemyError:
+            warn = "Временная ошибка БД. Попробуйте позже." if lang == "ru" else "Temporary DB error. Try later."
+            await message.answer(warn, reply_markup=ReplyKeyboardRemove())
+            await state.finish()
+            RUNNING_CHATS.discard(chat_id)
+            return
+
+        working = "Генерирую. Это может занять несколько минут..." if lang == "ru" else "Working on it. This may take a few minutes..."
+        await message.answer(working, reply_markup=ReplyKeyboardRemove())
+
+        # Run generation in a thread to avoid blocking the event loop
+        import asyncio
+        loop = asyncio.get_running_loop()
+        try:
+            path = await loop.run_in_executor(
+                None,
+                lambda: generate_post(
+                    topic,
+                    lang=lang,
+                    factcheck=True,
+                    research_iterations=depth,
                 ),
             )
             with open(path, "rb") as f:
