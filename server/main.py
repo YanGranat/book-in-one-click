@@ -48,7 +48,8 @@ async def telegram_webhook(secret: str, request: Request):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     data = await request.json()
-    update = types.Update.to_object(data)
+    # Aiogram v2 expects Update constructed from dict via kwargs
+    update = types.Update(**data)
     await DP.process_update(update)
     return JSONResponse({"ok": True})
 
