@@ -14,6 +14,7 @@ from utils.env import load_env_from_root
 from utils.lang import detect_lang_from_text
 from services.generation.post import generate_post
 from .db import SessionLocal
+from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
 
 
@@ -60,6 +61,10 @@ def create_dispatcher() -> Dispatcher:
             reply_markup=build_lang_keyboard(),
         )
         await GenerateStates.ChoosingLanguage.set()
+
+    @dp.message_handler(commands=["id"])  # type: ignore
+    async def cmd_id(message: types.Message):
+        await message.answer(str(message.from_user.id))
 
     @dp.message_handler(state=GenerateStates.ChoosingLanguage)  # type: ignore
     async def choose_language(message: types.Message, state: FSMContext):
@@ -110,6 +115,9 @@ def create_dispatcher() -> Dispatcher:
         from sqlalchemy.exc import SQLAlchemyError
         try:
             charged = False
+            # Admins generate for free
+            if message.from_user and message.from_user.id in ADMIN_IDS:
+                charged = True
             if SessionLocal is not None:
                 async with SessionLocal() as session:
                     user = await ensure_user_with_credits(session, message.from_user.id)  # type: ignore
