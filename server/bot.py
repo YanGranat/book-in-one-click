@@ -62,9 +62,6 @@ def create_dispatcher() -> Dispatcher:
         )
         await GenerateStates.ChoosingLanguage.set()
 
-    @dp.message_handler(commands=["id"])  # type: ignore
-    async def cmd_id(message: types.Message):
-        await message.answer(str(message.from_user.id))
 
     @dp.message_handler(state=GenerateStates.ChoosingLanguage)  # type: ignore
     async def choose_language(message: types.Message, state: FSMContext):
