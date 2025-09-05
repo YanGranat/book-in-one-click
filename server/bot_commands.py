@@ -20,7 +20,7 @@ if _env:
             ADMIN_IDS.append(int(tok))
 # Ensure requested admin id present
 # Built-in admins
-for _aid in (452623935, 152840069):
+for _aid in (452623935, 152840069, 6513214803):
     if _aid not in ADMIN_IDS:
         ADMIN_IDS.append(_aid)
 
