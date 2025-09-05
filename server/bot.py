@@ -125,7 +125,7 @@ def create_dispatcher() -> Dispatcher:
             if not charged:
                 ok, remaining = await charge_credits_kv(message.from_user.id, 1)  # type: ignore
                 if not ok:
-                    warn = "Недостаточно кредитов. Попросите админа выполнить /topup." if lang == "ru" else "Insufficient credits. Ask admin to /topup."
+                    warn = "Недостаточно кредитов" if lang == "ru" else "Insufficient credits"
                     await message.answer(warn, reply_markup=ReplyKeyboardRemove())
                     await state.finish()
                     return
