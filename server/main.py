@@ -5,7 +5,7 @@ import os
 import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-from aiogram import types
+from aiogram import types, Bot, Dispatcher
 
 from utils.env import load_env_from_root
 from .bot import create_dispatcher
@@ -50,6 +50,9 @@ async def telegram_webhook(secret: str, request: Request):
     data = await request.json()
     # Aiogram v2 expects Update constructed from dict via kwargs
     update = types.Update(**data)
+    # Ensure aiogram context is set in webhook execution
+    Bot.set_current(DP.bot)
+    Dispatcher.set_current(DP)
     await DP.process_update(update)
     return JSONResponse({"ok": True})
 
