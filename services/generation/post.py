@@ -59,15 +59,12 @@ def generate_post(
         raise RuntimeError("OPENAI_API_KEY not found in environment")
 
     # Ensure this thread has an event loop for libs that expect it
-    loop_created = False
     try:
-        try:
-            asyncio.get_event_loop()
-        except Exception:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            loop_created = True
+        asyncio.get_event_loop()
+    except Exception:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
-        Agent, Runner = _try_import_sdk()
+    Agent, Runner = _try_import_sdk()
 
     def _emit(stage: str) -> None:
         if on_progress:
@@ -304,16 +301,5 @@ def generate_post(
         content=final_content,
     )
     return filepath
-    finally:
-        if loop_created:
-            try:
-                loop = asyncio.get_event_loop()
-                loop.close()
-            except Exception:
-                pass
-            try:
-                asyncio.set_event_loop(None)
-            except Exception:
-                pass
 
 
