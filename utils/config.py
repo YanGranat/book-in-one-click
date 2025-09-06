@@ -34,7 +34,7 @@ def load_config(current_file: str) -> Dict[str, Any]:
                 "model": "gpt-4o",
                 "word_count_min": 400,
                 "word_count_max": 800,
-                "output_subdir": "popular_science_post",
+                "output_subdir": "post",
                 "style_pack": "pop_sci",
             },
             "article": {

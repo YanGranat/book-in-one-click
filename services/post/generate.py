@@ -40,7 +40,7 @@ def generate_post(
     factcheck_max_items: int = 0,
     research_iterations: int = 2,
     research_concurrency: int = 6,
-    output_subdir: str = "popular_science_post",
+    output_subdir: str = "post",
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> Path:
     """

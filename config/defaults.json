@@ -12,7 +12,7 @@
       "model": "gpt-4o",
       "word_count_min": 250,
       "word_count_max": 800,
-      "output_subdir": "popular_science_post",
+      "output_subdir": "post",
       "style_pack": "pop_sci"
     },
     "article": {
