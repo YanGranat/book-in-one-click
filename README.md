@@ -131,9 +131,13 @@ Book_in_one_click/
 │   └── simple_test.py
 ├── pipelines/              # Пайплайны (post/article/book/summary)
 ├── prompts/                # Системные промпты по сценариям
-│   └── post/{writing,rewriting,review}
+│   ├── post/{writing,rewriting,review}
+│   ├── article/{writing}
+│   ├── summary/{writing}
+│   └── book/{writing}
 ├── llm_agents/             # Код агентов по сценариям
-│   └── post/{writing,review}
+│   ├── post/{writing,review}
+│   └── book/ (пока каркас)
 ├── utils/                  # Хелперы (env, io, slug, config)
 ├── output/                 # Сгенерированный контент (в .gitignore)
 ├── output_example/         # Примеры результатов
