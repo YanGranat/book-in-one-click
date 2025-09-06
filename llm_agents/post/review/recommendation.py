@@ -7,7 +7,7 @@ from schemas.research import Recommendation
 
 
 def _load_prompt() -> str:
-    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "post" / "review" / "recommendation.md"
+    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "post" / "02_review" / "recommendation.md"
     return prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
 
 
