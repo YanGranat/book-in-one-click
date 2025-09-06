@@ -94,11 +94,11 @@ def generate_post(
 
     report = None
     if factcheck:
-        from llm_agents.review.identify_points import build_identify_points_agent
-        from llm_agents.review.iterative_research import build_iterative_research_agent
-        from llm_agents.review.recommendation import build_recommendation_agent
-        from llm_agents.review.sufficiency import build_sufficiency_agent
-        from llm_agents.review.query_synthesizer import build_query_synthesizer_agent
+        from llm_agents.post.review.identify_points import build_identify_points_agent
+        from llm_agents.post.review.iterative_research import build_iterative_research_agent
+        from llm_agents.post.review.recommendation import build_recommendation_agent
+        from llm_agents.post.review.sufficiency import build_sufficiency_agent
+        from llm_agents.post.review.query_synthesizer import build_query_synthesizer_agent
         from utils.config import load_config
 
         _emit("factcheck:init")
@@ -248,7 +248,7 @@ def generate_post(
         needs_rewrite = any(i.verdict != "pass" for i in report.items)
         if needs_rewrite:
             _emit("rewrite:init")
-            from llm_agents.writing.rewrite import build_rewrite_agent
+            from llm_agents.post.writing.rewrite import build_rewrite_agent
 
             rw_agent = build_rewrite_agent()
             rw_input = (
@@ -267,7 +267,7 @@ def generate_post(
 
             final_content = asyncio.run(_do_rewrite(rw_input))
 
-    from llm_agents.writing.refine import build_refine_agent
+    from llm_agents.post.writing.refine import build_refine_agent
 
     refine_agent = build_refine_agent()
     refine_input = (

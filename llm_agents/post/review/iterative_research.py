@@ -7,7 +7,7 @@ from schemas.research import ResearchIterationNote
 
 
 def _load_prompt() -> str:
-    prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "review" / "iterative_research.md"
+    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "post" / "review" / "iterative_research.md"
     return prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
 
 
