@@ -104,9 +104,10 @@ venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks"
 ## 📝 Промпты
 
 Файлы промптов целиком являются системной инструкцией агента. Для постов хранятся в `prompts/post/*`:
-- `post.md`
-- `article.md`
-- `summary.md`
+- `writing/post.md`
+- `rewriting/rewrite_post.md`
+- `rewriting/refine_post.md`
+- `review/*`
 
 ## 🎨 Стиль (style packs)
 
@@ -129,9 +130,10 @@ Book_in_one_click/
 │   ├── topic_summary.py
 │   └── simple_test.py
 ├── pipelines/              # Пайплайны (post/article/book/summary)
-├── prompts/                # Системные промпты (напр. writing/article.md)
-│   └── writing/
-├── llm_agents/             # Роли агентов (research/planning/writing/review)
+├── prompts/                # Системные промпты по сценариям
+│   └── post/{writing,rewriting,review}
+├── llm_agents/             # Код агентов по сценариям
+│   └── post/{writing,review}
 ├── utils/                  # Хелперы (env, io, slug, config)
 ├── output/                 # Сгенерированный контент (в .gitignore)
 ├── output_example/         # Примеры результатов
