@@ -4,7 +4,7 @@ Windows CMD examples:
 
 1) Popular science post
 ```
-venv\Scripts\python.exe scripts\Popular_science_post.py --topic "Ваша тема"
+venv\Scripts\python.exe scripts\popular_science_post.py --topic "Ваша тема"
 ```
 
 2) Deep popular science article

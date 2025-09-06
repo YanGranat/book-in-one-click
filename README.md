@@ -36,7 +36,7 @@ python scripts/simple_test.py
 
 ### 4. Запуск генераторов (Windows CMD)
 ```bat
-venv\Scripts\python.exe scripts\Popular_science_post.py
+venv\Scripts\python.exe scripts\popular_science_post.py
 venv\Scripts\python.exe scripts\deep_popular_science_article.py
 venv\Scripts\python.exe scripts\deep_popular_science_book.py
 venv\Scripts\python.exe scripts\topic_summary.py
@@ -64,7 +64,7 @@ venv\Scripts\python.exe scripts\simple_test.py
 
 Пример:
 ```bat
-venv\Scripts\python.exe scripts\Popular_science_post.py --topic "CRISPR" --lang en
+venv\Scripts\python.exe scripts\popular_science_post.py --topic "CRISPR" --lang en
 venv\Scripts\python.exe scripts\deep_popular_science_article.py --topic "Квантовые точки" --lang ru
 venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks" --lang auto
 ```
@@ -124,7 +124,7 @@ venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks"
 ```
 Book_in_one_click/
 ├── scripts/                # Точки входа
-│   ├── Popular_science_post.py
+│   ├── popular_science_post.py
 │   ├── deep_popular_science_article.py
 │   ├── deep_popular_science_book.py
 │   ├── topic_summary.py

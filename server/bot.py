@@ -12,7 +12,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 
 from utils.env import load_env_from_root
 from utils.lang import detect_lang_from_text
-from services.generation.post import generate_post
+from services.post.generate import generate_post
 from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
