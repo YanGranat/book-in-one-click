@@ -180,7 +180,7 @@ def generate_post(
                 f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
             )  # type: ignore
             rec = rec_res.final_output
-            return p, rec
+            return p, rec, notes
 
         async def process_all(points_list):
             sem = asyncio.Semaphore(max(1, int(research_concurrency)))
@@ -197,30 +197,26 @@ def generate_post(
 
         results = asyncio.run(process_all(points)) if points else []
 
-        per_point_recs = [r for (_, r) in results]
-
         class _SimpleItem:
-            def __init__(self, claim_text: str, verdict: str, proposed_fix: str | None):
+            def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
                 self.claim_text = claim_text
                 self.verdict = verdict
-                self.proposed_fix = proposed_fix
-                self.evidence = []
+                self.reason = reason
+                self.supporting_facts = supporting_facts
 
         simple_items = []
-        for p, r in zip(points, per_point_recs):
-            if r.action == "keep":
-                verdict = "pass"
-                fix = None
-            elif r.action == "clarify":
+        for (p, r, notes) in results:
+            if getattr(r, "action", "keep") == "keep":
+                continue  # confirmed parts не передаём в переписывание
+            if r.action == "clarify":
                 verdict = "uncertain"
-                fix = r.suggestion or ""
-            elif r.action == "rewrite":
+            elif r.action == "rewrite" or r.action == "remove":
                 verdict = "fail"
-                fix = r.suggestion or ""
             else:
                 verdict = "fail"
-                fix = "Удалить данный фрагмент."
-            simple_items.append(_SimpleItem(p.text, verdict, fix))
+            reason = getattr(r, "explanation", "") or ""
+            supporting_facts = " \n".join(getattr(n, "findings", "") for n in (notes or []))
+            simple_items.append(_SimpleItem(p.text, verdict, reason, supporting_facts))
 
         class _SimpleReport:
             def __init__(self, items):
@@ -230,14 +226,13 @@ def generate_post(
                 import json
                 return json.dumps(
                     {
-                        "summary": "Per-point recommendations",
+                        "summary": "Issues only for rewrite (exclude confirmed)",
                         "items": [
                             {
                                 "claim_text": i.claim_text,
                                 "verdict": i.verdict,
-                                "reason": "",
-                                "proposed_fix": i.proposed_fix,
-                                "evidence": [],
+                                "reason": i.reason,
+                                "supporting_facts": i.supporting_facts,
                             }
                             for i in self.items
                         ],
@@ -260,7 +255,7 @@ def generate_post(
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{lang}</lang>\n"
-                "<goal>Перепиши пост с учетом критики, сохрани стиль и формат из системного промпта поста.</goal>\n"
+                "<goal>Перепиши исходный пост, исправляя только проблемные места. Сохрани исходный легкий, понятный стиль. Не добавляй излишне технический тон. Используй supporting_facts для корректировки фактов и удаляй/заменяй неточные утверждения. Подтвержденные фрагменты не меняй.</goal>\n"
                 f"<post>\n{content}\n</post>\n"
                 f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
                 "</input>"
