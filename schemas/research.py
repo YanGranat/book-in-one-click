@@ -39,7 +39,6 @@ class Recommendation(BaseModel):
     point_id: str
     action: Literal["keep", "clarify", "rewrite", "remove"]
     explanation: str
-    suggestion: Optional[str] = None
 
 
 class SufficiencyDecision(BaseModel):
