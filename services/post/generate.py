@@ -255,7 +255,6 @@ def generate_post(
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{lang}</lang>\n"
-                "<goal>Перепиши исходный пост, исправляя только проблемные места. Сохрани исходный легкий, понятный стиль. Не добавляй излишне технический тон. Используй supporting_facts для корректировки фактов и удаляй/заменяй неточные утверждения. Подтвержденные фрагменты не меняй.</goal>\n"
                 f"<post>\n{content}\n</post>\n"
                 f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
                 "</input>"
