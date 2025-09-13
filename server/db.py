@@ -66,7 +66,16 @@ class Tx(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-engine = create_async_engine(DB_URL) if DB_URL else None
+engine = None
+if DB_URL:
+    # For pgBouncer (transaction pooler) + asyncpg: disable statement cache to avoid PREPARE issues
+    engine = create_async_engine(
+        DB_URL,
+        connect_args={
+            "statement_cache_size": 0,
+        },
+        pool_pre_ping=True,
+    )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False) if engine else None
 
 
