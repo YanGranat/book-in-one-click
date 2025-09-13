@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Optional, Type
 import os
 import asyncio
+import time
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.slug import safe_filename_base
@@ -88,11 +89,13 @@ def generate_post(
 
     _emit("start:post")
     from datetime import datetime
+    started_at = datetime.utcnow()
+    started_perf = time.perf_counter()
     log_lines = []
     def log(section: str, body: str):
         ts = datetime.utcnow().isoformat()
         log_lines.append(f"## {section}\n\n<time>{ts}</time>\n\n{body}\n")
-    log("config", f"provider={_prov}\nlang={lang}")
+    log("🧭 Config", f"provider={_prov}\nlang={lang}")
 
     instructions = build_post_instructions(topic, lang)
 
@@ -180,6 +183,9 @@ def generate_post(
         f"<lang>{(lang or 'auto').strip()}</lang>\n"
         f"</input>"
     )
+    # Log writer prompt and input for transparency
+    log("✍️ Writer · System Prompt", f"```md\n{instructions}\n```")
+    log("✍️ Writer · Input", f"```xml\n{user_message_local_writer}\n```")
     content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("writer_output", content[:2000])
     if not content:
@@ -203,6 +209,10 @@ def generate_post(
             points = plan.points or []
             if factcheck_max_items and factcheck_max_items > 0:
                 points = points[: factcheck_max_items]
+            try:
+                log("🔎 Fact-check · Plan (OpenAI)", f"points={len(points)}")
+            except Exception:
+                pass
 
             cfg = load_config(__file__)
             pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
@@ -350,6 +360,10 @@ def generate_post(
             points = plan.points or []
             if factcheck_max_items and factcheck_max_items > 0:
                 points = points[: factcheck_max_items]
+            try:
+                log("🔎 Fact-check · Plan", f"```json\n{plan.model_dump_json()}\n```")
+            except Exception:
+                log("🔎 Fact-check · Plan", f"points={len(points)}")
 
             cfg = load_config(__file__)
             pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
@@ -379,6 +393,16 @@ def generate_post(
             # Web context build (provider-agnostic)
             queries = getattr(qp, "queries", []) or []
             web_ctx = build_search_context(queries, per_query=2, max_chars=2000)
+            if queries:
+                log("🌐 Web · Queries", "\n".join([f"- {q}" for q in queries]))
+            # Extract sources (best-effort)
+            try:
+                import re as _re
+                urls = _re.findall(r"url=\"([^\"]+)\"", web_ctx)
+                if urls:
+                    log("🌐 Web · Sources", "\n".join([f"- {u}" for u in urls[:20]]))
+            except Exception:
+                pass
 
             notes = []
             for step in range(1, max(1, int(research_iterations)) + 1):
@@ -513,8 +537,11 @@ def generate_post(
                 f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
                 "</input>"
             )
+            # Log rewrite prompt and critique for transparency
+            log("🛠️ Rewrite · Prompt", f"```md\n{p_rewrite[:4000]}\n```")
+            log("🛠️ Rewrite · Critique JSON", f"```json\n{report.model_dump_json()}\n```")
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
-            log("rewrite_output", final_content[:2000])
+            log("🛠️ Rewrite · Output", final_content[:4000])
 
     from pathlib import Path
     p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
@@ -525,8 +552,9 @@ def generate_post(
         f"<post>\n{final_content}\n</post>\n"
         "</input>"
     )
+    log("✨ Refine · Prompt", f"```md\n{p_refine[:4000]}\n```")
     final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
-    log("refine_output", final_content[:2000])
+    log("✨ Refine · Output", final_content[:4000])
 
     # Save final
     output_dir = ensure_output_dir(output_subdir)
@@ -542,12 +570,19 @@ def generate_post(
     # Save log sidecar .md and register in DB if available
     log_dir = ensure_output_dir(output_subdir)
     log_path = next_available_filepath(log_dir, f"{safe_filename_base(topic)}_log", ".md")
+    finished_at = datetime.utcnow()
+    duration_s = max(0.0, time.perf_counter() - started_perf)
     header = (
-        f"# Generation Log\n\n"
+        f"# 🧾 Generation Log\n\n"
         f"- provider: `{_prov}`\n"
         f"- lang: `{lang}`\n"
         f"- model_heavy: `{os.getenv('OPENAI_MODEL' if _prov=='openai' else ('GEMINI_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}`\n"
         f"- model_fast: `{os.getenv('OPENAI_FAST_MODEL' if _prov=='openai' else ('GEMINI_FAST_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}`\n"
+        f"- started_at: `{started_at.isoformat()}`\n"
+        f"- finished_at: `{finished_at.isoformat()}`\n"
+        f"- duration: `{duration_s:.1f}s`\n"
+        f"- topic: `{topic}`\n"
+        f"- factcheck: `{bool(factcheck)}`\n"
     )
     save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=header + "\n".join(log_lines))
     try:
