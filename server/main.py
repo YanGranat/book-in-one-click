@@ -51,7 +51,7 @@ async def _startup():
         await DP.bot.set_my_commands([
             types.BotCommand(command="start", description="Start / Начать"),
             types.BotCommand(command="balance", description="Balance / Баланс"),
-            types.BotCommand(command="help", description="Help / Помощь"),
+            types.BotCommand(command="info", description="Info / Инфо"),
             types.BotCommand(command="lang", description="Language / Язык"),
             types.BotCommand(command="lang_generate", description="Gen Language / Язык генерации"),
             types.BotCommand(command="generate", description="Generate / Сгенерировать"),

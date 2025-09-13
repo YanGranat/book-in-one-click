@@ -72,13 +72,33 @@ def create_dispatcher() -> Dispatcher:
     _sem_capacity = int(os.getenv("BOT_PARALLEL_LIMIT", "12"))
     GLOBAL_SEMAPHORE = asyncio.Semaphore(max(1, _sem_capacity))
 
-    @dp.message_handler(commands=["start", "help"])  # type: ignore
+    @dp.message_handler(commands=["start"])  # type: ignore
     async def cmd_start(message: types.Message):
         await message.answer(
             "Выберите язык интерфейса / Choose interface language:",
             reply_markup=build_lang_keyboard(),
         )
         await GenerateStates.ChoosingLanguage.set()
+
+    @dp.message_handler(commands=["info"])  # type: ignore
+    async def cmd_info(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        lang = (data.get("lang") or "auto").strip()
+        if lang == "ru":
+            text = (
+                "Этот бот генерирует научно-популярные посты.\n"
+                "1) Выберите язык генерации: /lang_generate (Auto/RU/EN).\n"
+                "2) Нажмите /generate и отправьте тему.\n"
+                "На выходе получите Markdown-файл с постом."
+            )
+        else:
+            text = (
+                "This bot generates popular-science posts.\n"
+                "1) Pick generation language: /lang_generate (Auto/RU/EN).\n"
+                "2) Press /generate and send a topic.\n"
+                "You will get a Markdown file with the post."
+            )
+        await message.answer(text)
 
 
     @dp.message_handler(state=GenerateStates.ChoosingLanguage)  # type: ignore
