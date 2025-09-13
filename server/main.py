@@ -164,7 +164,7 @@ async def get_log(log_id: int):
         }
 
 
-@app.post("/logs-seed")
+@app.api_route("/logs-seed", methods=["GET", "POST"])
 async def logs_seed():
     if SessionLocal is None:
         return {"error": "db is not configured"}
