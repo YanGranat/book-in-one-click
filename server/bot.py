@@ -88,6 +88,14 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
 
+    @dp.message_handler(commands=["lang"])  # type: ignore
+    async def cmd_lang(message: types.Message, state: FSMContext):
+        await message.answer(
+            "Выберите язык интерфейса / Choose interface language:",
+            reply_markup=build_lang_keyboard(),
+        )
+        await GenerateStates.ChoosingLanguage.set()
+
     @dp.message_handler(state=GenerateStates.WaitingTopic, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def topic_received(message: types.Message, state: FSMContext):
         topic = (message.text or "").strip()
