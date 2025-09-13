@@ -20,7 +20,7 @@ services:
       - key: REDIS_URL
         sync: false
       - key: BOT_ADMIN_IDS
-        value: 452623935,152840069,6513214803,274026694,1246334907
+        sync: false
       - key: PYTHON_VERSION
         value: 3.11.9
   
