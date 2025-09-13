@@ -306,13 +306,20 @@ def create_dispatcher() -> Dispatcher:
         import asyncio
         loop = asyncio.get_running_loop()
         try:
+            # Resolve provider before jumping into executor
+            prov = (data.get("provider") or "").strip().lower()
+            if not prov and message.from_user:
+                try:
+                    prov = await get_provider(message.from_user.id)  # type: ignore
+                except Exception:
+                    prov = "openai"
             async with GLOBAL_SEMAPHORE:
                 path = await loop.run_in_executor(
                     None,
                     lambda: generate_post(
                         topic,
                         lang=(data.get("gen_lang") or "auto"),
-                        provider=(data.get("provider") or (await get_provider(message.from_user.id) if message.from_user else "openai")),
+                        provider=(prov or "openai"),
                         factcheck=False,
                     ),
                 )
@@ -385,13 +392,20 @@ def create_dispatcher() -> Dispatcher:
         import asyncio
         loop = asyncio.get_running_loop()
         try:
+            # Resolve provider before jumping into executor
+            prov = (data.get("provider") or "").strip().lower()
+            if not prov and message.from_user:
+                try:
+                    prov = await get_provider(message.from_user.id)  # type: ignore
+                except Exception:
+                    prov = "openai"
             async with GLOBAL_SEMAPHORE:
                 path = await loop.run_in_executor(
                     None,
                     lambda: generate_post(
                         topic,
                         lang=(data.get("gen_lang") or "auto"),
-                        provider=(data.get("provider") or (await get_provider(message.from_user.id) if message.from_user else "openai")),
+                        provider=(prov or "openai"),
                         factcheck=True,
                         research_iterations=depth,
                     ),
