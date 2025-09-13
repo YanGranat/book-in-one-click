@@ -125,7 +125,7 @@ def generate_post(
     def _run_claude_with(system: str, user_message_local: str, model_name: Optional[str] = None) -> str:
         import anthropic  # type: ignore
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        mname = model_name or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
+        mname = model_name or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
         msg = client.messages.create(
             model=mname,
             max_tokens=4096,
@@ -179,24 +179,174 @@ def generate_post(
 
     report = None
     if factcheck:
-        from utils.config import load_config
-        from pathlib import Path
-        from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
+        if _prov == "openai":
+            # Preserve original OpenAI Agents SDK flow (with WebSearchTool)
+            from llm_agents.post.module_02_review.identify_points import build_identify_points_agent
+            from llm_agents.post.module_02_review.iterative_research import build_iterative_research_agent
+            from llm_agents.post.module_02_review.recommendation import build_recommendation_agent
+            from llm_agents.post.module_02_review.sufficiency import build_sufficiency_agent
+            from llm_agents.post.module_02_review.query_synthesizer import build_query_synthesizer_agent
+            from utils.config import load_config
 
-        _emit("factcheck:init")
-        base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
-        p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
-        plan = run_json_with_provider(p_ident, f"<post>\n{content}\n</post>", ResearchPlan, speed="fast")
-        points = plan.points or []
-        if factcheck_max_items and factcheck_max_items > 0:
-            points = points[: factcheck_max_items]
+            _emit("factcheck:init")
+            identify_agent = build_identify_points_agent()
+            identify_result = Runner.run_sync(identify_agent, f"<post>\n{content}\n</post>")
+            plan = identify_result.final_output  # type: ignore
+            points = plan.points or []
+            if factcheck_max_items and factcheck_max_items > 0:
+                points = points[: factcheck_max_items]
 
-        cfg = load_config(__file__)
-        pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
-        p_iter = (base / "iterative_research.md").read_text(encoding="utf-8")
-        p_suff = (base / "sufficiency.md").read_text(encoding="utf-8")
-        p_rec = (base / "recommendation.md").read_text(encoding="utf-8")
-        p_qs = (base / "query_synthesizer.md").read_text(encoding="utf-8")
+            cfg = load_config(__file__)
+            pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
+            research_agent = build_iterative_research_agent()
+            suff_agent = build_sufficiency_agent()
+            rec_agent = build_recommendation_agent()
+            synth_agent = build_query_synthesizer_agent()
+
+            async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+                for i in range(attempts):
+                    try:
+                        return await Runner.run(agent, inp)
+                    except Exception:
+                        if i == attempts - 1:
+                            raise
+                        await asyncio.sleep(base_delay * (2 ** i))
+
+            async def process_point_async(p):
+                # Query synthesis
+                cfg_pref = ",".join(pref)
+                qp_res = await _run_with_retries(
+                    synth_agent,
+                    f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
+                )  # type: ignore
+                _ = qp_res.final_output
+
+                notes = []
+                for step in range(1, max(1, int(research_iterations)) + 1):
+                    rr_input = (
+                        "<input>\n"
+                        f"<point>{p.model_dump_json()}</point>\n"
+                        f"<step>{step}</step>\n"
+                        "</input>"
+                    )
+                    note_res = await _run_with_retries(research_agent, rr_input)  # type: ignore
+                    note = note_res.final_output
+                    notes.append(note)
+
+                    suff_input = (
+                        "<input>\n"
+                        f"<point>{p.model_dump_json()}</point>\n"
+                        f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
+                        "</input>"
+                    )
+                    decision_res = await _run_with_retries(suff_agent, suff_input)  # type: ignore
+                    decision = decision_res.final_output
+                    if decision.done:
+                        break
+
+                class _TmpReport:
+                    def __init__(self, point_id, notes):
+                        self.point_id = point_id
+                        self.notes = notes
+                        self.synthesis = ""
+
+                    def model_dump_json(self):
+                        import json
+                        return json.dumps(
+                            {
+                                "point_id": self.point_id,
+                                "notes": [n.model_dump() for n in self.notes],
+                                "synthesis": self.synthesis,
+                            },
+                            ensure_ascii=False,
+                        )
+
+                rr = _TmpReport(p.id, notes)
+                rec_res = await _run_with_retries(
+                    rec_agent,
+                    f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
+                )  # type: ignore
+                rec = rec_res.final_output
+                return p, rec, notes
+
+            async def process_all(points_list):
+                sem = asyncio.Semaphore(max(1, int(research_concurrency)))
+
+                async def worker(p):
+                    async with sem:
+                        return await process_point_async(p)
+
+                tasks = [asyncio.create_task(worker(p)) for p in points_list]
+                results = []
+                for t in asyncio.as_completed(tasks):
+                    results.append(await t)
+                return results
+
+            results = asyncio.run(process_all(points)) if points else []
+
+            class _SimpleItem:
+                def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
+                    self.claim_text = claim_text
+                    self.verdict = verdict
+                    self.reason = reason
+                    self.supporting_facts = supporting_facts
+
+            simple_items = []
+            for (p, r, notes) in results:
+                if getattr(r, "action", "keep") == "keep":
+                    continue
+                if r.action == "clarify":
+                    verdict = "uncertain"
+                elif r.action == "rewrite" or r.action == "remove":
+                    verdict = "fail"
+                else:
+                    verdict = "fail"
+                reason = getattr(r, "explanation", "") or ""
+                supporting_facts = " \n".join(getattr(n, "findings", "") for n in (notes or []))
+                simple_items.append(_SimpleItem(p.text, verdict, reason, supporting_facts))
+
+            class _SimpleReport:
+                def __init__(self, items):
+                    self.items = items
+
+                def model_dump_json(self):
+                    import json
+                    return json.dumps(
+                        {
+                            "summary": "Issues only for rewrite (exclude confirmed)",
+                            "items": [
+                                {
+                                    "claim_text": i.claim_text,
+                                    "verdict": i.verdict,
+                                    "reason": i.reason,
+                                    "supporting_facts": i.supporting_facts,
+                                }
+                                for i in self.items
+                            ],
+                        },
+                        ensure_ascii=False,
+                    )
+
+            report = _SimpleReport(simple_items) if simple_items else None
+        else:
+            from utils.config import load_config
+            from pathlib import Path
+            from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
+
+            _emit("factcheck:init")
+            base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
+            p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
+            plan = run_json_with_provider(p_ident, f"<post>\n{content}\n</post>", ResearchPlan, speed="fast")
+            points = plan.points or []
+            if factcheck_max_items and factcheck_max_items > 0:
+                points = points[: factcheck_max_items]
+
+            cfg = load_config(__file__)
+            pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
+            p_iter = (base / "iterative_research.md").read_text(encoding="utf-8")
+            p_suff = (base / "sufficiency.md").read_text(encoding="utf-8")
+            p_rec = (base / "recommendation.md").read_text(encoding="utf-8")
+            p_qs = (base / "query_synthesizer.md").read_text(encoding="utf-8")
 
         async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
             for i in range(attempts):
