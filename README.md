@@ -52,7 +52,7 @@ venv\Scripts\python.exe scripts\simple_test.py
 - **Статья (article)**: глубокая популярная статья (≈15 000–45 000 слов)
 - **Книга (book)**: заготовка/книга (цель: 60 000–180 000 слов; пока черновик)
 
-Промпты для сценария поста находятся в `prompts/post/{writing,rewriting,review}/*.md`.
+Промпты для сценария поста находятся в `prompts/post/{module_01_writing,module_02_review,module_03_rewriting}/*.md`.
 
 ## 🎛️ Параметры CLI
 
@@ -103,11 +103,10 @@ venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks"
 
 ## 📝 Промпты
 
-Файлы промптов целиком являются системной инструкцией агента. Для постов хранятся в `prompts/post/*`:
-- `writing/post.md`
-- `rewriting/rewrite_post.md`
-- `rewriting/refine_post.md`
-- `review/*`
+Файлы промптов целиком являются системной инструкцией агента. Для постов хранятся в `prompts/post/*` (module_* структура):
+- `module_01_writing/post.md`
+- `module_02_review/*.md` (identify_risky_points.md, iterative_research.md, sufficiency.md, recommendation.md, query_synthesizer.md)
+- `module_03_rewriting/rewrite.md`, `module_03_rewriting/refine.md`
 
 ## 🎨 Стиль (style packs)
 
@@ -131,12 +130,12 @@ Book_in_one_click/
 │   └── simple_test.py
 ├── pipelines/              # Пайплайны (post/article/book/summary)
 ├── prompts/                # Системные промпты по сценариям
-│   ├── post/{writing,rewriting,review}
+│   ├── post/{module_01_writing,module_02_review,module_03_rewriting}
 │   ├── article/{writing}
 │   ├── summary/{writing}
 │   └── book/{writing}
 ├── llm_agents/             # Код агентов по сценариям
-│   ├── post/{writing,review}
+│   ├── post/{module_01_writing,module_02_review,module_03_rewriting}
 │   └── book/ (пока каркас)
 ├── utils/                  # Хелперы (env, io, slug, config)
 ├── output/                 # Сгенерированный контент (в .gitignore)
