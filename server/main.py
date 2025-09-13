@@ -46,6 +46,19 @@ async def _startup():
     except Exception:
         # Non-fatal: fallback to default executor
         pass
+    # Register bot commands and enable command menu button
+    try:
+        await DP.bot.set_my_commands([
+            types.BotCommand(command="start", description="Start / Начать"),
+            types.BotCommand(command="balance", description="Balance / Баланс"),
+            types.BotCommand(command="help", description="Help / Помощь"),
+        ])
+        try:
+            await DP.bot.set_chat_menu_button(menu_button=types.MenuButtonCommands())
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 @app.get("/health")
