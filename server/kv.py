@@ -82,3 +82,22 @@ async def charge_kv(telegram_id: int, amount: int) -> tuple[bool, int]:
         return False, bal
 
 
+# ---- User preferences (provider, etc.) ----
+
+async def set_provider(telegram_id: int, provider: str) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:provider:{telegram_id}"
+    await r.set(key, (provider or "openai").strip().lower())
+
+
+async def get_provider(telegram_id: int) -> str:
+    r = get_redis()
+    key = f"{kv_prefix()}:provider:{telegram_id}"
+    val = await r.get(key)
+    try:
+        prov = (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "")).strip().lower()
+    except Exception:
+        prov = str(val or "").strip().lower()
+    return prov or "openai"
+
+

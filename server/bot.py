@@ -16,6 +16,7 @@ from services.post.generate import generate_post
 from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
+from .kv import set_provider, get_provider
 
 
 def _load_env():
@@ -165,6 +166,14 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_generate(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
+        prov = (data.get("provider") or "").strip().lower()
+        if not prov and message.from_user:
+            try:
+                prov = await get_provider(message.from_user.id)  # type: ignore
+            except Exception:
+                prov = "openai"
+        if prov:
+            await state.update_data(provider=prov)
         prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
@@ -189,6 +198,11 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(msg, reply_markup=build_provider_keyboard())
             return
         await state.update_data(provider=prov)
+        try:
+            if message.from_user:
+                await set_provider(message.from_user.id, prov)  # type: ignore
+        except Exception:
+            pass
         ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
         await message.answer(ok, reply_markup=ReplyKeyboardRemove())
         await state.finish()
@@ -298,7 +312,7 @@ def create_dispatcher() -> Dispatcher:
                     lambda: generate_post(
                         topic,
                         lang=(data.get("gen_lang") or "auto"),
-                        provider=(data.get("provider") or "openai"),
+                        provider=(data.get("provider") or (await get_provider(message.from_user.id) if message.from_user else "openai")),
                         factcheck=False,
                     ),
                 )
@@ -377,7 +391,7 @@ def create_dispatcher() -> Dispatcher:
                     lambda: generate_post(
                         topic,
                         lang=(data.get("gen_lang") or "auto"),
-                        provider=(data.get("provider") or "openai"),
+                        provider=(data.get("provider") or (await get_provider(message.from_user.id) if message.from_user else "openai")),
                         factcheck=True,
                         research_iterations=depth,
                     ),
