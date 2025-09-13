@@ -46,6 +46,7 @@ def build_lang_keyboard() -> ReplyKeyboardMarkup:
 def build_yesno_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("Yes"), KeyboardButton("No"))
+    kb.add(KeyboardButton("Cancel"), KeyboardButton("Отмена"))
     return kb
 
 
@@ -58,6 +59,12 @@ def build_depth_keyboard() -> ReplyKeyboardMarkup:
 def build_genlang_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("Auto"), KeyboardButton("RU"), KeyboardButton("EN"))
+    return kb
+
+
+def build_cancel_keyboard() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("Cancel"), KeyboardButton("Отмена"))
     return kb
 
 
@@ -83,8 +90,8 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(commands=["info"])  # type: ignore
     async def cmd_info(message: types.Message, state: FSMContext):
         data = await state.get_data()
-        lang = (data.get("lang") or "auto").strip()
-        if lang == "ru":
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        if ui_lang == "ru":
             text = (
                 "Этот бот генерирует научно-популярные посты.\n"
                 "1) Выберите язык генерации: /lang_generate (Auto/RU/EN).\n"
@@ -105,15 +112,15 @@ def create_dispatcher() -> Dispatcher:
     async def choose_language(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
         if text.startswith("english"):
-            lang = "en"
+            ui_lang = "en"
         elif text.startswith("рус"):
-            lang = "ru"
+            ui_lang = "ru"
         else:
-            lang = "auto"
-        await state.update_data(lang=lang)
-        prompt = "Отправьте тему для поста:" if lang == "ru" else "Send a topic for your post:"
-        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
-        await GenerateStates.WaitingTopic.set()
+            ui_lang = "auto"
+        await state.update_data(ui_lang=ui_lang)
+        confirm = "Язык интерфейса установлен." if ui_lang == "ru" else "Interface language set."
+        await message.answer(confirm, reply_markup=ReplyKeyboardRemove())
+        await state.finish()
 
     @dp.message_handler(commands=["lang_generate"])  # type: ignore
     async def cmd_lang_generate(message: types.Message, state: FSMContext):
@@ -127,26 +134,35 @@ def create_dispatcher() -> Dispatcher:
     async def choose_gen_language(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
         if text.startswith("ru"):
-            lang = "ru"
+            gen_lang = "ru"
         elif text.startswith("en"):
-            lang = "en"
+            gen_lang = "en"
         else:
-            lang = "auto"
-        await state.update_data(lang=lang)
-        note = {
-            "ru": "Язык генерации: русский.",
-            "en": "Generation language: English.",
-            "auto": "Язык генерации: авто (по теме).",
+            gen_lang = "auto"
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        await state.update_data(gen_lang=gen_lang)
+        msg = {
+            "ru": {
+                "ru": "Язык генерации: русский.",
+                "en": "Язык генерации: английский.",
+                "auto": "Язык генерации: авто (по теме).",
+            },
+            "en": {
+                "ru": "Generation language: Russian.",
+                "en": "Generation language: English.",
+                "auto": "Generation language: auto (by topic).",
+            },
         }
-        await message.answer(note.get(lang, "OK"), reply_markup=ReplyKeyboardRemove())
+        await message.answer(msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"), reply_markup=ReplyKeyboardRemove())
         await state.finish()
 
     @dp.message_handler(commands=["generate"])  # type: ignore
     async def cmd_generate(message: types.Message, state: FSMContext):
         data = await state.get_data()
-        lang = (data.get("lang") or "auto").strip()
-        prompt = "Отправьте тему для поста:" if lang == "ru" else "Send a topic for your post:"
-        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
+        await message.answer(prompt, reply_markup=build_cancel_keyboard())
         await GenerateStates.WaitingTopic.set()
 
     @dp.message_handler(commands=["lang"])  # type: ignore
@@ -157,35 +173,52 @@ def create_dispatcher() -> Dispatcher:
         )
         await GenerateStates.ChoosingLanguage.set()
 
+    @dp.message_handler(commands=["cancel"])  # type: ignore
+    async def cmd_cancel(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        done = "Отменено." if ui_lang == "ru" else "Cancelled."
+        await state.finish()
+        await message.answer(done, reply_markup=ReplyKeyboardRemove())
+
     @dp.message_handler(state=GenerateStates.WaitingTopic, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def topic_received(message: types.Message, state: FSMContext):
-        topic = (message.text or "").strip()
+        text_raw = (message.text or "").strip()
+        data = await state.get_data()
+        ui_lang = data.get("ui_lang", "ru")
+        if text_raw.lower() in {"cancel", "отмена"}:
+            done = "Отменено." if ui_lang == "ru" else "Cancelled."
+            await message.answer(done, reply_markup=ReplyKeyboardRemove())
+            await state.finish()
+            return
+        topic = text_raw
         if not topic:
-            data = await state.get_data()
-            lang = data.get("lang", "auto")
-            msg = "Тема не может быть пустой. Отправьте тему:" if lang == "ru" else "Topic cannot be empty. Send a topic:"
+            msg = "Тема не может быть пустой. Отправьте тему:" if ui_lang == "ru" else "Topic cannot be empty. Send a topic:"
             await message.answer(msg)
             return
         await state.update_data(topic=topic)
-        data = await state.get_data()
-        lang = data.get("lang", "auto")
-        q = "Включить факт-чекинг?" if lang == "ru" else "Enable fact-checking?"
+        q = "Включить факт-чекинг?" if ui_lang == "ru" else "Enable fact-checking?"
         await message.answer(q, reply_markup=build_yesno_keyboard())
         await GenerateStates.ChoosingFactcheck.set()
 
     @dp.message_handler(state=GenerateStates.ChoosingFactcheck)  # type: ignore
     async def choose_factcheck(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
-        # yes in en = y/yes; in ru = д/да
-        factcheck = text.startswith("y") or text.startswith("д")
         data = await state.get_data()
         topic = data.get("topic", "")
-        lang = data.get("lang", "auto")
+        ui_lang = data.get("ui_lang", "ru")
+        if text in {"cancel", "отмена"}:
+            done = "Отменено." if ui_lang == "ru" else "Cancelled."
+            await message.answer(done, reply_markup=ReplyKeyboardRemove())
+            await state.finish()
+            return
+        # yes in en = y/yes; in ru = д/да
+        factcheck = text.startswith("y") or text.startswith("д")
 
         # If fact-checking is enabled, ask for depth first
         if factcheck:
             await state.update_data(factcheck=True)
-            prompt = "Выберите глубину проверки (1–3):" if lang == "ru" else "Select research depth (1–3):"
+            prompt = "Выберите глубину проверки (1–3):" if ui_lang == "ru" else "Select research depth (1–3):"
             await message.answer(prompt, reply_markup=build_depth_keyboard())
             await GenerateStates.ChoosingDepth.set()
             return
@@ -213,18 +246,18 @@ def create_dispatcher() -> Dispatcher:
             if not charged:
                 ok, remaining = await charge_credits_kv(message.from_user.id, 1)  # type: ignore
                 if not ok:
-                    warn = "Недостаточно кредитов" if lang == "ru" else "Insufficient credits"
+                    warn = "Недостаточно кредитов" if ui_lang == "ru" else "Insufficient credits"
                     await message.answer(warn, reply_markup=ReplyKeyboardRemove())
                     await state.finish()
                     return
         except SQLAlchemyError:
-            warn = "Временная ошибка БД. Попробуйте позже." if lang == "ru" else "Temporary DB error. Try later."
+            warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
             await message.answer(warn, reply_markup=ReplyKeyboardRemove())
             await state.finish()
             RUNNING_CHATS.discard(chat_id)
             return
 
-        working = "Генерирую. Это может занять несколько минут..." if lang == "ru" else "Working on it. This may take a few minutes..."
+        working = "Генерирую. Это может занять несколько минут..." if ui_lang == "ru" else "Working on it. This may take a few minutes..."
         await message.answer(working, reply_markup=ReplyKeyboardRemove())
 
         # Run generation in a thread to avoid blocking the event loop
@@ -236,15 +269,15 @@ def create_dispatcher() -> Dispatcher:
                     None,
                     lambda: generate_post(
                         topic,
-                        lang=lang,
+                        lang=(data.get("gen_lang") or "auto"),
                         factcheck=False,
                     ),
                 )
             with open(path, "rb") as f:
-                cap = f"Готово: {path.name}" if lang == "ru" else f"Done: {path.name}"
+                cap = f"Готово: {path.name}" if ui_lang == "ru" else f"Done: {path.name}"
                 await message.answer_document(f, caption=cap)
         except Exception as e:
-            err = f"Ошибка: {e}" if lang == "ru" else f"Error: {e}"
+            err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
             await message.answer(err)
 
         await state.finish()
@@ -254,10 +287,15 @@ def create_dispatcher() -> Dispatcher:
     async def choose_depth(message: types.Message, state: FSMContext):
         txt = (message.text or "").strip()
         data = await state.get_data()
-        lang = data.get("lang", "auto")
+        ui_lang = data.get("ui_lang", "ru")
         topic = data.get("topic", "")
+        if txt.lower() in {"cancel", "отмена"}:
+            done = "Отменено." if ui_lang == "ru" else "Cancelled."
+            await message.answer(done, reply_markup=ReplyKeyboardRemove())
+            await state.finish()
+            return
         if txt not in {"1", "2", "3"}:
-            prompt = "Выберите 1, 2 или 3:" if lang == "ru" else "Please choose 1, 2 or 3:"
+            prompt = "Выберите 1, 2 или 3:" if ui_lang == "ru" else "Please choose 1, 2 or 3:"
             await message.answer(prompt, reply_markup=build_depth_keyboard())
             return
         depth = int(txt)
@@ -285,19 +323,19 @@ def create_dispatcher() -> Dispatcher:
             if not charged:
                 ok, remaining = await charge_credits_kv(message.from_user.id, 1)  # type: ignore
                 if not ok:
-                    warn = "Недостаточно кредитов" if lang == "ru" else "Insufficient credits"
+                    warn = "Недостаточно кредитов" if ui_lang == "ru" else "Insufficient credits"
                     await message.answer(warn, reply_markup=ReplyKeyboardRemove())
                     await state.finish()
                     RUNNING_CHATS.discard(chat_id)
                     return
         except SQLAlchemyError:
-            warn = "Временная ошибка БД. Попробуйте позже." if lang == "ru" else "Temporary DB error. Try later."
+            warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
             await message.answer(warn, reply_markup=ReplyKeyboardRemove())
             await state.finish()
             RUNNING_CHATS.discard(chat_id)
             return
 
-        working = "Генерирую. Это может занять несколько минут..." if lang == "ru" else "Working on it. This may take a few minutes..."
+        working = "Генерирую. Это может занять несколько минут..." if ui_lang == "ru" else "Working on it. This may take a few minutes..."
         await message.answer(working, reply_markup=ReplyKeyboardRemove())
 
         # Run generation in a thread to avoid blocking the event loop
@@ -309,16 +347,16 @@ def create_dispatcher() -> Dispatcher:
                     None,
                     lambda: generate_post(
                         topic,
-                        lang=lang,
+                        lang=(data.get("gen_lang") or "auto"),
                         factcheck=True,
                         research_iterations=depth,
                     ),
                 )
             with open(path, "rb") as f:
-                cap = f"Готово: {path.name}" if lang == "ru" else f"Done: {path.name}"
+                cap = f"Готово: {path.name}" if ui_lang == "ru" else f"Done: {path.name}"
                 await message.answer_document(f, caption=cap)
         except Exception as e:
-            err = f"Ошибка: {e}" if lang == "ru" else f"Error: {e}"
+            err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
             await message.answer(err)
 
         await state.finish()
