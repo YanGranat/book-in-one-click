@@ -164,6 +164,20 @@ async def get_log(log_id: int):
         }
 
 
+@app.post("/logs-seed")
+async def logs_seed():
+    if SessionLocal is None:
+        return {"error": "db is not configured"}
+    try:
+        async with SessionLocal() as s:
+            item = JobLog(job_id=0, kind="seed", path="seed")
+            s.add(item)
+            await s.commit()
+            return {"ok": True, "id": item.id}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _extract_meta_from_text(md: str) -> dict:
     meta = {}
     try:
