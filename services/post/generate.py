@@ -11,7 +11,7 @@ Key guarantees:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Type
 import os
 import asyncio
 
@@ -88,6 +88,15 @@ def generate_post(
 
     instructions = build_post_instructions(topic, lang)
 
+    def _run_openai_with(system: str, user_message_local: str) -> str:
+        agent = Agent(
+            name="Generic Agent",
+            instructions=system,
+            model="gpt-5",
+        )
+        res_local = Runner.run_sync(agent, user_message_local)
+        return getattr(res_local, "final_output", "")
+
     def _run_openai() -> str:
         agent = Agent(
             name="Popular Science Post Writer",
@@ -103,35 +112,32 @@ def generate_post(
         res_local = Runner.run_sync(agent, user_message_local)
         return getattr(res_local, "final_output", "")
 
-    def _run_gemini() -> str:
+    def _run_gemini_with(system: str, user_message_local: str) -> str:
         import google.generativeai as genai  # type: ignore
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         genai.configure(api_key=api_key)
         model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        model = genai.GenerativeModel(model_name=model_name, system_instruction=instructions)
-        user_message_local = (
-            f"<input>\n"
-            f"<topic>{topic}</topic>\n"
-            f"<lang>{(lang or 'auto').strip()}</lang>\n"
-            f"</input>"
-        )
+        model = genai.GenerativeModel(model_name=model_name, system_instruction=system)
         resp = model.generate_content(user_message_local)
         return (getattr(resp, "text", None) or "").strip()
 
-    def _run_claude() -> str:
-        import anthropic  # type: ignore
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        model_name = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
+    def _run_gemini() -> str:
         user_message_local = (
             f"<input>\n"
             f"<topic>{topic}</topic>\n"
             f"<lang>{(lang or 'auto').strip()}</lang>\n"
             f"</input>"
         )
+        return _run_gemini_with(instructions, user_message_local)
+
+    def _run_claude_with(system: str, user_message_local: str) -> str:
+        import anthropic  # type: ignore
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        model_name = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
         msg = client.messages.create(
             model=model_name,
             max_tokens=4096,
-            system=instructions,
+            system=system,
             messages=[{"role": "user", "content": user_message_local}],
         )
         parts = []
@@ -140,6 +146,39 @@ def generate_post(
             if txt:
                 parts.append(txt)
         return ("\n\n".join(parts)).strip()
+
+    def _run_claude() -> str:
+        user_message_local = (
+            f"<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{(lang or 'auto').strip()}</lang>\n"
+            f"</input>"
+        )
+        return _run_claude_with(instructions, user_message_local)
+
+    def run_with_provider(system: str, user_inp: str) -> str:
+        if _prov == "openai":
+            return _run_openai_with(system, user_inp)
+        if _prov in {"gemini", "google"}:
+            return _run_gemini_with(system, user_inp)
+        return _run_claude_with(system, user_inp)
+
+    def run_json_with_provider(system: str, user_inp: str, cls: Type):
+        import json
+        txt = run_with_provider(system, user_inp)
+        # strip code fences if any
+        if txt.strip().startswith("```") and txt.strip().endswith("```"):
+            txt = "\n".join([line for line in txt.strip().splitlines()[1:-1]])
+        try:
+            data = json.loads(txt)
+            return cls.model_validate(data)
+        except Exception:
+            # try to find first json block
+            import re
+            m = re.search(r"\{[\s\S]*\}\s*$", txt)
+            if m:
+                return cls.model_validate(json.loads(m.group(0)))
+            raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
 
     if _prov == "openai":
         content = _run_openai()
@@ -152,27 +191,24 @@ def generate_post(
 
     report = None
     if factcheck:
-        from llm_agents.post.module_02_review.identify_points import build_identify_points_agent
-        from llm_agents.post.module_02_review.iterative_research import build_iterative_research_agent
-        from llm_agents.post.module_02_review.recommendation import build_recommendation_agent
-        from llm_agents.post.module_02_review.sufficiency import build_sufficiency_agent
-        from llm_agents.post.module_02_review.query_synthesizer import build_query_synthesizer_agent
         from utils.config import load_config
+        from pathlib import Path
+        from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
 
         _emit("factcheck:init")
-        identify_agent = build_identify_points_agent()
-        identify_result = Runner.run_sync(identify_agent, f"<post>\n{content}\n</post>")
-        plan = identify_result.final_output  # type: ignore
+        base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
+        p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
+        plan = run_json_with_provider(p_ident, f"<post>\n{content}\n</post>", ResearchPlan)
         points = plan.points or []
         if factcheck_max_items and factcheck_max_items > 0:
             points = points[: factcheck_max_items]
 
         cfg = load_config(__file__)
         pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
-        research_agent = build_iterative_research_agent()
-        suff_agent = build_sufficiency_agent()
-        rec_agent = build_recommendation_agent()
-        synth_agent = build_query_synthesizer_agent()
+        p_iter = (base / "iterative_research.md").read_text(encoding="utf-8")
+        p_suff = (base / "sufficiency.md").read_text(encoding="utf-8")
+        p_rec = (base / "recommendation.md").read_text(encoding="utf-8")
+        p_qs = (base / "query_synthesizer.md").read_text(encoding="utf-8")
 
         async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
             for i in range(attempts):
@@ -186,11 +222,11 @@ def generate_post(
         async def process_point_async(p):
             # Query synthesis
             cfg_pref = ",".join(pref)
-            qp_res = await _run_with_retries(
-                synth_agent,
+            _ = run_json_with_provider(
+                p_qs,
                 f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
-            )  # type: ignore
-            _ = qp_res.final_output
+                QueryPack,
+            )
 
             notes = []
             for step in range(1, max(1, int(research_iterations)) + 1):
@@ -200,8 +236,7 @@ def generate_post(
                     f"<step>{step}</step>\n"
                     "</input>"
                 )
-                note_res = await _run_with_retries(research_agent, rr_input)  # type: ignore
-                note = note_res.final_output
+                note = run_json_with_provider(p_iter, rr_input, ResearchIterationNote)
                 notes.append(note)
 
                 suff_input = (
@@ -210,8 +245,7 @@ def generate_post(
                     f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
                     "</input>"
                 )
-                decision_res = await _run_with_retries(suff_agent, suff_input)  # type: ignore
-                decision = decision_res.final_output
+                decision = run_json_with_provider(p_suff, suff_input, SufficiencyDecision)
                 if decision.done:
                     break
 
@@ -233,11 +267,11 @@ def generate_post(
                     )
 
             rr = _TmpReport(p.id, notes)
-            rec_res = await _run_with_retries(
-                rec_agent,
+            rec = run_json_with_provider(
+                p_rec,
                 f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
-            )  # type: ignore
-            rec = rec_res.final_output
+                Recommendation,
+            )
             return p, rec, notes
 
         async def process_all(points_list):
@@ -253,7 +287,14 @@ def generate_post(
                 results.append(await t)
             return results
 
-        results = asyncio.run(process_all(points)) if points else []
+        # For non-openai providers concurrency brings little benefit; run sequentially
+        if _prov == "openai":
+            results = asyncio.run(process_all(points)) if points else []
+        else:
+            seq_results = []
+            for p in points or []:
+                seq_results.append(asyncio.run(process_point_async(p)))
+            results = seq_results
 
         class _SimpleItem:
             def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
@@ -306,9 +347,8 @@ def generate_post(
         needs_rewrite = any(i.verdict != "pass" for i in report.items)
         if needs_rewrite:
             _emit("rewrite:init")
-            from llm_agents.post.module_03_rewriting.rewrite import build_rewrite_agent
-
-            rw_agent = build_rewrite_agent()
+            from pathlib import Path
+            p_rewrite = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "rewrite.md").read_text(encoding="utf-8")
             rw_input = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
@@ -317,16 +357,10 @@ def generate_post(
                 f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
                 "</input>"
             )
+            final_content = run_with_provider(p_rewrite, rw_input) or content
 
-            async def _do_rewrite(inp: str) -> str:
-                res = await Runner.run(rw_agent, inp)
-                return getattr(res, "final_output", "") or content
-
-            final_content = asyncio.run(_do_rewrite(rw_input))
-
-    from llm_agents.post.module_03_rewriting.refine import build_refine_agent
-
-    refine_agent = build_refine_agent()
+    from pathlib import Path
+    p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
     refine_input = (
         "<input>\n"
         f"<topic>{topic}</topic>\n"
@@ -334,12 +368,7 @@ def generate_post(
         f"<post>\n{final_content}\n</post>\n"
         "</input>"
     )
-
-    async def _do_refine(inp: str) -> str:
-        res = await Runner.run(refine_agent, inp)
-        return getattr(res, "final_output", "") or final_content
-
-    final_content = asyncio.run(_do_refine(refine_input))
+    final_content = run_with_provider(p_refine, refine_input) or final_content
 
     # Save final
     output_dir = ensure_output_dir(output_subdir)
@@ -348,7 +377,7 @@ def generate_post(
     save_markdown(
         filepath,
         title=topic,
-        generator="OpenAI Agents SDK",
+        generator=("OpenAI Agents SDK" if _prov == "openai" else _prov),
         pipeline="PopularSciencePost",
         content=final_content,
     )
