@@ -48,6 +48,15 @@ class Job(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class JobLog(Base):
+    __tablename__ = _t("job_logs")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="md")  # md|txt|json
+    path: Mapped[str] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Tx(Base):
     __tablename__ = _t("tx")
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

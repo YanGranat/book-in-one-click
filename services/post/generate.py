@@ -44,6 +44,7 @@ def generate_post(
     research_concurrency: int = 6,
     output_subdir: str = "post",
     on_progress: Optional[Callable[[str], None]] = None,
+    job_meta: Optional[dict] = None,
 ) -> Path:
     """
     Generate a popular science post and save it to output/<output_subdir>/.
@@ -86,6 +87,12 @@ def generate_post(
                 pass
 
     _emit("start:post")
+    from datetime import datetime
+    log_lines = []
+    def log(section: str, body: str):
+        ts = datetime.utcnow().isoformat()
+        log_lines.append(f"## {section}\n\n<time>{ts}</time>\n\n{body}\n")
+    log("config", f"provider={_prov}\nlang={lang}")
 
     instructions = build_post_instructions(topic, lang)
 
@@ -174,6 +181,7 @@ def generate_post(
         f"</input>"
     )
     content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
+    log("writer_output", content[:2000])
     if not content:
         raise RuntimeError("Empty result from writer agent")
 
@@ -328,6 +336,8 @@ def generate_post(
                     )
 
             report = _SimpleReport(simple_items) if simple_items else None
+            if report is not None:
+                log("factcheck_summary", report.model_dump_json())
         else:
             from utils.config import load_config
             from pathlib import Path
@@ -484,6 +494,8 @@ def generate_post(
                 )
 
         report = _SimpleReport(simple_items) if simple_items else None
+        if report is not None:
+            log("factcheck_summary", report.model_dump_json())
 
     # Rewrite and refine
     final_content = content
@@ -502,6 +514,7 @@ def generate_post(
                 "</input>"
             )
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
+            log("rewrite_output", final_content[:2000])
 
     from pathlib import Path
     p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
@@ -513,6 +526,7 @@ def generate_post(
         "</input>"
     )
     final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
+    log("refine_output", final_content[:2000])
 
     # Save final
     output_dir = ensure_output_dir(output_subdir)
@@ -525,6 +539,29 @@ def generate_post(
         pipeline="PopularSciencePost",
         content=final_content,
     )
+    # Save log sidecar .md and register in DB if available
+    log_dir = ensure_output_dir(output_subdir)
+    log_path = next_available_filepath(log_dir, f"{safe_filename_base(topic)}_log", ".md")
+    header = (
+        f"# Generation Log\n\n"
+        f"- provider: `{_prov}`\n"
+        f"- lang: `{lang}`\n"
+        f"- model_heavy: `{os.getenv('OPENAI_MODEL' if _prov=='openai' else ('GEMINI_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}`\n"
+        f"- model_fast: `{os.getenv('OPENAI_FAST_MODEL' if _prov=='openai' else ('GEMINI_FAST_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}`\n"
+    )
+    save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=header + "\n".join(log_lines))
+    try:
+        from server.db import SessionLocal, JobLog
+        if SessionLocal is not None:
+            import asyncio as _a
+            async def _write():
+                async with SessionLocal() as s:
+                    jl = JobLog(job_id=int((job_meta or {}).get("job_id", 0)), kind="md", path=str(log_path))
+                    s.add(jl)
+                    await s.commit()
+            _a.run(_write())
+    except Exception:
+        pass
     return filepath
 
 
