@@ -23,14 +23,21 @@ if _env:
 def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker):
     @dp.message_handler(commands=["balance"])  # type: ignore
     async def balance_cmd(message: types.Message):
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         if session_factory is None:
             bal = await get_balance_kv_only(message.from_user.id)  # type: ignore
-            await message.answer(f"Your balance: {bal} credits")
+            if is_admin:
+                await message.answer(f"Admin: generation is free. Stored balance: {bal}")
+            else:
+                await message.answer(f"Your balance: {bal} credits")
             return
         async with session_factory() as session:
             from .db import get_or_create_user
             user = await get_or_create_user(session, message.from_user.id)  # type: ignore
-            await message.answer(f"Your balance: {user.credits} credits")
+            if is_admin:
+                await message.answer(f"Admin: generation is free. Stored balance: {user.credits}")
+            else:
+                await message.answer(f"Your balance: {user.credits} credits")
 
     @dp.message_handler(commands=["topup"])  # type: ignore
     async def topup_cmd(message: types.Message):
