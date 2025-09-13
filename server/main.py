@@ -10,7 +10,7 @@ from aiogram import types, Bot, Dispatcher
 from utils.env import load_env_from_root
 from .bot import create_dispatcher
 from .bot_commands import register_admin_commands, ensure_db_ready
-from .db import SessionLocal
+from .db import SessionLocal, JobLog, Job
 
 
 def _load_env():
@@ -74,6 +74,52 @@ async def health():
 @app.get("/")
 async def root():
     return {"ok": True}
+@app.get("/logs")
+async def list_logs():
+    items = []
+    if SessionLocal is None:
+        return {"items": items}
+    async with SessionLocal() as s:
+        from sqlalchemy import select
+        res = await s.execute(select(JobLog).order_by(JobLog.id.desc()).limit(200))
+        rows = res.scalars().all()
+        for r in rows:
+            items.append({
+                "id": r.id,
+                "job_id": r.job_id,
+                "kind": r.kind,
+                "path": r.path,
+                "created_at": str(r.created_at),
+            })
+    return {"items": items}
+
+
+@app.get("/logs/{log_id}")
+async def get_log(log_id: int):
+    if SessionLocal is None:
+        return {"error": "db is not configured"}
+    async with SessionLocal() as s:
+        from sqlalchemy import select
+        res = await s.execute(select(JobLog).where(JobLog.id == log_id))
+        row = res.scalar_one_or_none()
+        if row is None:
+            return {"error": "not found"}
+        try:
+            with open(row.path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            content = ""
+        # try resolve basic job info
+        topic = ""
+        provider = ""
+        created = str(row.created_at)
+        return {
+            "id": row.id,
+            "job_id": row.job_id,
+            "path": row.path,
+            "created_at": created,
+            "content": content,
+        }
 
 
 @app.post("/webhook/{secret}")
