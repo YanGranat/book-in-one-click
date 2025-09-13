@@ -21,6 +21,14 @@ services:
         sync: false
       - key: BOT_ADMIN_IDS
         sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-pro
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4
       - key: PYTHON_VERSION
         value: 3.11.9
   

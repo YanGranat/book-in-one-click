@@ -107,7 +107,7 @@ def generate_post(
         import google.generativeai as genai  # type: ignore
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         genai.configure(api_key=api_key)
-        model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
         model = genai.GenerativeModel(model_name=model_name, system_instruction=instructions)
         user_message_local = (
             f"<input>\n"
@@ -121,7 +121,7 @@ def generate_post(
     def _run_claude() -> str:
         import anthropic  # type: ignore
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        model_name = os.getenv("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+        model_name = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
         user_message_local = (
             f"<input>\n"
             f"<topic>{topic}</topic>\n"
