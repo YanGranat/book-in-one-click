@@ -13,7 +13,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+from urllib.parse import urlsplit, urlunsplit
+import ssl
+import certifi
 
 
 DB_URL = os.getenv("DB_URL", "")
@@ -78,7 +80,10 @@ def _sanitize_db_url(raw: str) -> tuple[str, dict]:
     # Drop ALL query params from URL to avoid passing sslmode via DSN
     base_url = urlunsplit((scheme, parts.netloc, parts.path, "", parts.fragment))
     # Provide required options via connect_args instead of DSN
-    cargs = {"ssl": True, "statement_cache_size": 0}
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    ssl_ctx.check_hostname = True
+    ssl_ctx.verify_mode = ssl.CERT_REQUIRED
+    cargs = {"ssl": ssl_ctx, "statement_cache_size": 0}
     return base_url, cargs
 
 
