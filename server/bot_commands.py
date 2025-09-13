@@ -25,17 +25,17 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
     async def balance_cmd(message: types.Message):
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         if session_factory is None:
-            bal = await get_balance_kv_only(message.from_user.id)  # type: ignore
+            _ = await get_balance_kv_only(message.from_user.id)  # type: ignore
             if is_admin:
-                await message.answer(f"Admin: generation is free. Stored balance: {bal}")
+                await message.answer("Admin: generation is free.")
             else:
-                await message.answer(f"Your balance: {bal} credits")
+                await message.answer(f"Your balance: {_} credits")
             return
         async with session_factory() as session:
             from .db import get_or_create_user
             user = await get_or_create_user(session, message.from_user.id)  # type: ignore
             if is_admin:
-                await message.answer(f"Admin: generation is free. Stored balance: {user.credits}")
+                await message.answer("Admin: generation is free.")
             else:
                 await message.answer(f"Your balance: {user.credits} credits")
 
