@@ -231,6 +231,8 @@ async def log_view_ui(log_id: int):
     content = data.get("content", "")
     meta = _extract_meta_from_text(content)
     title = Path(data.get("path", "")).name
+    import base64
+    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
     html = (
         "<html><head><meta charset='utf-8'><title>Log View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
@@ -246,10 +248,8 @@ async def log_view_ui(log_id: int):
         "<div id='content'></div>"
         "<textarea id='md' style='display:none'></textarea>"
         "</main>"
-        "<script>document.getElementById('md').value = atob('" + content.encode('utf-8').hex() + "');</script>"
-        "<script>const hex= document.getElementById('md').value;"
-        "function hexToStr(h){let s='';for(let i=0;i<h.length;i+=2){s+=String.fromCharCode(parseInt(h.substr(i,2),16));}return s;}"
-        "document.getElementById('content').innerHTML = marked.parse(hexToStr(hex));</script>"
+        f"<script>document.getElementById('md').value = atob('{b64}');" 
+        "document.getElementById('content').innerHTML = marked.parse(document.getElementById('md').value);</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
