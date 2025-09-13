@@ -108,15 +108,15 @@ def _sanitize_db_url(raw: str) -> tuple[str, dict]:
     return base_url, cargs
 
 
-# Disable SQL DB entirely for now — use filesystem logs only
 engine = None
-# if DB_URL:
-#     sanitized, cargs = _sanitize_db_url(DB_URL)
-#     engine = create_async_engine(
-#         sanitized,
-#         connect_args=cargs,
-#         pool_pre_ping=True,
-#     )
+if DB_URL:
+    sanitized, cargs = _sanitize_db_url(DB_URL)
+    # For pgBouncer (transaction pooler) + asyncpg: disable statement cache to avoid PREPARE issues
+    engine = create_async_engine(
+        sanitized,
+        connect_args=cargs,
+        pool_pre_ping=True,
+    )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False) if engine else None
 
 
