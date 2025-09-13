@@ -47,7 +47,6 @@ def build_lang_keyboard() -> ReplyKeyboardMarkup:
 def build_yesno_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("Yes"), KeyboardButton("No"))
-    kb.add(KeyboardButton("Cancel"), KeyboardButton("Отмена"))
     return kb
 
 
@@ -167,7 +166,7 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
-        await message.answer(prompt, reply_markup=build_cancel_keyboard())
+        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
 
     @dp.message_handler(commands=["provider"])  # type: ignore
@@ -215,7 +214,7 @@ def create_dispatcher() -> Dispatcher:
         text_raw = (message.text or "").strip()
         data = await state.get_data()
         ui_lang = data.get("ui_lang", "ru")
-        if text_raw.lower() in {"cancel", "отмена"}:
+        if text_raw.lower() in {"/cancel"}:
             done = "Отменено." if ui_lang == "ru" else "Cancelled."
             await message.answer(done, reply_markup=ReplyKeyboardRemove())
             await state.finish()
@@ -236,7 +235,7 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         topic = data.get("topic", "")
         ui_lang = data.get("ui_lang", "ru")
-        if text in {"cancel", "отмена"}:
+        if text in {"/cancel"}:
             done = "Отменено." if ui_lang == "ru" else "Cancelled."
             await message.answer(done, reply_markup=ReplyKeyboardRemove())
             await state.finish()
@@ -319,7 +318,7 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = data.get("ui_lang", "ru")
         topic = data.get("topic", "")
-        if txt.lower() in {"cancel", "отмена"}:
+        if txt.lower() in {"/cancel"}:
             done = "Отменено." if ui_lang == "ru" else "Cancelled."
             await message.answer(done, reply_markup=ReplyKeyboardRemove())
             await state.finish()
