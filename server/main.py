@@ -33,6 +33,19 @@ register_admin_commands(DP, SessionLocal)
 async def _startup():
     # Initialize DB if configured; safe no-op otherwise
     await ensure_db_ready()
+    # Ensure enough worker threads for concurrent generations (5–10 users)
+    import asyncio
+    import concurrent.futures
+    try:
+        max_workers = int(os.getenv("BOT_WORKERS", "16"))
+    except Exception:
+        max_workers = 16
+    try:
+        loop = asyncio.get_event_loop()
+        loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=max_workers))
+    except Exception:
+        # Non-fatal: fallback to default executor
+        pass
 
 
 @app.get("/health")

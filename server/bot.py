@@ -60,6 +60,10 @@ def create_dispatcher() -> Dispatcher:
 
     # Simple in-memory guard to avoid duplicate generation per chat
     RUNNING_CHATS: Set[int] = set()
+    # Optional global concurrency limit (5–10 parallel jobs target)
+    import asyncio
+    _sem_capacity = int(os.getenv("BOT_PARALLEL_LIMIT", "12"))
+    GLOBAL_SEMAPHORE = asyncio.Semaphore(max(1, _sem_capacity))
 
     @dp.message_handler(commands=["start", "help"])  # type: ignore
     async def cmd_start(message: types.Message):
@@ -158,14 +162,15 @@ def create_dispatcher() -> Dispatcher:
         import asyncio
         loop = asyncio.get_running_loop()
         try:
-            path = await loop.run_in_executor(
-                None,
-                lambda: generate_post(
-                    topic,
-                    lang=lang,
-                    factcheck=False,
-                ),
-            )
+            async with GLOBAL_SEMAPHORE:
+                path = await loop.run_in_executor(
+                    None,
+                    lambda: generate_post(
+                        topic,
+                        lang=lang,
+                        factcheck=False,
+                    ),
+                )
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if lang == "ru" else f"Done: {path.name}"
                 await message.answer_document(f, caption=cap)
@@ -230,15 +235,16 @@ def create_dispatcher() -> Dispatcher:
         import asyncio
         loop = asyncio.get_running_loop()
         try:
-            path = await loop.run_in_executor(
-                None,
-                lambda: generate_post(
-                    topic,
-                    lang=lang,
-                    factcheck=True,
-                    research_iterations=depth,
-                ),
-            )
+            async with GLOBAL_SEMAPHORE:
+                path = await loop.run_in_executor(
+                    None,
+                    lambda: generate_post(
+                        topic,
+                        lang=lang,
+                        factcheck=True,
+                        research_iterations=depth,
+                    ),
+                )
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if lang == "ru" else f"Done: {path.name}"
                 await message.answer_document(f, caption=cap)
