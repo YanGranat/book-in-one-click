@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from datetime import datetime
 import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -77,7 +79,24 @@ async def root():
 @app.get("/logs")
 async def list_logs():
     items = []
+    # Fallback: if no SQL DB configured, read logs from filesystem
     if SessionLocal is None:
+        base = Path("output")
+        files = list(base.glob("**/*_log.md")) if base.exists() else []
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for idx, p in enumerate(files, start=1):
+            try:
+                ts = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
+            except Exception:
+                ts = ""
+            items.append({
+                "id": idx,
+                "job_id": 0,
+                "kind": "md",
+                "path": str(p),
+                "created_at": ts,
+                "source": "fs",
+            })
         return {"items": items}
     async with SessionLocal() as s:
         from sqlalchemy import select
@@ -97,7 +116,30 @@ async def list_logs():
 @app.get("/logs/{log_id}")
 async def get_log(log_id: int):
     if SessionLocal is None:
-        return {"error": "db is not configured"}
+        # Fallback: map log_id to Nth recent file in output/**/*_log.md
+        base = Path("output")
+        files = list(base.glob("**/*_log.md")) if base.exists() else []
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        if log_id <= 0 or log_id > len(files):
+            return {"error": "not found"}
+        p = files[log_id - 1]
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            content = ""
+        try:
+            created = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
+        except Exception:
+            created = ""
+        return {
+            "id": log_id,
+            "job_id": 0,
+            "path": str(p),
+            "created_at": created,
+            "content": content,
+            "source": "fs",
+        }
     async with SessionLocal() as s:
         from sqlalchemy import select
         res = await s.execute(select(JobLog).where(JobLog.id == log_id))
