@@ -97,8 +97,6 @@ venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks"
 }
 ```
 
-Бот поддерживает список администраторов через переменную окружения `BOT_ADMIN_IDS` (через запятую). Значения не хранятся в репозитории; задайте их в секции секретов/переменных деплоя.
-
 Провайдеры LLM и ключи:
 - OpenAI (по умолчанию): `OPENAI_API_KEY`
 - Gemini: `GOOGLE_API_KEY` (модель по умолчанию: `gemini-2.5-pro`, можно переопределить `GEMINI_MODEL`)
