@@ -52,3 +52,4 @@ redis
 # Additional LLM providers
 anthropic
 google-generativeai
+duckduckgo-search

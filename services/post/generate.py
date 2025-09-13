@@ -17,6 +17,7 @@ import asyncio
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.slug import safe_filename_base
+from utils.web import build_search_context
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from pipelines.post.pipeline import build_instructions as build_post_instructions
 
@@ -88,11 +89,11 @@ def generate_post(
 
     instructions = build_post_instructions(topic, lang)
 
-    def _run_openai_with(system: str, user_message_local: str) -> str:
+    def _run_openai_with(system: str, user_message_local: str, model: Optional[str] = None) -> str:
         agent = Agent(
             name="Generic Agent",
             instructions=system,
-            model="gpt-5",
+            model=(model or os.getenv("OPENAI_MODEL", "gpt-5")),
         )
         res_local = Runner.run_sync(agent, user_message_local)
         return getattr(res_local, "final_output", "")
@@ -112,30 +113,21 @@ def generate_post(
         res_local = Runner.run_sync(agent, user_message_local)
         return getattr(res_local, "final_output", "")
 
-    def _run_gemini_with(system: str, user_message_local: str) -> str:
+    def _run_gemini_with(system: str, user_message_local: str, model_name: Optional[str] = None) -> str:
         import google.generativeai as genai  # type: ignore
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         genai.configure(api_key=api_key)
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        model = genai.GenerativeModel(model_name=model_name, system_instruction=system)
+        mname = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+        model = genai.GenerativeModel(model_name=mname, system_instruction=system)
         resp = model.generate_content(user_message_local)
         return (getattr(resp, "text", None) or "").strip()
 
-    def _run_gemini() -> str:
-        user_message_local = (
-            f"<input>\n"
-            f"<topic>{topic}</topic>\n"
-            f"<lang>{(lang or 'auto').strip()}</lang>\n"
-            f"</input>"
-        )
-        return _run_gemini_with(instructions, user_message_local)
-
-    def _run_claude_with(system: str, user_message_local: str) -> str:
+    def _run_claude_with(system: str, user_message_local: str, model_name: Optional[str] = None) -> str:
         import anthropic  # type: ignore
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        model_name = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
+        mname = model_name or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
         msg = client.messages.create(
-            model=model_name,
+            model=mname,
             max_tokens=4096,
             system=system,
             messages=[{"role": "user", "content": user_message_local}],
@@ -147,25 +139,20 @@ def generate_post(
                 parts.append(txt)
         return ("\n\n".join(parts)).strip()
 
-    def _run_claude() -> str:
-        user_message_local = (
-            f"<input>\n"
-            f"<topic>{topic}</topic>\n"
-            f"<lang>{(lang or 'auto').strip()}</lang>\n"
-            f"</input>"
-        )
-        return _run_claude_with(instructions, user_message_local)
-
-    def run_with_provider(system: str, user_inp: str) -> str:
+    def run_with_provider(system: str, user_inp: str, speed: str = "heavy") -> str:
         if _prov == "openai":
-            return _run_openai_with(system, user_inp)
+            model = os.getenv("OPENAI_FAST_MODEL", "gpt-5-mini") if speed == "fast" else os.getenv("OPENAI_MODEL", "gpt-5")
+            return _run_openai_with(system, user_inp, model)
         if _prov in {"gemini", "google"}:
-            return _run_gemini_with(system, user_inp)
-        return _run_claude_with(system, user_inp)
+            mname = os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash") if speed == "fast" else os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+            return _run_gemini_with(system, user_inp, mname)
+        # Claude: same model for fast/heavy unless overridden
+        cname = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
+        return _run_claude_with(system, user_inp, cname)
 
-    def run_json_with_provider(system: str, user_inp: str, cls: Type):
+    def run_json_with_provider(system: str, user_inp: str, cls: Type, speed: str = "fast"):
         import json
-        txt = run_with_provider(system, user_inp)
+        txt = run_with_provider(system, user_inp, speed)
         # strip code fences if any
         if txt.strip().startswith("```") and txt.strip().endswith("```"):
             txt = "\n".join([line for line in txt.strip().splitlines()[1:-1]])
@@ -180,12 +167,13 @@ def generate_post(
                 return cls.model_validate(json.loads(m.group(0)))
             raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
 
-    if _prov == "openai":
-        content = _run_openai()
-    elif _prov in {"gemini", "google"}:
-        content = _run_gemini()
-    else:
-        content = _run_claude()
+    user_message_local_writer = (
+        f"<input>\n"
+        f"<topic>{topic}</topic>\n"
+        f"<lang>{(lang or 'auto').strip()}</lang>\n"
+        f"</input>"
+    )
+    content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     if not content:
         raise RuntimeError("Empty result from writer agent")
 
@@ -198,7 +186,7 @@ def generate_post(
         _emit("factcheck:init")
         base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
         p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
-        plan = run_json_with_provider(p_ident, f"<post>\n{content}\n</post>", ResearchPlan)
+        plan = run_json_with_provider(p_ident, f"<post>\n{content}\n</post>", ResearchPlan, speed="fast")
         points = plan.points or []
         if factcheck_max_items and factcheck_max_items > 0:
             points = points[: factcheck_max_items]
@@ -222,11 +210,15 @@ def generate_post(
         async def process_point_async(p):
             # Query synthesis
             cfg_pref = ",".join(pref)
-            _ = run_json_with_provider(
+            qp = run_json_with_provider(
                 p_qs,
                 f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
                 QueryPack,
+                speed="fast",
             )
+            # Web context build (provider-agnostic)
+            queries = getattr(qp, "queries", []) or []
+            web_ctx = build_search_context(queries, per_query=2, max_chars=2000)
 
             notes = []
             for step in range(1, max(1, int(research_iterations)) + 1):
@@ -234,9 +226,10 @@ def generate_post(
                     "<input>\n"
                     f"<point>{p.model_dump_json()}</point>\n"
                     f"<step>{step}</step>\n"
+                    f"<web_context>\n{web_ctx}\n</web_context>\n"
                     "</input>"
                 )
-                note = run_json_with_provider(p_iter, rr_input, ResearchIterationNote)
+                note = run_json_with_provider(p_iter, rr_input, ResearchIterationNote, speed="fast")
                 notes.append(note)
 
                 suff_input = (
@@ -245,7 +238,7 @@ def generate_post(
                     f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
                     "</input>"
                 )
-                decision = run_json_with_provider(p_suff, suff_input, SufficiencyDecision)
+                decision = run_json_with_provider(p_suff, suff_input, SufficiencyDecision, speed="fast")
                 if decision.done:
                     break
 
@@ -271,6 +264,7 @@ def generate_post(
                 p_rec,
                 f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
                 Recommendation,
+                speed="fast",
             )
             return p, rec, notes
 
@@ -357,7 +351,7 @@ def generate_post(
                 f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
                 "</input>"
             )
-            final_content = run_with_provider(p_rewrite, rw_input) or content
+            final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
 
     from pathlib import Path
     p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
@@ -368,7 +362,7 @@ def generate_post(
         f"<post>\n{final_content}\n</post>\n"
         "</input>"
     )
-    final_content = run_with_provider(p_refine, refine_input) or final_content
+    final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
 
     # Save final
     output_dir = ensure_output_dir(output_subdir)
