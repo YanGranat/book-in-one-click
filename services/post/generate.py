@@ -157,7 +157,7 @@ def generate_post(
             mname = os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash") if speed == "fast" else os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
             return _run_gemini_with(system, user_inp, mname)
         # Claude: same model for fast/heavy unless overridden
-        cname = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4")
+        cname = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-0")
         return _run_claude_with(system, user_inp, cname)
 
     def run_json_with_provider(system: str, user_inp: str, cls: Type, speed: str = "fast"):
@@ -585,6 +585,7 @@ def generate_post(
         f"- factcheck: `{bool(factcheck)}`\n"
     )
     save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=header + "\n".join(log_lines))
+    # Record log path in DB if available
     try:
         from server.db import SessionLocal, JobLog
         if SessionLocal is not None:
@@ -594,9 +595,14 @@ def generate_post(
                     jl = JobLog(job_id=int((job_meta or {}).get("job_id", 0)), kind="md", path=str(log_path))
                     s.add(jl)
                     await s.commit()
-            _a.run(_write())
-    except Exception:
-        pass
+                    return jl.id
+            log_id = _a.run(_write())
+            print(f"[INFO] Log recorded in DB: id={log_id}, path={log_path}")
+        else:
+            print(f"[INFO] Log saved to filesystem only: {log_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to record log in DB: {e}")
+        print(f"[INFO] Log available on filesystem: {log_path}")
     return filepath
 
 
