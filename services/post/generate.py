@@ -125,7 +125,7 @@ def generate_post(
     def _run_claude_with(system: str, user_message_local: str, model_name: Optional[str] = None) -> str:
         import anthropic  # type: ignore
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        mname = model_name or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
+        mname = model_name or os.getenv("ANTHROPIC_MODEL", "claude-4-sonnet")
         msg = client.messages.create(
             model=mname,
             max_tokens=4096,
