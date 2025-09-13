@@ -60,11 +60,13 @@ venv\Scripts\python.exe scripts\simple_test.py
 
 - `--topic` — тема генерации (строка)
 - `--lang` — язык вывода: `auto|ru|en` (по умолчанию `auto`)
+- `--provider` — провайдер LLM: `openai|gemini|claude` (по умолчанию `openai`)
 - `--out` — подпапка для сохранения результата (по умолчанию зависит от пайплайна)
 
 Пример:
 ```bat
 venv\Scripts\python.exe scripts\popular_science_post.py --topic "CRISPR" --lang en
+venv\Scripts\python.exe scripts\popular_science_post.py --topic "pH" --lang ru --provider claude
 venv\Scripts\python.exe scripts\deep_popular_science_article.py --topic "Квантовые точки" --lang ru
 venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks" --lang auto
 ```
@@ -94,8 +96,6 @@ venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks"
   }
 }
 ```
-
-Бот поддерживает список администраторов через переменную окружения `BOT_ADMIN_IDS` (через запятую). Значения не хранятся в репозитории; задайте их в секции секретов/переменных деплоя.
 
 ## 🧠 Memory Bank
 

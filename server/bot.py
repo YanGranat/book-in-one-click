@@ -30,6 +30,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 class GenerateStates(StatesGroup):
     ChoosingLanguage = State()
     ChoosingGenLanguage = State()
+    ChoosingProvider = State()
     WaitingTopic = State()
     ChoosingFactcheck = State()
     ChoosingDepth = State()
@@ -59,6 +60,10 @@ def build_depth_keyboard() -> ReplyKeyboardMarkup:
 def build_genlang_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("Auto"), KeyboardButton("RU"), KeyboardButton("EN"))
+    return kb
+def build_provider_keyboard() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("OpenAI"), KeyboardButton("Gemini"), KeyboardButton("Claude"))
     return kb
 
 
@@ -165,6 +170,30 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(prompt, reply_markup=build_cancel_keyboard())
         await GenerateStates.WaitingTopic.set()
 
+    @dp.message_handler(commands=["provider"])  # type: ignore
+    async def cmd_provider(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if ui_lang == "ru" else "Choose provider (OpenAI/Gemini/Claude):"
+        await message.answer(prompt, reply_markup=build_provider_keyboard())
+        await GenerateStates.ChoosingProvider.set()
+
+    @dp.message_handler(state=GenerateStates.ChoosingProvider)  # type: ignore
+    async def choose_provider(message: types.Message, state: FSMContext):
+        text = (message.text or "").strip().lower()
+        prov_map = {"openai": "openai", "gemini": "gemini", "claude": "claude"}
+        prov = prov_map.get(text, None)
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        if not prov:
+            msg = "Пожалуйста, выберите: OpenAI, Gemini или Claude." if ui_lang == "ru" else "Please choose: OpenAI, Gemini or Claude."
+            await message.answer(msg, reply_markup=build_provider_keyboard())
+            return
+        await state.update_data(provider=prov)
+        ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
+        await message.answer(ok, reply_markup=ReplyKeyboardRemove())
+        await state.finish()
+
     @dp.message_handler(commands=["lang"])  # type: ignore
     async def cmd_lang(message: types.Message, state: FSMContext):
         await message.answer(
@@ -270,6 +299,7 @@ def create_dispatcher() -> Dispatcher:
                     lambda: generate_post(
                         topic,
                         lang=(data.get("gen_lang") or "auto"),
+                        provider=(data.get("provider") or "openai"),
                         factcheck=False,
                     ),
                 )
@@ -348,6 +378,7 @@ def create_dispatcher() -> Dispatcher:
                     lambda: generate_post(
                         topic,
                         lang=(data.get("gen_lang") or "auto"),
+                        provider=(data.get("provider") or "openai"),
                         factcheck=True,
                         research_iterations=depth,
                     ),

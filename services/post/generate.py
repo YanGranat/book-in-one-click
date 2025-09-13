@@ -36,6 +36,7 @@ def generate_post(
     topic: str,
     *,
     lang: str = "auto",
+    provider: str = "openai",  # openai|gemini|claude
     factcheck: bool = True,
     factcheck_max_items: int = 0,
     research_iterations: int = 2,
@@ -55,8 +56,18 @@ def generate_post(
     if not topic or not topic.strip():
         raise ValueError("Topic must be a non-empty string")
 
-    if not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY not found in environment")
+    _prov = (provider or "openai").strip().lower()
+    if _prov == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise RuntimeError("OPENAI_API_KEY not found in environment")
+    elif _prov == "claude":
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise RuntimeError("ANTHROPIC_API_KEY not found in environment")
+    elif _prov in {"gemini", "google"}:
+        if not os.getenv("GOOGLE_API_KEY") and not os.getenv("GEMINI_API_KEY"):
+            raise RuntimeError("GOOGLE_API_KEY (or GEMINI_API_KEY) not found in environment")
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
 
     # Ensure this thread has an event loop for libs that expect it
     try:
@@ -75,24 +86,86 @@ def generate_post(
 
     _emit("start:post")
 
-    agent = Agent(
-        name="Popular Science Post Writer",
-        instructions=build_post_instructions(topic, lang),
-        model="gpt-5",
-    )
+    instructions = build_post_instructions(topic, lang)
 
-    user_message = (
-        f"<input>\n"
-        f"<topic>{topic}</topic>\n"
-        f"<lang>{(lang or 'auto').strip()}</lang>\n"
-        f"</input>"
-    )
-    res = Runner.run_sync(agent, user_message)
-    content = getattr(res, "final_output", "")
+    def _run_openai() -> str:
+        agent = Agent(
+            name="Popular Science Post Writer",
+            instructions=instructions,
+            model="gpt-5",
+        )
+        user_message_local = (
+            f"<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{(lang or 'auto').strip()}</lang>\n"
+            f"</input>"
+        )
+        res_local = Runner.run_sync(agent, user_message_local)
+        return getattr(res_local, "final_output", "")
+
+    def _run_gemini() -> str:
+        import google.generativeai as genai  # type: ignore
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        genai.configure(api_key=api_key)
+        model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+        model = genai.GenerativeModel(model_name=model_name, system_instruction=instructions)
+        user_message_local = (
+            f"<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{(lang or 'auto').strip()}</lang>\n"
+            f"</input>"
+        )
+        resp = model.generate_content(user_message_local)
+        return (getattr(resp, "text", None) or "").strip()
+
+    def _run_claude() -> str:
+        import anthropic  # type: ignore
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        model_name = os.getenv("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+        user_message_local = (
+            f"<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{(lang or 'auto').strip()}</lang>\n"
+            f"</input>"
+        )
+        msg = client.messages.create(
+            model=model_name,
+            max_tokens=4096,
+            system=instructions,
+            messages=[{"role": "user", "content": user_message_local}],
+        )
+        parts = []
+        for blk in getattr(msg, "content", []) or []:
+            txt = getattr(blk, "text", None)
+            if txt:
+                parts.append(txt)
+        return ("\n\n".join(parts)).strip()
+
+    if _prov == "openai":
+        content = _run_openai()
+    elif _prov in {"gemini", "google"}:
+        content = _run_gemini()
+    else:
+        content = _run_claude()
     if not content:
         raise RuntimeError("Empty result from writer agent")
 
     report = None
+    # For non-OpenAI providers, skip fact-check and rewrite/refine for now
+    if _prov != "openai":
+        final_content = content
+        output_dir = ensure_output_dir(output_subdir)
+        base = f"{safe_filename_base(topic)}_post"
+        filepath = next_available_filepath(output_dir, base, ".md")
+        save_markdown(
+            filepath,
+            title=topic,
+            generator=_prov,
+            pipeline="PopularSciencePost",
+            content=final_content,
+        )
+        return filepath
+
     if factcheck:
         from llm_agents.post.module_02_review.identify_points import build_identify_points_agent
         from llm_agents.post.module_02_review.iterative_research import build_iterative_research_agent

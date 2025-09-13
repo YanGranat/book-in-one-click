@@ -48,3 +48,7 @@ sqlalchemy>=2.0
 asyncpg
 aiosqlite
 redis
+
+# Additional LLM providers
+anthropic
+google-generativeai
