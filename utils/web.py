@@ -20,7 +20,7 @@ def _clean_text(text: str) -> str:
     return text.strip()
 
 
-def search_web(query: str, max_results: int = 5, timelimit: str = "y") -> List[Dict[str, str]]:
+def search_web(query: str, max_results: int = 8, timelimit: str = "y") -> List[Dict[str, str]]:
     """Search the web and return a list of result dicts: title, href, body/snippet.
     Uses DuckDuckGo; falls back to empty if package missing.
     """
@@ -42,7 +42,7 @@ def search_web(query: str, max_results: int = 5, timelimit: str = "y") -> List[D
     return results
 
 
-def fetch_url_text(url: str, timeout: int = 12, max_chars: int = 4000) -> str:
+def fetch_url_text(url: str, timeout: int = 15, max_chars: int = 8000) -> str:
     try:
         resp = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
@@ -57,9 +57,9 @@ def fetch_url_text(url: str, timeout: int = 12, max_chars: int = 4000) -> str:
         return ""
 
 
-def build_search_context(queries: List[str], per_query: int = 3, max_chars: int = 3000) -> str:
+def build_search_context(queries: List[str], per_query: int = 4, max_chars: int = 6000) -> str:
     context_parts: List[str] = []
-    for q in queries[:5]:
+    for q in queries[:8]:
         results = search_web(q, max_results=per_query)
         for i, r in enumerate(results):
             if not r.get("href"):
