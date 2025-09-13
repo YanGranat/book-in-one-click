@@ -13,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 
 DB_URL = os.getenv("DB_URL", "")
@@ -66,11 +67,31 @@ class Tx(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+def _sanitize_db_url(raw: str) -> str:
+    if not raw:
+        return raw
+    parts = urlsplit(raw)
+    # Ensure asyncpg dialect in scheme
+    scheme = parts.scheme or "postgresql+asyncpg"
+    if scheme in ("postgres", "postgresql"):
+        scheme = "postgresql+asyncpg"
+    # Normalize query: drop sslmode, force ssl=true
+    q = dict(parse_qsl(parts.query or "", keep_blank_values=True))
+    # Drop any sslmode value coming from UI edits
+    if "sslmode" in q:
+        q.pop("sslmode", None)
+    # Force ssl=true for Supabase/pgBouncer
+    q["ssl"] = "true"
+    new_query = urlencode(q, doseq=True)
+    return urlunsplit((scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
 engine = None
 if DB_URL:
+    sanitized = _sanitize_db_url(DB_URL)
     # For pgBouncer (transaction pooler) + asyncpg: disable statement cache to avoid PREPARE issues
     engine = create_async_engine(
-        DB_URL,
+        sanitized,
         connect_args={
             "statement_cache_size": 0,
         },
