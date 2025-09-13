@@ -246,10 +246,11 @@ async def log_view_ui(log_id: int):
         "</header>"
         "<main>"
         "<div id='content'></div>"
-        "<textarea id='md' style='display:none'></textarea>"
         "</main>"
-        f"<script>document.getElementById('md').value = atob('{b64}');" 
-        "document.getElementById('content').innerHTML = marked.parse(document.getElementById('md').value);</script>"
+        f"<script>const b64='{b64}';"
+        "const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}"
+        "const text=new TextDecoder('utf-8').decode(bytes);"
+        "document.getElementById('content').innerHTML = marked.parse(text);</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
