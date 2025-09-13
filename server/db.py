@@ -80,9 +80,30 @@ def _sanitize_db_url(raw: str) -> tuple[str, dict]:
     # Drop ALL query params from URL to avoid passing sslmode via DSN
     base_url = urlunsplit((scheme, parts.netloc, parts.path, "", parts.fragment))
     # Provide required options via connect_args instead of DSN
-    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    ssl_ctx.check_hostname = True
-    ssl_ctx.verify_mode = ssl.CERT_REQUIRED
+    # Strategy:
+    # 1) If DB_SSL_CA provided (PEM text or path) — use it
+    # 2) Else use certifi bundle
+    # 3) If DB_SSL_SKIP_VERIFY=true — disable verification (temporary fallback)
+    ssl_ctx = ssl.create_default_context()
+    db_ssl_ca = os.getenv("DB_SSL_CA", "").strip()
+    if db_ssl_ca:
+        try:
+            if db_ssl_ca.startswith("-----BEGIN"):
+                ssl_ctx.load_verify_locations(cadata=db_ssl_ca)
+            else:
+                ssl_ctx.load_verify_locations(db_ssl_ca)
+        except Exception:
+            # Fall back to certifi if provided CA fails to load
+            ssl_ctx.load_verify_locations(cafile=certifi.where())
+    else:
+        ssl_ctx.load_verify_locations(cafile=certifi.where())
+
+    if (os.getenv("DB_SSL_SKIP_VERIFY", "").lower() in ("1", "true", "yes")):
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+    else:
+        ssl_ctx.check_hostname = True
+        ssl_ctx.verify_mode = ssl.CERT_REQUIRED
     cargs = {"ssl": ssl_ctx, "statement_cache_size": 0}
     return base_url, cargs
 
