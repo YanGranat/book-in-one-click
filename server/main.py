@@ -53,6 +53,8 @@ async def _startup():
             types.BotCommand(command="balance", description="Balance / Баланс"),
             types.BotCommand(command="help", description="Help / Помощь"),
             types.BotCommand(command="lang", description="Language / Язык"),
+            types.BotCommand(command="lang_generate", description="Gen Language / Язык генерации"),
+            types.BotCommand(command="generate", description="Generate / Сгенерировать"),
         ])
         try:
             await DP.bot.set_chat_menu_button(menu_button=types.MenuButtonCommands())

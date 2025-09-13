@@ -29,6 +29,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 class GenerateStates(StatesGroup):
     ChoosingLanguage = State()
+    ChoosingGenLanguage = State()
     WaitingTopic = State()
     ChoosingFactcheck = State()
     ChoosingDepth = State()
@@ -51,6 +52,12 @@ def build_yesno_keyboard() -> ReplyKeyboardMarkup:
 def build_depth_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("1"), KeyboardButton("2"), KeyboardButton("3"))
+    return kb
+
+
+def build_genlang_keyboard() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("Auto"), KeyboardButton("RU"), KeyboardButton("EN"))
     return kb
 
 
@@ -84,6 +91,40 @@ def create_dispatcher() -> Dispatcher:
         else:
             lang = "auto"
         await state.update_data(lang=lang)
+        prompt = "Отправьте тему для поста:" if lang == "ru" else "Send a topic for your post:"
+        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
+        await GenerateStates.WaitingTopic.set()
+
+    @dp.message_handler(commands=["lang_generate"])  # type: ignore
+    async def cmd_lang_generate(message: types.Message, state: FSMContext):
+        await message.answer(
+            "Выберите язык генерации / Choose generation language:",
+            reply_markup=build_genlang_keyboard(),
+        )
+        await GenerateStates.ChoosingGenLanguage.set()
+
+    @dp.message_handler(state=GenerateStates.ChoosingGenLanguage)  # type: ignore
+    async def choose_gen_language(message: types.Message, state: FSMContext):
+        text = (message.text or "").strip().lower()
+        if text.startswith("ru"):
+            lang = "ru"
+        elif text.startswith("en"):
+            lang = "en"
+        else:
+            lang = "auto"
+        await state.update_data(lang=lang)
+        note = {
+            "ru": "Язык генерации: русский.",
+            "en": "Generation language: English.",
+            "auto": "Язык генерации: авто (по теме).",
+        }
+        await message.answer(note.get(lang, "OK"), reply_markup=ReplyKeyboardRemove())
+        await state.finish()
+
+    @dp.message_handler(commands=["generate"])  # type: ignore
+    async def cmd_generate(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        lang = (data.get("lang") or "auto").strip()
         prompt = "Отправьте тему для поста:" if lang == "ru" else "Send a topic for your post:"
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
