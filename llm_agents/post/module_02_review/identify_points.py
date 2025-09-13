@@ -16,12 +16,12 @@ def try_import_sdk():
     return Agent
 
 
-def build_identify_points_agent() -> Any:
+def build_identify_points_agent(model: str | None = None) -> Any:
     Agent = try_import_sdk()
     return Agent(
         name="Identify Risky Points",
         instructions=_load_prompt(),
-        model="gpt-5",
+        model=model or "gpt-5",
         output_type=ResearchPlan,
     )
 

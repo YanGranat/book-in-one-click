@@ -151,21 +151,6 @@ def generate_post(
         raise RuntimeError("Empty result from writer agent")
 
     report = None
-    # For non-OpenAI providers, skip fact-check and rewrite/refine for now
-    if _prov != "openai":
-        final_content = content
-        output_dir = ensure_output_dir(output_subdir)
-        base = f"{safe_filename_base(topic)}_post"
-        filepath = next_available_filepath(output_dir, base, ".md")
-        save_markdown(
-            filepath,
-            title=topic,
-            generator=_prov,
-            pipeline="PopularSciencePost",
-            content=final_content,
-        )
-        return filepath
-
     if factcheck:
         from llm_agents.post.module_02_review.identify_points import build_identify_points_agent
         from llm_agents.post.module_02_review.iterative_research import build_iterative_research_agent
