@@ -28,7 +28,7 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ANTHROPIC_MODEL
-        value: claude-4-sonnet
+        value: claude-sonnet-4-0
       - key: PYTHON_VERSION
         value: 3.11.9
   
