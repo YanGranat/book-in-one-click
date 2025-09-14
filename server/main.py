@@ -191,6 +191,10 @@ def _extract_meta_from_text(md: str) -> dict:
                 v = line.split("`", 2)
                 if len(v) >= 2:
                     meta["lang"] = v[1]
+            elif line.startswith("- topic:"):
+                v = line.split("`", 2)
+                if len(v) >= 2:
+                    meta["topic"] = v[1]
             elif line.startswith("- model_heavy:"):
                 v = line.split("`", 2)
                 if len(v) >= 2:
@@ -209,12 +213,41 @@ async def logs_ui():
     # Reuse /logs data
     data = await list_logs()
     items = data.get("items", [])
-    # Derive topic from filename
+    # Extract topic from log content and format timestamp
     for it in items:
-        stem = Path(it.get("path", "")).name
-        if stem.endswith("_log.md"):
-            stem = stem[:-7]
-        it["topic"] = stem
+        # Try to get topic from log file content first
+        topic_from_content = ""
+        try:
+            path_str = it.get("path", "")
+            if path_str and Path(path_str).exists():
+                with open(path_str, "r", encoding="utf-8") as f:
+                    content = f.read(2000)  # Read first 2KB to find topic
+                meta = _extract_meta_from_text(content)
+                topic_from_content = meta.get("topic", "")
+        except Exception:
+            pass
+        
+        # Fallback to filename if topic not found in content
+        if topic_from_content:
+            it["topic"] = topic_from_content
+        else:
+            stem = Path(it.get("path", "")).name
+            if stem.endswith("_log.md"):
+                stem = stem[:-7]
+            it["topic"] = stem
+            
+        # Format timestamp as YYYY-MM-DD HH:MM
+        try:
+            from datetime import datetime
+            ts_str = it.get("created_at", "")
+            if ts_str:
+                if "T" in ts_str:  # ISO format
+                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                else:  # Already formatted
+                    dt = datetime.fromisoformat(ts_str)
+                it["created_at"] = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            pass
     html_rows = []
     for it in items:
         html_rows.append(
