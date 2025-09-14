@@ -616,6 +616,7 @@ def generate_post(
     except Exception as e:
         print(f"[ERROR] Failed to record log in DB: {e}")
         print(f"[INFO] Log available on filesystem: {log_path}")
+        # Continue execution - log file is still created even if DB fails
     if return_log_path:
         return log_path
     return filepath
