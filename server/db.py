@@ -13,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import text
 from urllib.parse import urlsplit, urlunsplit
 import ssl
 import certifi
@@ -125,7 +126,16 @@ async def init_db() -> None:
     if not engine:
         return
     async with engine.begin() as conn:
+        # Create tables if they don't exist
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Add content column to existing job_logs table if it doesn't exist
+        try:
+            await conn.execute(text(f"ALTER TABLE {_t('job_logs')} ADD COLUMN content TEXT"))
+            print("[INFO] Added content column to job_logs table")
+        except Exception:
+            # Column already exists or other error - that's fine
+            pass
 
 
 async def get_or_create_user(session: AsyncSession, telegram_id: int) -> User:
