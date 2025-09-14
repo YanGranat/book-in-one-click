@@ -271,6 +271,31 @@ def generate_post(
             s = s.replace("-", "_")
             return s.lower()
 
+        def _to_confidence(value):
+            if isinstance(value, (int, float)):
+                v = float(value)
+                return max(0.0, min(1.0, v if v <= 1.0 else v / 100.0))
+            if isinstance(value, str):
+                s = value.strip().lower()
+                scale = {
+                    "low": 0.25,
+                    "medium": 0.5,
+                    "med": 0.5,
+                    "mid": 0.5,
+                    "high": 0.75,
+                    "very high": 0.9,
+                    "vh": 0.9,
+                    "confident": 0.8,
+                }
+                if s in scale:
+                    return scale[s]
+                try:
+                    num = float(s)
+                    return max(0.0, min(1.0, num if num <= 1.0 else num / 100.0))
+                except Exception:
+                    return 0.0
+            return 0.0
+
         def _normalize(obj):
             # Recursively convert keys to snake_case and coerce common fields
             if isinstance(obj, dict):
@@ -297,6 +322,26 @@ def generate_post(
                         raw = out["queries"].replace("\r", "\n")
                         items = [q.strip() for q in raw.replace(";", "\n").split("\n") if q.strip()]
                         out["queries"] = items
+                    # findings can come as list of strings
+                    if isinstance(out.get("findings"), list):
+                        out["findings"] = "\n".join(str(x) for x in out["findings"]) or ""
+                    # evidence may be list of strings or dicts with url/title
+                    ev = out.get("evidence")
+                    if isinstance(ev, list):
+                        norm_ev = []
+                        for item in ev:
+                            if isinstance(item, str):
+                                norm_ev.append({"url": item})
+                            elif isinstance(item, dict):
+                                url = item.get("url") or item.get("link") or item.get("href") or item.get("source")
+                                title = item.get("title") or item.get("name")
+                                snippet = item.get("snippet") or item.get("summary") or item.get("text")
+                                if url:
+                                    norm_ev.append({"url": url, "title": title, "snippet": snippet})
+                        out["evidence"] = norm_ev
+                    # confidence may come as string labels
+                    if "confidence" in out:
+                        out["confidence"] = _to_confidence(out.get("confidence"))
                 return out
             if isinstance(obj, list):
                 return [_normalize(x) for x in obj]
