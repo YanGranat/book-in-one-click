@@ -5,12 +5,12 @@ from typing import Any
 
 
 def _load_post_prompt() -> str:
-    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "post" / "module_01_writing" / "post.md"
+    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "writing" / "post.md"
     return prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
 
 
 def _load_rewrite_prompt() -> str:
-    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "post" / "module_03_rewriting" / "rewrite.md"
+    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "rewriting" / "rewrite_post.md"
     return prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
 
 
