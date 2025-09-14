@@ -254,6 +254,8 @@ async def log_view_ui(log_id: int):
         initial_content = data.get("content", "") or ""
     except Exception:
         pass
+    from html import escape as _esc
+    _raw = (_esc(initial_content or "").replace("</textarea>", "&lt;/textarea&gt;") if initial_content else "")
     html = (
         "<html><head><meta charset='utf-8'><title>Log View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
@@ -269,12 +271,13 @@ async def log_view_ui(log_id: int):
         "</header>"
         "<main>"
         "<div id='content'></div>"
+        f"<textarea id='raw' style='display:none'>{_raw}</textarea>"
         "</main>"
         f"<script>const LOG_ID={log_id};"
         "const TAGS=['input','topic','lang','post','critique_json'];"
         "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
         "function extractMeta(md){const out={};const lines=md.split('\n');for(let i=0;i<Math.min(lines.length,80);i++){const line=lines[i].trim();if(line.startsWith('- provider:')){out.provider=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- lang:')){out.lang=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- topic:')){out.topic=line.split(':').slice(1).join(':').trim();}}return out;}"
-        f"let text={repr(initial_content)};"
+        "let text=(document.getElementById('raw')?document.getElementById('raw').value:'');"
         "function render(md){const escaped=escapeOutsideCode(md||'');"
         "let html='';try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}"
         "if(!html||html.trim()===''){const safe=escaped.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>'; }"
