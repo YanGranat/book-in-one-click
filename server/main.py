@@ -103,7 +103,12 @@ async def list_logs():
     # If DB failed or no DB configured, read from filesystem
     if not items:
         base = Path("output")
-        files = list(base.glob("**/*_log.md")) if base.exists() else []
+        files = []
+        if base.exists():
+            # Find both old format (*_log.md) and new format (*_log_YYYYMMDD_HHMMSS.md)
+            files.extend(base.glob("**/*_log.md"))
+            files.extend(base.glob("**/*_log_*.md"))
+        files = list(set(files))  # Remove duplicates
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         for idx, p in enumerate(files, start=1):
             try:
@@ -148,9 +153,14 @@ async def get_log(log_id: int):
         except Exception as e:
             print(f"[ERROR] DB get_log failed, falling back to filesystem: {e}")
     
-    # Fallback: map log_id to Nth recent file in output/**/*_log.md
+    # Fallback: map log_id to Nth recent file in output/**/*_log*.md
     base = Path("output")
-    files = list(base.glob("**/*_log.md")) if base.exists() else []
+    files = []
+    if base.exists():
+        # Find both old format (*_log.md) and new format (*_log_YYYYMMDD_HHMMSS.md)
+        files.extend(base.glob("**/*_log.md"))
+        files.extend(base.glob("**/*_log_*.md"))
+    files = list(set(files))  # Remove duplicates
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     if log_id <= 0 or log_id > len(files):
         return {"error": "not found"}
@@ -310,7 +320,8 @@ async def log_view_ui(log_id: int):
         f"<script>const b64='{b64}';"
         "const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}"
         "const text=new TextDecoder('utf-8').decode(bytes);"
-        "document.getElementById('content').innerHTML = marked.parse(text);</script>"
+        "const escaped=text.replace(/</g,'&lt;').replace(/>/g,'&gt;');"
+        "document.getElementById('content').innerHTML = marked.parse(escaped);</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
