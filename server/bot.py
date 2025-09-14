@@ -13,6 +13,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from utils.env import load_env_from_root
 from utils.lang import detect_lang_from_text
 from services.post.generate import generate_post
+from utils.slug import safe_filename_base
 from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
@@ -379,12 +380,11 @@ def create_dispatcher() -> Dispatcher:
                 if message.from_user:
                     logs_enabled = await get_logs_enabled(message.from_user.id)
                     if logs_enabled:
-                        # Find corresponding log file
-                        log_pattern = f"{path.stem.replace('_post', '_log')}_*.md"
-                        import glob
-                        log_files = glob.glob(str(path.parent / log_pattern))
+                        # Find corresponding log file by scanning directory
+                        topic_base = safe_filename_base(topic)
+                        log_files = list(path.parent.glob(f"{topic_base}_log_*.md"))
                         if log_files:
-                            log_path = Path(log_files[0])  # Take first match
+                            log_path = log_files[0]  # Take first match
                             with open(log_path, "rb") as log_f:
                                 log_cap = f"Лог: {log_path.name}" if ui_lang == "ru" else f"Log: {log_path.name}"
                                 await message.answer_document(log_f, caption=log_cap)
@@ -493,12 +493,11 @@ def create_dispatcher() -> Dispatcher:
                 if message.from_user:
                     logs_enabled = await get_logs_enabled(message.from_user.id)
                     if logs_enabled:
-                        # Find corresponding log file
-                        log_pattern = f"{path.stem.replace('_post', '_log')}_*.md"
-                        import glob
-                        log_files = glob.glob(str(path.parent / log_pattern))
+                        # Find corresponding log file by scanning directory
+                        topic_base = safe_filename_base(topic)
+                        log_files = list(path.parent.glob(f"{topic_base}_log_*.md"))
                         if log_files:
-                            log_path = Path(log_files[0])  # Take first match
+                            log_path = log_files[0]  # Take first match
                             with open(log_path, "rb") as log_f:
                                 log_cap = f"Лог: {log_path.name}" if ui_lang == "ru" else f"Log: {log_path.name}"
                                 await message.answer_document(log_f, caption=log_cap)

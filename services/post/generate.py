@@ -184,9 +184,9 @@ def generate_post(
         f"</input>"
     )
     # Log writer input for transparency
-    log("✍️ Writer · Input", f"{user_message_local_writer}")
+    log("⬇️ Writer · Input", f"{user_message_local_writer}")
     content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
-    log("writer_output", content[:2000])
+    log("✍️ Writer · Output", content[:2000])
     if not content:
         raise RuntimeError("Empty result from writer agent")
 
@@ -536,8 +536,8 @@ def generate_post(
                 f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
                 "</input>"
             )
-            # Log rewrite critique for transparency
-            log("🛠️ Rewrite · Critique JSON", f"{report.model_dump_json()}")
+            # Log rewrite input and output
+            log("⬇️ Rewrite · Input", f"{rw_input}")
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
             log("🛠️ Rewrite · Output", final_content[:4000])
 
@@ -550,7 +550,8 @@ def generate_post(
         f"<post>\n{final_content}\n</post>\n"
         "</input>"
     )
-    # Skip refine prompt logging
+    # Log refine input and output
+    log("⬇️ Refine · Input", f"{refine_input}")
     final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
     log("✨ Refine · Output", final_content[:4000])
 
