@@ -431,6 +431,13 @@ async def delete_log_api(log_id: int, _: bool = Depends(require_admin)):
         obj = await s.get(JobLog, log_id)
         if obj is None:
             return {"ok": False, "error": "not found"}
+        # Also delete results for same job_id
+        try:
+            if getattr(obj, "job_id", 0):
+                from sqlalchemy import delete as _sqdel
+                await s.execute(_sqdel(ResultDoc).where(ResultDoc.job_id == obj.job_id))
+        except Exception:
+            pass
         await s.delete(obj)
         await s.commit()
         return {"ok": True, "deleted_id": log_id}
@@ -446,11 +453,16 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
     deleted = 0
     async with SessionLocal() as s:
         if ids:
-            from sqlalchemy import delete
+            from sqlalchemy import delete, select
+            # Collect affected job_ids first
+            res = await s.execute(select(JobLog.job_id).where(JobLog.id.in_(ids)))
+            job_ids = [jid for (jid,) in (res.fetchall() or []) if isinstance(jid, int) and jid > 0]
+            if job_ids:
+                await s.execute(delete(ResultDoc).where(ResultDoc.job_id.in_(job_ids)))
             stmt = delete(JobLog).where(JobLog.id.in_(ids))
-            res = await s.execute(stmt)
+            res2 = await s.execute(stmt)
             await s.commit()
-            deleted = res.rowcount or 0
+            deleted = res2.rowcount or 0
     return {"ok": True, "deleted": int(deleted)}
 
 
@@ -463,7 +475,7 @@ async def _list_result_files() -> list[dict]:
         try:
             async with SessionLocal() as s:
                 from sqlalchemy import select
-                res = await s.execute(select(ResultDoc).order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc()))
+                res = await s.execute(select(ResultDoc).where(ResultDoc.hidden == 0).order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc()))
                 rows = res.scalars().all()
                 for r in rows:
                     items.append({

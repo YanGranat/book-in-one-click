@@ -17,7 +17,7 @@ from utils.slug import safe_filename_base
 from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
-from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled
+from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 
 
 def _load_env():
@@ -34,6 +34,7 @@ class GenerateStates(StatesGroup):
     ChoosingGenLanguage = State()
     ChoosingProvider = State()
     ChoosingLogs = State()
+    ChoosingIncognito = State()
     WaitingTopic = State()
     ChoosingFactcheck = State()
     ChoosingDepth = State()
@@ -70,6 +71,11 @@ def build_provider_keyboard() -> ReplyKeyboardMarkup:
 
 
 def build_logs_keyboard() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("Включить"), KeyboardButton("Отключить"))
+    return kb
+
+def build_incognito_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("Включить"), KeyboardButton("Отключить"))
     return kb
@@ -253,6 +259,37 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
         await state.finish()
 
+    @dp.message_handler(commands=["incognito"])  # type: ignore
+    async def cmd_incognito(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
+        await message.answer(prompt, reply_markup=build_incognito_keyboard())
+        await GenerateStates.ChoosingIncognito.set()
+
+    @dp.message_handler(state=GenerateStates.ChoosingIncognito)  # type: ignore
+    async def choose_incognito(message: types.Message, state: FSMContext):
+        text = (message.text or "").strip().lower()
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        if text.startswith("включ") or text.startswith("enable"):
+            enabled = True
+            msg = "Инкогнито: включён." if ui_lang == "ru" else "Incognito: enabled."
+        elif text.startswith("отключ") or text.startswith("disable"):
+            enabled = False
+            msg = "Инкогнито: отключён." if ui_lang == "ru" else "Incognito: disabled."
+        else:
+            prompt = "Выберите: Включить или Отключить." if ui_lang == "ru" else "Choose: Enable or Disable."
+            await message.answer(prompt, reply_markup=build_incognito_keyboard())
+            return
+        try:
+            if message.from_user:
+                await set_incognito(message.from_user.id, enabled)
+        except Exception:
+            pass
+        await message.answer(msg, reply_markup=ReplyKeyboardRemove())
+        await state.finish()
+
     @dp.message_handler(commands=["cancel"])  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
         data = await state.get_data()
@@ -359,6 +396,7 @@ def create_dispatcher() -> Dispatcher:
                     "topic": topic,
                     "provider": prov or "openai",
                     "lang": data.get("gen_lang") or "auto",
+                    "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                 }
                 path = await loop.run_in_executor(
                     None,
@@ -471,6 +509,7 @@ def create_dispatcher() -> Dispatcher:
                     "topic": topic,
                     "provider": prov or "openai",
                     "lang": data.get("gen_lang") or "auto",
+                    "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                 }
                 path = await loop.run_in_executor(
                     None,

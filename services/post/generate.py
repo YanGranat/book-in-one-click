@@ -648,6 +648,7 @@ def generate_post(
                         provider=_prov,
                         lang=lang,
                         content=final_content,
+                        hidden=1 if ((job_meta or {}).get("incognito") is True) else 0,
                     )
                     try:
                         s.add(rd)

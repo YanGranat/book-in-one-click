@@ -72,6 +72,7 @@ class ResultDoc(Base):
     provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     lang: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     content: Mapped[str] = mapped_column(Text)
+    hidden: Mapped[int] = mapped_column(Integer, default=0)  # 0=visible, 1=incognito
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -158,6 +159,12 @@ async def init_db() -> None:
         # Ensure results table exists (for final documents)
         try:
             await conn.run_sync(ResultDoc.__table__.create, checkfirst=True)
+        except Exception:
+            pass
+        # Add hidden flag to results if missing
+        try:
+            await conn.execute(text(f"ALTER TABLE {_t('results')} ADD COLUMN hidden INTEGER DEFAULT 0"))
+            print("[INFO] Added hidden column to results table")
         except Exception:
             pass
 
