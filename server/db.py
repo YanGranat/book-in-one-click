@@ -167,6 +167,17 @@ async def init_db() -> None:
             print("[INFO] Added hidden column to results table")
         except Exception:
             pass
+        # Migrate old table result_docs -> results (best-effort)
+        try:
+            await conn.execute(text(
+                f"INSERT INTO {_t('results')} (job_id, kind, path, topic, provider, lang, content, created_at) "
+                f"SELECT job_id, kind, path, topic, provider, lang, content, created_at FROM {_t('result_docs')} rd "
+                f"WHERE NOT EXISTS (SELECT 1 FROM {_t('results')} r WHERE r.path = rd.path AND r.created_at = rd.created_at)"
+            ))
+            print("[INFO] Migrated rows from legacy result_docs to results (if existed)")
+        except Exception:
+            # Old table may not exist; ignore
+            pass
 
 
 async def get_or_create_user(session: AsyncSession, telegram_id: int) -> User:

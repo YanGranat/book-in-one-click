@@ -665,7 +665,7 @@ def generate_post(
                         s.rollback()
                         print(f"[ERROR] ResultDoc commit failed: {_e}")
                     try:
-                        print(f"[INFO] Log recorded in DB: id={getattr(jl,'id',None)}, path={log_path}, content_size={len(full_log_content)}")
+                        print(f"[INFO] Log recorded in DB: id={getattr(jl,'id',None)}, path={log_path}, content_size={len(full_log_content)}; result_job_id={result_job_id}")
                     except Exception:
                         pass
                 try:

@@ -475,7 +475,7 @@ async def _list_result_files() -> list[dict]:
         try:
             async with SessionLocal() as s:
                 from sqlalchemy import select
-                res = await s.execute(select(ResultDoc).where(ResultDoc.hidden == 0).order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc()))
+                res = await s.execute(select(ResultDoc).where((ResultDoc.hidden == 0)).order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc()))
                 rows = res.scalars().all()
                 for r in rows:
                     items.append({
@@ -488,7 +488,8 @@ async def _list_result_files() -> list[dict]:
                         "provider": getattr(r, "provider", "") or "",
                         "lang": getattr(r, "lang", "") or "",
                     })
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] results db read failed: {e}")
             items = []
     if items:
         return items
