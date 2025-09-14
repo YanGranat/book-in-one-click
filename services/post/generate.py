@@ -626,6 +626,7 @@ def generate_post(
                     # Store log content directly (avoid FS race/ephemeral issues)
                     jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=full_log_content)
                     s.add(jl)
+                    s.flush()
                     # Store final result document as well
                     try:
                         rel_doc = str(filepath.relative_to(Path.cwd())) if filepath.is_absolute() else str(filepath)
@@ -641,8 +642,12 @@ def generate_post(
                         content=final_content,
                     )
                     s.add(rd)
+                    s.flush()
                     s.commit()
-                    print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(full_log_content)}")
+                    try:
+                        print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(full_log_content)}; Result id pending")
+                    except Exception:
+                        pass
             else:
                 print(f"[INFO] No DB_URL configured, log saved to filesystem only: {log_path}")
         else:
