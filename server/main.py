@@ -123,53 +123,54 @@ async def list_logs():
 
 @app.get("/logs/{log_id}")
 async def get_log(log_id: int):
-    if SessionLocal is None:
-        # Fallback: map log_id to Nth recent file in output/**/*_log.md
-        base = Path("output")
-        files = list(base.glob("**/*_log.md")) if base.exists() else []
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        if log_id <= 0 or log_id > len(files):
-            return {"error": "not found"}
-        p = files[log_id - 1]
+    # Try DB first, then filesystem fallback (same logic as list_logs)
+    if SessionLocal is not None:
         try:
-            with open(p, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception:
-            content = ""
-        try:
-            created = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
-        except Exception:
-            created = ""
-        return {
-            "id": log_id,
-            "job_id": 0,
-            "path": str(p),
-            "created_at": created,
-            "content": content,
-            "source": "fs",
-        }
-    async with SessionLocal() as s:
-        from sqlalchemy import select
-        res = await s.execute(select(JobLog).where(JobLog.id == log_id))
-        row = res.scalar_one_or_none()
-        if row is None:
-            return {"error": "not found"}
-        try:
-            with open(row.path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception:
-            content = ""
-        # try resolve basic job info
-        topic = ""
-        provider = ""
-        created = str(row.created_at)
-        return {
-            "id": row.id,
-            "job_id": row.job_id,
-            "path": row.path,
-            "created_at": created,
-            "content": content,
-        }
+            async with SessionLocal() as s:
+                from sqlalchemy import select
+                res = await s.execute(select(JobLog).where(JobLog.id == log_id))
+                row = res.scalar_one_or_none()
+                if row is not None:
+                    try:
+                        with open(row.path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                    except Exception:
+                        content = ""
+                    return {
+                        "id": row.id,
+                        "job_id": row.job_id,
+                        "path": row.path,
+                        "created_at": str(row.created_at),
+                        "content": content,
+                        "source": "db",
+                    }
+        except Exception as e:
+            print(f"[ERROR] DB get_log failed, falling back to filesystem: {e}")
+    
+    # Fallback: map log_id to Nth recent file in output/**/*_log.md
+    base = Path("output")
+    files = list(base.glob("**/*_log.md")) if base.exists() else []
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    if log_id <= 0 or log_id > len(files):
+        return {"error": "not found"}
+    p = files[log_id - 1]
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        content = ""
+    try:
+        created = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
+    except Exception:
+        created = ""
+    return {
+        "id": log_id,
+        "job_id": 0,
+        "path": str(p),
+        "created_at": created,
+        "content": content,
+        "source": "fs",
+    }
 
 
 @app.api_route("/logs-seed", methods=["GET", "POST"])

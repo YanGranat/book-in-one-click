@@ -123,6 +123,7 @@ def main() -> None:
                 research_iterations=args.research_iterations,
                 research_concurrency=args.research_concurrency,
                 output_subdir=args.out,
+                job_meta={"source": "cli", "script": "Popular_science_post.py"},
             )
             print(f"💾 Сохранено: {path}")
             print("✅ Готово.")

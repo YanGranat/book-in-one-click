@@ -67,10 +67,7 @@ def build_provider_keyboard() -> ReplyKeyboardMarkup:
     return kb
 
 
-def build_cancel_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Cancel"), KeyboardButton("Отмена"))
-    return kb
+# Removed unused build_cancel_keyboard - we use /cancel command instead
 
 
 def create_dispatcher() -> Dispatcher:
