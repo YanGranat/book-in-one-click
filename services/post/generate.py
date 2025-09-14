@@ -608,7 +608,7 @@ def generate_post(
                 # Ensure SSL for psycopg2 if not explicitly set
                 if "sslmode" not in {k.lower() for k in qs.keys()}:
                     cargs["sslmode"] = "require"
-                sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
+                sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True, pool_size=3, max_overflow=0)
                 SyncSession = sessionmaker(sync_engine)
                 
                 with SyncSession() as s:

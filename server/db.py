@@ -167,6 +167,11 @@ async def init_db() -> None:
             print("[INFO] Added hidden column to results table")
         except Exception:
             pass
+        # Normalize existing NULLs to 0 to make UI queries work
+        try:
+            await conn.execute(text(f"UPDATE {_t('results')} SET hidden=0 WHERE hidden IS NULL"))
+        except Exception:
+            pass
         # Migrate old table result_docs -> results (best-effort)
         try:
             await conn.execute(text(

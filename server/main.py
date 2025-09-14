@@ -475,7 +475,12 @@ async def _list_result_files() -> list[dict]:
         try:
             async with SessionLocal() as s:
                 from sqlalchemy import select
-                res = await s.execute(select(ResultDoc).where((ResultDoc.hidden == 0)).order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc()))
+                from sqlalchemy import or_
+                res = await s.execute(
+                    select(ResultDoc)
+                    .where(or_(ResultDoc.hidden == 0, ResultDoc.hidden.is_(None)))
+                    .order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc())
+                )
                 rows = res.scalars().all()
                 for r in rows:
                     items.append({
@@ -670,6 +675,31 @@ async def result_view_ui_file(b64: str):
         "</body></html>"
     )
     return HTMLResponse(content=html)
+
+
+@app.get("/debug/results-summary")
+async def debug_results_summary():
+    out = {"total": 0, "visible": 0, "hidden": 0, "recent": []}
+    if SessionLocal is None:
+        return out
+    try:
+        async with SessionLocal() as s:
+            from sqlalchemy import select, func
+            total = await s.execute(select(func.count()).select_from(ResultDoc))
+            vis = await s.execute(select(func.count()).select_from(ResultDoc).where(ResultDoc.hidden == 0))
+            hid = await s.execute(select(func.count()).select_from(ResultDoc).where(ResultDoc.hidden == 1))
+            out["total"] = int(total.scalar() or 0)
+            out["visible"] = int(vis.scalar() or 0)
+            out["hidden"] = int(hid.scalar() or 0)
+            res = await s.execute(select(ResultDoc).order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc()).limit(5))
+            rows = res.scalars().all()
+            out["recent"] = [
+                {"id": r.id, "hidden": int(getattr(r, "hidden", 0) or 0), "created_at": str(r.created_at), "path": r.path}
+                for r in rows
+            ]
+    except Exception as e:
+        out["error"] = str(e)
+    return out
 
 
 @app.post("/webhook/{secret}")
