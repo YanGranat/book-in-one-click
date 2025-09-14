@@ -270,9 +270,11 @@ async def log_view_ui(log_id: int):
         "<div id='content'></div>"
         "</main>"
         f"<script>const b64='{b64}';"
-        "const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}"
+        "const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}" 
         "const text=new TextDecoder('utf-8').decode(bytes);"
-        "const escaped=text.replace(/<input>/g,'&lt;input&gt;').replace(/<\\/input>/g,'&lt;/input&gt;').replace(/<topic>/g,'&lt;topic&gt;').replace(/<\\/topic>/g,'&lt;/topic&gt;').replace(/<lang>/g,'&lt;lang&gt;').replace(/<\\/lang>/g,'&lt;/lang&gt;').replace(/<post>/g,'&lt;post&gt;').replace(/<\\/post>/g,'&lt;/post&gt;').replace(/<critique_json>/g,'&lt;critique_json&gt;').replace(/<\\/critique_json>/g,'&lt;/critique_json&gt;');"
+        "const TAGS=['input','topic','lang','post','critique_json'];"
+        "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
+        "const escaped=escapeOutsideCode(text);"
         "document.getElementById('content').innerHTML = marked.parse(escaped);</script>"
         "</body></html>"
     )

@@ -183,8 +183,8 @@ def generate_post(
         f"<lang>{(lang or 'auto').strip()}</lang>\n"
         f"</input>"
     )
-    # Log writer input for transparency (render as code block to preserve newlines)
-    log("⬇️ Writer · Input", f"```xml\n{user_message_local_writer}\n```")
+    # Log writer input for transparency (plain text; UI preserves newlines)
+    log("⬇️ Writer · Input", user_message_local_writer)
     content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("✍️ Writer · Output", content)
     if not content:
@@ -536,8 +536,8 @@ def generate_post(
                 f"<critique_json>\n\n{report.model_dump_json()}\n\n</critique_json>\n"
                 "</input>"
             )
-            # Log rewrite input and output (render input as code block)
-            log("⬇️ Rewrite · Input", f"```xml\n{rw_input}\n```")
+            # Log rewrite input and output (plain text)
+            log("⬇️ Rewrite · Input", rw_input)
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
             log("🛠️ Rewrite · Output", final_content)
 
@@ -550,8 +550,8 @@ def generate_post(
         f"<post>\n\n{final_content}\n\n</post>\n"
         "</input>"
     )
-    # Log refine input and output (render input as code block)
-    log("⬇️ Refine · Input", f"```xml\n{refine_input}\n```")
+    # Log refine input and output (plain text)
+    log("⬇️ Refine · Input", refine_input)
     final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
     log("✨ Refine · Output", final_content)
 
