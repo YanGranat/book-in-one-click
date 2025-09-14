@@ -194,11 +194,16 @@ async def logs_ui():
         topic_from_content = ""
         try:
             path_str = it.get("path", "")
-            if path_str and Path(path_str).exists():
-                with open(path_str, "r", encoding="utf-8") as f:
-                    content = f.read(2000)  # Read first 2KB to find topic
-                meta = _extract_meta_from_text(content)
-                topic_from_content = meta.get("topic", "")
+            if path_str:
+                # Handle both relative and absolute paths
+                log_file_path = Path(path_str)
+                if not log_file_path.is_absolute():
+                    log_file_path = Path.cwd() / log_file_path
+                if log_file_path.exists():
+                    with open(log_file_path, "r", encoding="utf-8") as f:
+                        content = f.read(2000)  # Read first 2KB to find topic
+                    meta = _extract_meta_from_text(content)
+                    topic_from_content = meta.get("topic", "")
         except Exception:
             pass
         
@@ -261,10 +266,12 @@ async def log_view_ui(log_id: int):
     html = (
         "<html><head><meta charset='utf-8'><title>Log View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
-        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0}"
+        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.6}"
         "header{background:#111;color:#eee;padding:12px 16px;display:flex;gap:16px;align-items:center}"
         "main{padding:16px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
+        "h1{font-size:1.8em;margin:1em 0 0.5em}h2{font-size:1.4em;margin:1em 0 0.5em}h3{font-size:1.2em;margin:0.8em 0 0.4em;color:#333}"
         "code{background:none;color:inherit;padding:0}pre{background:none;color:inherit;padding:0;white-space:pre-wrap;word-wrap:break-word}"
+        "p{margin:0.5em 0}ul,ol{margin:0.5em 0}li{margin:0.2em 0}"
         "</style></head><body>"
         f"<header><a href='/logs-ui'>← Back</a><div>{title}</div>"
         f"<div style='margin-left:auto;opacity:.8'>provider={meta.get('provider','?')} | lang={meta.get('lang','?')}</div>"
