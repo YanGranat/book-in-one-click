@@ -253,8 +253,6 @@ async def log_view_ui(log_id: int):
     if not content:
         return HTMLResponse("<h1>Empty</h1><p>No content stored for this log.</p>", status_code=200)
     title = Path(data.get("path", "")).name
-    import base64
-    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
     html = (
         "<html><head><meta charset='utf-8'><title>Log View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
@@ -271,15 +269,13 @@ async def log_view_ui(log_id: int):
         "<main>"
         "<div id='content'></div>"
         "</main>"
-        f"<script>const b64='{b64}';"
-        "const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}" 
-        "const text=new TextDecoder('utf-8').decode(bytes);"
+        f"<script>const LOG_ID={log_id};"
         "const TAGS=['input','topic','lang','post','critique_json'];"
         "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
-        "const escaped=escapeOutsideCode(text);"
+        "async function load(){try{const r=await fetch('/logs/'+LOG_ID);const j=await r.json();let text=j.content||'';const escaped=escapeOutsideCode(text);"
         "let html='';try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}"
         "if(!html||html.trim()===''){const safe=escaped.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>'; }"
-        "document.getElementById('content').innerHTML = html;</script>"
+        "document.getElementById('content').innerHTML = html;}catch(_){document.getElementById('content').innerHTML='<p style=opacity:.7>Load error</p>';}}load();</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
