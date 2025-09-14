@@ -532,8 +532,8 @@ def generate_post(
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{lang}</lang>\n"
-                f"<post>\n{content}\n</post>\n"
-                f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
+                f"<post>\n\n{content}\n\n</post>\n"
+                f"<critique_json>\n\n{report.model_dump_json()}\n\n</critique_json>\n"
                 "</input>"
             )
             # Log rewrite input and output
@@ -547,7 +547,7 @@ def generate_post(
         "<input>\n"
         f"<topic>{topic}</topic>\n"
         f"<lang>{lang}</lang>\n"
-        f"<post>\n{final_content}\n</post>\n"
+        f"<post>\n\n{final_content}\n\n</post>\n"
         "</input>"
     )
     # Log refine input and output
