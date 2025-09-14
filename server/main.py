@@ -175,28 +175,20 @@ async def logs_seed():
 def _extract_meta_from_text(md: str) -> dict:
     meta = {}
     try:
-        for line in md.splitlines()[:50]:
+        for line in md.splitlines()[:80]:
             line = line.strip()
+            def _val(s: str) -> str:
+                return s.split(":", 1)[1].strip() if ":" in s else ""
             if line.startswith("- provider:"):
-                v = line.split("`", 2)
-                if len(v) >= 2:
-                    meta["provider"] = v[1]
+                meta["provider"] = _val(line)
             elif line.startswith("- lang:"):
-                v = line.split("`", 2)
-                if len(v) >= 2:
-                    meta["lang"] = v[1]
+                meta["lang"] = _val(line)
             elif line.startswith("- topic:"):
-                v = line.split("`", 2)
-                if len(v) >= 2:
-                    meta["topic"] = v[1]
+                meta["topic"] = _val(line)
             elif line.startswith("- model_heavy:"):
-                v = line.split("`", 2)
-                if len(v) >= 2:
-                    meta["model_heavy"] = v[1]
+                meta["model_heavy"] = _val(line)
             elif line.startswith("- model_fast:"):
-                v = line.split("`", 2)
-                if len(v) >= 2:
-                    meta["model_fast"] = v[1]
+                meta["model_fast"] = _val(line)
     except Exception:
         pass
     return meta
@@ -275,8 +267,8 @@ async def log_view_ui(log_id: int):
         "</main>"
         f"<script>const LOG_ID={log_id};"
         "const TAGS=['input','topic','lang','post','critique_json'];"
-        "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
-        "function extractMeta(md){const out={};const lines=md.split('\n');for(let i=0;i<Math.min(lines.length,80);i++){const line=lines[i].trim();if(line.startsWith('- provider:')){out.provider=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- lang:')){out.lang=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- topic:')){out.topic=line.split(':').slice(1).join(':').trim();}}return out;}"
+        "function escapeOutsideCode(md){const lines=md.split('\\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\\n');}"
+        "function extractMeta(md){const out={};const lines=md.split('\\n');for(let i=0;i<Math.min(lines.length,80);i++){const line=lines[i].trim();if(line.startsWith('- provider:')){out.provider=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- lang:')){out.lang=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- topic:')){out.topic=line.split(':').slice(1).join(':').trim();}}return out;}"
         "let text=(document.getElementById('raw')?document.getElementById('raw').value:'');"
         "function render(md){const escaped=escapeOutsideCode(md||'');"
         "let html='';try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}"
