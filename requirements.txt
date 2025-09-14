@@ -46,6 +46,7 @@ httptools<0.7
 # Database
 sqlalchemy>=2.0
 asyncpg
+psycopg2-binary
 aiosqlite
 redis
 
