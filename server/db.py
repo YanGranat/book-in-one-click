@@ -149,6 +149,12 @@ async def init_db() -> None:
         except Exception:
             # Column already exists or other error - that's fine
             pass
+        # Add created_at column to job_logs if missing
+        try:
+            await conn.execute(text(f"ALTER TABLE {_t('job_logs')} ADD COLUMN created_at TIMESTAMP DEFAULT NOW()"))
+            print("[INFO] Added created_at column to job_logs table")
+        except Exception:
+            pass
         # Ensure results table exists (for final documents)
         try:
             await conn.run_sync(ResultDoc.__table__.create, checkfirst=True)

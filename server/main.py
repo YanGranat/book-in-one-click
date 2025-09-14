@@ -13,6 +13,8 @@ import secrets
 import base64
 
 from utils.env import load_env_from_root
+# Load .env BEFORE importing DB module to ensure DB_URL/DB_TABLE_PREFIX are visible
+load_env_from_root(__file__)
 from .bot import create_dispatcher
 from .bot_commands import register_admin_commands, ensure_db_ready
 from .db import SessionLocal, JobLog, Job, ResultDoc
@@ -22,7 +24,8 @@ def _load_env():
     load_env_from_root(__file__)
 
 
-_load_env()
+# Already loaded above
+# _load_env()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
@@ -89,7 +92,8 @@ async def list_logs():
         try:
             async with SessionLocal() as s:
                 from sqlalchemy import select
-                res = await s.execute(select(JobLog).order_by(JobLog.id.desc()).limit(200))
+                # Order by created_at if available; otherwise id desc
+                res = await s.execute(select(JobLog).order_by(JobLog.created_at.desc(), JobLog.id.desc()).limit(200))
                 rows = res.scalars().all()
                 for r in rows:
                     # Extract topic from stored content if available
@@ -118,7 +122,52 @@ async def list_logs():
                     })
         except Exception as e:
             print(f"[ERROR] DB read failed: {e}")
-    
+    # Fallback: sync read in case async engine/session isn't available
+    if (not items):
+        try:
+            from sqlalchemy import create_engine, text as _sqtext
+            from urllib.parse import urlsplit, urlunsplit, parse_qs
+            db_url = os.getenv("DB_URL", "").strip()
+            if db_url:
+                sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql://", "postgresql+psycopg2://")
+                parts = urlsplit(sync_url)
+                qs = parse_qs(parts.query or "")
+                base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
+                cargs = {"sslmode": "require"} if not any(k.lower()=="sslmode" for k in qs.keys()) else {}
+                eng = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
+                table = JobLog.__tablename__
+                with eng.connect() as conn:
+                    res = conn.execute(_sqtext(f"SELECT id, job_id, kind, path, content, created_at FROM {table} ORDER BY created_at DESC NULLS LAST, id DESC LIMIT :lim"), {"lim": 200})
+                    for r in res.fetchall():
+                        rid, rjob, rkind, rpath, rcont, rts = r
+                        topic = ""
+                        try:
+                            if rcont:
+                                meta = _extract_meta_from_text((rcont or "")[:2000])
+                                topic = meta.get("topic", "")
+                        except Exception:
+                            pass
+                        if not topic:
+                            stem = Path(rpath or "").name
+                            if stem.endswith(".md"):
+                                stem = stem[:-3]
+                            import re as _re
+                            stem = _re.sub(r"_log(_\d{8}_\d{6})?$", "", stem)
+                            topic = stem
+                        items.append({
+                            "id": rid,
+                            "job_id": rjob,
+                            "kind": rkind,
+                            "path": rpath,
+                            "created_at": str(rts) if rts is not None else "",
+                            "topic": topic,
+                        })
+                try:
+                    eng.dispose()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[ERROR] Sync fallback read failed: {e}")
     return {"items": items}
 
 
@@ -126,7 +175,33 @@ async def list_logs():
 async def get_log(log_id: int):
     # Read only from DB
     if SessionLocal is None:
-        return {"error": "db is not configured"}
+        # Try sync fallback
+        try:
+            from sqlalchemy import create_engine, text as _sqtext
+            from urllib.parse import urlsplit, urlunsplit, parse_qs
+            db_url = os.getenv("DB_URL", "").strip()
+            if not db_url:
+                return {"error": "db is not configured"}
+            sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql://", "postgresql+psycopg2://")
+            parts = urlsplit(sync_url)
+            qs = parse_qs(parts.query or "")
+            base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
+            cargs = {"sslmode": "require"} if not any(k.lower()=="sslmode" for k in qs.keys()) else {}
+            eng = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
+            table = JobLog.__tablename__
+            with eng.connect() as conn:
+                res = conn.execute(_sqtext(f"SELECT id, job_id, kind, path, content, created_at FROM {table} WHERE id=:id"), {"id": int(log_id)})
+                row = res.fetchone()
+            try:
+                eng.dispose()
+            except Exception:
+                pass
+            if not row:
+                return {"error": "not found"}
+            rid, rjob, rkind, rpath, rcont, rts = row
+            return {"id": rid, "job_id": rjob, "path": rpath, "created_at": str(rts) if rts else "", "content": rcont or ""}
+        except Exception as e:
+            return {"error": f"db not configured: {e}"}
     
     try:
         async with SessionLocal() as s:
@@ -140,14 +215,28 @@ async def get_log(log_id: int):
             if row.content:
                 content = row.content
             else:
-                return {
-                    "id": row.id,
-                    "job_id": row.job_id,
-                    "path": row.path,
-                    "created_at": str(row.created_at),
-                    "content": "",
-                    "error": "no content stored for this log"
-                }
+                # Try sync fallback read (in case async row lacks column due to migration lag)
+                try:
+                    from sqlalchemy import create_engine, text as _sqtext
+                    from urllib.parse import urlsplit, urlunsplit, parse_qs
+                    db_url = os.getenv("DB_URL", "").strip()
+                    sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql://", "postgresql+psycopg2://")
+                    parts = urlsplit(sync_url)
+                    qs = parse_qs(parts.query or "")
+                    base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
+                    cargs = {"sslmode": "require"} if not any(k.lower()=="sslmode" for k in qs.keys()) else {}
+                    eng = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
+                    table = JobLog.__tablename__
+                    with eng.connect() as conn:
+                        res2 = conn.execute(_sqtext(f"SELECT content FROM {table} WHERE id=:id"), {"id": int(log_id)})
+                        r2 = res2.fetchone()
+                    try:
+                        eng.dispose()
+                    except Exception:
+                        pass
+                    content = r2[0] if r2 and r2[0] else ""
+                except Exception:
+                    content = ""
             
             return {
                 "id": row.id,
@@ -158,7 +247,33 @@ async def get_log(log_id: int):
             }
     except Exception as e:
         print(f"[ERROR] DB get_log failed: {e}")
-        return {"error": f"database error: {e}"}
+        # Try sync fallback as last resort
+        try:
+            from sqlalchemy import create_engine, text as _sqtext
+            from urllib.parse import urlsplit, urlunsplit, parse_qs
+            db_url = os.getenv("DB_URL", "").strip()
+            if not db_url:
+                return {"error": f"database error: {e}"}
+            sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql://", "postgresql+psycopg2://")
+            parts = urlsplit(sync_url)
+            qs = parse_qs(parts.query or "")
+            base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
+            cargs = {"sslmode": "require"} if not any(k.lower()=="sslmode" for k in qs.keys()) else {}
+            eng = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
+            table = JobLog.__tablename__
+            with eng.connect() as conn:
+                res = conn.execute(_sqtext(f"SELECT id, job_id, kind, path, content, created_at FROM {table} WHERE id=:id"), {"id": int(log_id)})
+                row = res.fetchone()
+            try:
+                eng.dispose()
+            except Exception:
+                pass
+            if not row:
+                return {"error": "not found"}
+            rid, rjob, rkind, rpath, rcont, rts = row
+            return {"id": rid, "job_id": rjob, "path": rpath, "created_at": str(rts) if rts else "", "content": rcont or ""}
+        except Exception as e2:
+            return {"error": f"database error: {e} / fallback: {e2}"}
 
 
 @app.api_route("/logs-seed", methods=["GET", "POST"])
@@ -348,14 +463,18 @@ async def _list_result_files() -> list[dict]:
         try:
             async with SessionLocal() as s:
                 from sqlalchemy import select
-                res = await s.execute(select(ResultDoc).order_by(ResultDoc.id.desc()).limit(500))
-                for r in res.scalars().all():
+                res = await s.execute(select(ResultDoc).order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc()))
+                rows = res.scalars().all()
+                for r in rows:
                     items.append({
                         "id": r.id,
                         "path": r.path,
                         "name": Path(r.path).name,
                         "created_at": str(r.created_at),
                         "kind": r.kind,
+                        "topic": getattr(r, "topic", "") or "",
+                        "provider": getattr(r, "provider", "") or "",
+                        "lang": getattr(r, "lang", "") or "",
                     })
         except Exception:
             items = []
@@ -394,9 +513,9 @@ async def results_ui():
     items = await _list_result_files()
     rows = []
     for it in items:
-        b64 = base64.urlsafe_b64encode(it["path"].encode("utf-8")).decode("ascii")
         rows.append(
-            f"<tr><td><a href='/results-ui/{b64}'>{it['name']}</a></td><td>{it['created_at']}</td><td>{it['kind']}</td></tr>"
+            f"<tr><td><a href='/results-ui/id/{it['id']}'>{it.get('name','result.md')}</a></td>"
+            f"<td>{it['created_at']}</td><td>{it.get('kind','')}</td><td>{it.get('provider','')}</td><td>{it.get('lang','')}</td><td>{it.get('topic','')}</td></tr>"
         )
     html = (
         "<html><head><meta charset='utf-8'><title>Results</title>"
@@ -405,35 +524,64 @@ async def results_ui():
         "th{background:#111;color:#eee}tr:nth-child(even){background:#1a1a1a;color:#eee}a{color:#6cf}</style></head><body>"
         "<h1>Generated Results</h1>"
         f"<p>Total: {len(items)}</p>"
-        "<table><thead><tr><th>Name</th><th>Created</th><th>Kind</th></tr></thead><tbody>"
-        + ("".join(rows) or "<tr><td colspan='3'>No results yet</td></tr>")
+        "<table><thead><tr><th>Name</th><th>Created</th><th>Kind</th><th>Provider</th><th>Lang</th><th>Topic</th></tr></thead><tbody>"
+        + ("".join(rows) or "<tr><td colspan='6'>No results yet</td></tr>")
         + "</tbody></table>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
 
 
-@app.get("/results-ui/{b64}", response_class=HTMLResponse)
-async def result_view_ui(b64: str):
+@app.get("/results/{res_id}")
+async def get_result(res_id: int):
+    if SessionLocal is None:
+        # Sync fallback
+        try:
+            from sqlalchemy import create_engine, text as _sqtext
+            from urllib.parse import urlsplit, urlunsplit, parse_qs
+            db_url = os.getenv("DB_URL", "").strip()
+            if not db_url:
+                return {"error": "db is not configured"}
+            sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql://", "postgresql+psycopg2://")
+            parts = urlsplit(sync_url)
+            qs = parse_qs(parts.query or "")
+            base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
+            cargs = {"sslmode": "require"} if not any(k.lower()=="sslmode" for k in qs.keys()) else {}
+            eng = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
+            table = ResultDoc.__tablename__
+            with eng.connect() as conn:
+                res = conn.execute(_sqtext(f"SELECT id, path, content, created_at, kind, provider, lang, topic FROM {table} WHERE id=:id"), {"id": int(res_id)})
+                row = res.fetchone()
+            try:
+                eng.dispose()
+            except Exception:
+                pass
+            if not row:
+                return {"error": "not found"}
+            rid, rpath, rcont, rts, rkind, rprov, rlang, rtopic = row
+            return {"id": rid, "path": rpath, "content": rcont or "", "created_at": str(rts) if rts else "", "kind": rkind, "provider": rprov, "lang": rlang, "topic": rtopic}
+        except Exception as e:
+            return {"error": f"db not configured: {e}"}
     try:
-        path_str = base64.urlsafe_b64decode(b64.encode("ascii")).decode("utf-8")
-    except Exception:
-        return HTMLResponse("<h1>Bad request</h1>", status_code=400)
-    p = Path(path_str)
-    # Security: ensure under output/
-    try:
-        if not p.resolve().is_relative_to(Path("output").resolve()):
-            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
-    except Exception:
-        # Python <3.9 compatibility not needed; fallback
-        root = str(Path("output").resolve())
-        if root not in str(p.resolve()):
-            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
-    if not p.exists():
-        return HTMLResponse("<h1>Not found</h1>", status_code=404)
-    content = p.read_text(encoding="utf-8", errors="ignore")
-    title = p.name
-    # Simple Markdown render (result already Markdown)
+        async with SessionLocal() as s:
+            from sqlalchemy import select
+            res = await s.execute(select(ResultDoc).where(ResultDoc.id == res_id))
+            row = res.scalar_one_or_none()
+            if row is None:
+                return {"error": "not found"}
+            return {"id": row.id, "path": row.path, "content": row.content or "", "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
+    except Exception as e:
+        return {"error": f"database error: {e}"}
+
+
+@app.get("/results-ui/id/{res_id}", response_class=HTMLResponse)
+async def result_view_ui_id(res_id: int):
+    # Fetch initial content
+    data = await get_result(res_id)
+    content = data.get("content", "") if isinstance(data, dict) else ""
+    title = f"Result #{res_id}"
+    from html import escape as _esc
+    _raw = (_esc(content or "").replace("</textarea>", "&lt;/textarea&gt;") if content else "")
     html = (
         "<html><head><meta charset='utf-8'><title>Result View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
@@ -443,8 +591,13 @@ async def result_view_ui(b64: str):
         "h1,h2,h3{margin:0.6em 0 0.3em;font-weight:700}pre{white-space:pre-wrap;word-wrap:break-word}"
         "</style></head><body>"
         f"<header><a href='/results-ui'>← Back</a><div>{title}</div></header>"
-        "<main><div id='content'></div></main>"
-        "<script>const txt=`" + content.replace("`", "\`") + "`;document.getElementById('content').innerHTML=marked.parse(txt);</script>"
+        "<main>"
+        "<div id='content'></div>"
+        f"<textarea id='raw' style='display:none'>{_raw}</textarea>"
+        "</main>"
+        f"<script>const RES_ID={res_id};let text=(document.getElementById('raw')?document.getElementById('raw').value:'');"
+        "function render(md){let html='';try{html=(window.marked?window.marked.parse(md):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=md.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>';}document.getElementById('content').innerHTML=html;}"
+        "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}}catch(_){}}refresh();</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)

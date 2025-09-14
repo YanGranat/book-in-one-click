@@ -587,8 +587,9 @@ def generate_post(
     save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=full_log_content)
     # Record log and result in DB if available
     try:
-        from server.db import SessionLocal, JobLog, ResultDoc
-        if SessionLocal is not None:
+        from server.db import JobLog, ResultDoc
+        # Gate by DB_URL presence, not by async SessionLocal state
+        if os.getenv("DB_URL", "").strip():
             # Use sync approach to avoid event loop conflicts in thread executor
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
@@ -597,16 +598,17 @@ def generate_post(
             # Create sync connection from same DB_URL
             db_url = os.getenv("DB_URL", "")
             if db_url:
-                # Convert async URL to sync with psycopg2 driver
-                sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+                # Convert async URL to sync with psycopg2 driver (strip query params)
+                sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql://", "postgresql+psycopg2://")
                 parts = urlsplit(sync_url)
-                qs = parse_qs(parts.query)
-                base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, parts.fragment))
+                qs = parse_qs(parts.query or "")
+                # psycopg2 не принимает нестандартные query-параметры (например, ssl=true)
+                base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
                 cargs = {}
                 # Ensure SSL for psycopg2 if not explicitly set
                 if "sslmode" not in {k.lower() for k in qs.keys()}:
                     cargs["sslmode"] = "require"
-                sync_engine = create_engine(base_sync_url, connect_args=cargs)
+                sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
                 SyncSession = sessionmaker(sync_engine)
                 
                 with SyncSession() as s:
@@ -624,10 +626,16 @@ def generate_post(
                     except (ValueError, TypeError):
                         job_id = 0
                     # Store log content directly (avoid FS race/ephemeral issues)
+                    # 1) Persist JobLog first (transactionally)
                     jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=full_log_content)
-                    s.add(jl)
-                    s.flush()
-                    # Store final result document as well
+                    try:
+                        s.add(jl)
+                        s.flush()
+                        s.commit()
+                    except Exception as _e:
+                        s.rollback()
+                        print(f"[ERROR] JobLog commit failed: {_e}")
+                    # 2) Persist final ResultDoc independently (even if JobLog failed)
                     try:
                         rel_doc = str(filepath.relative_to(Path.cwd())) if filepath.is_absolute() else str(filepath)
                     except ValueError:
@@ -641,13 +649,21 @@ def generate_post(
                         lang=lang,
                         content=final_content,
                     )
-                    s.add(rd)
-                    s.flush()
-                    s.commit()
                     try:
-                        print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(full_log_content)}; Result id pending")
+                        s.add(rd)
+                        s.flush()
+                        s.commit()
+                    except Exception as _e:
+                        s.rollback()
+                        print(f"[ERROR] ResultDoc commit failed: {_e}")
+                    try:
+                        print(f"[INFO] Log recorded in DB: id={getattr(jl,'id',None)}, path={log_path}, content_size={len(full_log_content)}")
                     except Exception:
                         pass
+                try:
+                    sync_engine.dispose()
+                except Exception:
+                    pass
             else:
                 print(f"[INFO] No DB_URL configured, log saved to filesystem only: {log_path}")
         else:
