@@ -275,7 +275,9 @@ async def log_view_ui(log_id: int):
         "const TAGS=['input','topic','lang','post','critique_json'];"
         "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
         "const escaped=escapeOutsideCode(text);"
-        "document.getElementById('content').innerHTML = marked.parse(escaped);</script>"
+        "let html='';try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}"
+        "if(!html||html.trim()===''){const safe=escaped.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>'; }"
+        "document.getElementById('content').innerHTML = html;</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
