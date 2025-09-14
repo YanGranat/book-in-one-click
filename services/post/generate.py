@@ -183,9 +183,8 @@ def generate_post(
         f"<lang>{(lang or 'auto').strip()}</lang>\n"
         f"</input>"
     )
-    # Log writer prompt and input for transparency
-    log("✍️ Writer · System Prompt", f"```md\n{instructions}\n```")
-    log("✍️ Writer · Input", f"```xml\n{user_message_local_writer}\n```")
+    # Log writer input for transparency
+    log("✍️ Writer · Input", f"{user_message_local_writer}")
     content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("writer_output", content[:2000])
     if not content:
@@ -537,9 +536,8 @@ def generate_post(
                 f"<critique_json>\n{report.model_dump_json()}\n</critique_json>\n"
                 "</input>"
             )
-            # Log rewrite prompt and critique for transparency
-            log("🛠️ Rewrite · Prompt", f"```md\n{p_rewrite[:4000]}\n```")
-            log("🛠️ Rewrite · Critique JSON", f"```json\n{report.model_dump_json()}\n```")
+            # Log rewrite critique for transparency
+            log("🛠️ Rewrite · Critique JSON", f"{report.model_dump_json()}")
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
             log("🛠️ Rewrite · Output", final_content[:4000])
 
@@ -552,7 +550,7 @@ def generate_post(
         f"<post>\n{final_content}\n</post>\n"
         "</input>"
     )
-    log("✨ Refine · Prompt", f"```md\n{p_refine[:4000]}\n```")
+    # Skip refine prompt logging
     final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
     log("✨ Refine · Output", final_content[:4000])
 
