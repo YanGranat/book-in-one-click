@@ -363,6 +363,26 @@ def generate_post(
             p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
             plan = run_json_with_provider(p_ident, f"<post>\n{content}\n</post>", ResearchPlan, speed="fast")
             points = plan.points or []
+            # Fallback: if Gemini/Claude produced empty plan, retry on heavy model with strict JSON requirement and min points
+            if not points:
+                try:
+                    strict_ident = (
+                        p_ident
+                        + "\n\n<requirements>\n"
+                        + "- Верни строго JSON-объект вида {\"points\":[...]}.\n"
+                        + "- Минимум 3 пункта (p01, p02, p03), даже если текст общий.\n"
+                        + "- Пункты атомарные, конкретные (факт/цифра/датировка/причинно-следственная связь).\n"
+                        + "</requirements>\n"
+                    )
+                    plan_heavy = run_json_with_provider(strict_ident, f"<post>\n{content}\n</post>", ResearchPlan, speed="heavy")
+                    points = plan_heavy.points or []
+                    try:
+                        log("🔎 Fact-check · Plan (fallback)", f"points={len(points)}")
+                    except Exception:
+                        pass
+                except Exception:
+                    # keep empty; downstream will no-op
+                    points = []
             if factcheck_max_items and factcheck_max_items > 0:
                 points = points[: factcheck_max_items]
             try:
