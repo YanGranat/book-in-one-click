@@ -317,6 +317,24 @@ def generate_post(
                 if _norm_key(cls.__name__) == "sufficiencydecision":
                     if isinstance(out.get("done"), str):
                         out["done"] = out["done"].strip().lower() in {"true", "yes", "1"}
+                    if "confidence" in out:
+                        out["confidence"] = _to_confidence(out.get("confidence"))
+                if _norm_key(cls.__name__) == "recommendation":
+                    act = out.get("action")
+                    if isinstance(act, str):
+                        a = act.strip().lower()
+                        syn = {
+                            "retain": "keep",
+                            "keep": "keep",
+                            "ok": "keep",
+                            "clarify": "clarify",
+                            "edit": "rewrite",
+                            "rewrite": "rewrite",
+                            "reword": "rewrite",
+                            "remove": "remove",
+                            "delete": "remove",
+                        }
+                        out["action"] = syn.get(a, a)
                 if _norm_key(cls.__name__) == "researchiterationnote":
                     if isinstance(out.get("queries"), str):
                         raw = out["queries"].replace("\r", "\n")
