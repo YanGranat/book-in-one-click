@@ -604,8 +604,17 @@ def generate_post(
                     # Import sync model
                     from server.db import JobLog
                     # Store relative path for portability
-                    rel_path = str(log_path.relative_to(Path.cwd())) if log_path.is_absolute() else str(log_path)
-                    jl = JobLog(job_id=int((job_meta or {}).get("job_id", 0)), kind="md", path=rel_path)
+                    try:
+                        rel_path = str(log_path.relative_to(Path.cwd())) if log_path.is_absolute() else str(log_path)
+                    except ValueError:
+                        # If relative_to fails, use absolute path
+                        rel_path = str(log_path)
+                    # Safely convert job_id to int
+                    try:
+                        job_id = int((job_meta or {}).get("job_id", 0))
+                    except (ValueError, TypeError):
+                        job_id = 0
+                    jl = JobLog(job_id=job_id, kind="md", path=rel_path)
                     s.add(jl)
                     s.commit()
                     print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}")

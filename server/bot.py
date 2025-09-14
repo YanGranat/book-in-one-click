@@ -316,15 +316,15 @@ def create_dispatcher() -> Dispatcher:
             # Admins generate for free
             if message.from_user and message.from_user.id in ADMIN_IDS:
                 charged = True
-            if SessionLocal is not None:
+            if SessionLocal is not None and message.from_user:
                 async with SessionLocal() as session:
-                    user = await ensure_user_with_credits(session, message.from_user.id)  # type: ignore
+                    user = await ensure_user_with_credits(session, message.from_user.id)
                     ok, remaining = await charge_credits(session, user, 1, reason="post")
                     if ok:
                         await session.commit()
                         charged = True
-            if not charged:
-                ok, remaining = await charge_credits_kv(message.from_user.id, 1)  # type: ignore
+            if not charged and message.from_user:
+                ok, remaining = await charge_credits_kv(message.from_user.id, 1)
                 if not ok:
                     warn = "Недостаточно кредитов" if ui_lang == "ru" else "Insufficient credits"
                     await message.answer(warn, reply_markup=ReplyKeyboardRemove())
@@ -427,15 +427,15 @@ def create_dispatcher() -> Dispatcher:
             # Admins generate for free
             if message.from_user and message.from_user.id in ADMIN_IDS:
                 charged = True
-            if SessionLocal is not None:
+            if SessionLocal is not None and message.from_user:
                 async with SessionLocal() as session:
-                    user = await ensure_user_with_credits(session, message.from_user.id)  # type: ignore
+                    user = await ensure_user_with_credits(session, message.from_user.id)
                     ok, remaining = await charge_credits(session, user, 1, reason="post")
                     if ok:
                         await session.commit()
                         charged = True
-            if not charged:
-                ok, remaining = await charge_credits_kv(message.from_user.id, 1)  # type: ignore
+            if not charged and message.from_user:
+                ok, remaining = await charge_credits_kv(message.from_user.id, 1)
                 if not ok:
                     warn = "Недостаточно кредитов" if ui_lang == "ru" else "Insufficient credits"
                     await message.answer(warn, reply_markup=ReplyKeyboardRemove())
