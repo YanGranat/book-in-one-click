@@ -592,7 +592,6 @@ def generate_post(
             # Use sync approach to avoid event loop conflicts in thread executor
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
-            import os
             
             # Create sync connection from same DB_URL
             db_url = os.getenv("DB_URL", "")
