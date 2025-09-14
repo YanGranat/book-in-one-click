@@ -16,7 +16,7 @@ from services.post.generate import generate_post
 from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
-from .kv import set_provider, get_provider
+from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled
 
 
 def _load_env():
@@ -32,6 +32,7 @@ class GenerateStates(StatesGroup):
     ChoosingLanguage = State()
     ChoosingGenLanguage = State()
     ChoosingProvider = State()
+    ChoosingLogs = State()
     WaitingTopic = State()
     ChoosingFactcheck = State()
     ChoosingDepth = State()
@@ -64,6 +65,12 @@ def build_genlang_keyboard() -> ReplyKeyboardMarkup:
 def build_provider_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("OpenAI"), KeyboardButton("Gemini"), KeyboardButton("Claude"))
+    return kb
+
+
+def build_logs_keyboard() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("Включить"), KeyboardButton("Отключить"))
     return kb
 
 
@@ -212,6 +219,39 @@ def create_dispatcher() -> Dispatcher:
         )
         await GenerateStates.ChoosingLanguage.set()
 
+    @dp.message_handler(commands=["logs"])  # type: ignore
+    async def cmd_logs(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Отправлять логи генерации?" if ui_lang == "ru" else "Send generation logs?"
+        await message.answer(prompt, reply_markup=build_logs_keyboard())
+        await GenerateStates.ChoosingLogs.set()
+
+    @dp.message_handler(state=GenerateStates.ChoosingLogs)  # type: ignore
+    async def choose_logs(message: types.Message, state: FSMContext):
+        text = (message.text or "").strip().lower()
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        
+        if text.startswith("включ") or text.startswith("enable"):
+            enabled = True
+            msg = "Логи включены." if ui_lang == "ru" else "Logs enabled."
+        elif text.startswith("отключ") or text.startswith("disable"):
+            enabled = False
+            msg = "Логи отключены." if ui_lang == "ru" else "Logs disabled."
+        else:
+            prompt = "Выберите: Включить или Отключить." if ui_lang == "ru" else "Choose: Enable or Disable."
+            await message.answer(prompt, reply_markup=build_logs_keyboard())
+            return
+            
+        try:
+            if message.from_user:
+                await set_logs_enabled(message.from_user.id, enabled)
+        except Exception:
+            pass
+        await message.answer(msg, reply_markup=ReplyKeyboardRemove())
+        await state.finish()
+
     @dp.message_handler(commands=["cancel"])  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
         data = await state.get_data()
@@ -329,9 +369,27 @@ def create_dispatcher() -> Dispatcher:
                         job_meta=job_meta,
                     ),
                 )
+            # Send main result
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if ui_lang == "ru" else f"Done: {path.name}"
                 await message.answer_document(f, caption=cap)
+            
+            # Send logs if enabled
+            try:
+                if message.from_user:
+                    logs_enabled = await get_logs_enabled(message.from_user.id)
+                    if logs_enabled:
+                        # Find corresponding log file
+                        log_pattern = f"{path.stem.replace('_post', '_log')}_*.md"
+                        import glob
+                        log_files = glob.glob(str(path.parent / log_pattern))
+                        if log_files:
+                            log_path = Path(log_files[0])  # Take first match
+                            with open(log_path, "rb") as log_f:
+                                log_cap = f"Лог: {log_path.name}" if ui_lang == "ru" else f"Log: {log_path.name}"
+                                await message.answer_document(log_f, caption=log_cap)
+            except Exception:
+                pass
         except Exception as e:
             err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
             await message.answer(err)
@@ -425,9 +483,27 @@ def create_dispatcher() -> Dispatcher:
                         job_meta=job_meta,
                     ),
                 )
+            # Send main result
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if ui_lang == "ru" else f"Done: {path.name}"
                 await message.answer_document(f, caption=cap)
+            
+            # Send logs if enabled
+            try:
+                if message.from_user:
+                    logs_enabled = await get_logs_enabled(message.from_user.id)
+                    if logs_enabled:
+                        # Find corresponding log file
+                        log_pattern = f"{path.stem.replace('_post', '_log')}_*.md"
+                        import glob
+                        log_files = glob.glob(str(path.parent / log_pattern))
+                        if log_files:
+                            log_path = Path(log_files[0])  # Take first match
+                            with open(log_path, "rb") as log_f:
+                                log_cap = f"Лог: {log_path.name}" if ui_lang == "ru" else f"Log: {log_path.name}"
+                                await message.answer_document(log_f, caption=log_cap)
+            except Exception:
+                pass
         except Exception as e:
             err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
             await message.answer(err)
