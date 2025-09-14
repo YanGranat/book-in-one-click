@@ -250,6 +250,8 @@ async def log_view_ui(log_id: int):
         return HTMLResponse(f"<h1>Not found</h1><p>{data['error']}</p>", status_code=404)
     content = data.get("content", "")
     meta = _extract_meta_from_text(content)
+    if not content:
+        return HTMLResponse("<h1>Empty</h1><p>No content stored for this log.</p>", status_code=200)
     title = Path(data.get("path", "")).name
     import base64
     b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")

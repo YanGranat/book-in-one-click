@@ -583,7 +583,8 @@ def generate_post(
         f"- topic: {topic}\n"
         f"- factcheck: {bool(factcheck)}\n"
     )
-    save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=header + "\n".join(log_lines))
+    full_log_content = header + "\n".join(log_lines)
+    save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=full_log_content)
     # Record log path in DB if available
     try:
         from server.db import SessionLocal, JobLog
@@ -622,15 +623,8 @@ def generate_post(
                         job_id = int((job_meta or {}).get("job_id", 0))
                     except (ValueError, TypeError):
                         job_id = 0
-                    # Read log content to store in DB
-                    log_content = ""
-                    try:
-                        with open(log_path, "r", encoding="utf-8") as f:
-                            log_content = f.read()
-                    except Exception:
-                        pass
-                    
-                    jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=log_content)
+                    # Store log content directly (avoid FS race/ephemeral issues)
+                    jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=full_log_content)
                     s.add(jl)
                     s.commit()
                     print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(log_content)}")
