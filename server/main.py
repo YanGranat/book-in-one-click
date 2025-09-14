@@ -244,12 +244,14 @@ async def logs_ui():
 
 @app.get("/logs-ui/{log_id}", response_class=HTMLResponse)
 async def log_view_ui(log_id: int):
-    # Try to get path for title; content will be fetched client-side
+    # Try to get initial content for instant render and title
     title = f"Log #{log_id}"
+    initial_content = ""
     try:
         data = await get_log(log_id)
         if "path" in data and data["path"]:
             title = Path(data["path"]).name
+        initial_content = data.get("content", "") or ""
     except Exception:
         pass
     html = (
@@ -272,11 +274,15 @@ async def log_view_ui(log_id: int):
         "const TAGS=['input','topic','lang','post','critique_json'];"
         "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
         "function extractMeta(md){const out={};const lines=md.split('\n');for(let i=0;i<Math.min(lines.length,80);i++){const line=lines[i].trim();if(line.startsWith('- provider:')){out.provider=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- lang:')){out.lang=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- topic:')){out.topic=line.split(':').slice(1).join(':').trim();}}return out;}"
-        "async function load(){try{const r=await fetch('/logs/'+LOG_ID);const j=await r.json();let text=j.content||'';const escaped=escapeOutsideCode(text);"
+        f"let text={repr(initial_content)};"
+        "function render(md){const escaped=escapeOutsideCode(md||'');"
         "let html='';try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}"
         "if(!html||html.trim()===''){const safe=escaped.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>'; }"
-        "const m=extractMeta(text);const metaEl=document.getElementById('meta');if(metaEl){metaEl.textContent=`provider=${m.provider||'?'} | lang=${m.lang||'?'}`;}"
-        "document.getElementById('content').innerHTML = html;}catch(_){document.getElementById('content').innerHTML='<p style=opacity:.7>Load error</p>';}}load();</script>"
+        "const m=extractMeta(md||'');const metaEl=document.getElementById('meta');if(metaEl){metaEl.textContent=`provider=${m.provider||'?'} | lang=${m.lang||'?'}`;}"
+        "document.getElementById('content').innerHTML = html;}"
+        "render(text);"
+        "async function refresh(){try{const r=await fetch('/logs/'+LOG_ID,{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}}catch(_){/* ignore */}}"
+        "refresh();</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
