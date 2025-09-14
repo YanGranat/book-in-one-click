@@ -46,6 +46,7 @@ def generate_post(
     output_subdir: str = "post",
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
+    return_log_path: bool = False,
 ) -> Path:
     """
     Generate a popular science post and save it to output/<output_subdir>/.
@@ -568,7 +569,7 @@ def generate_post(
     )
     # Save log sidecar .md and register in DB if available
     log_dir = ensure_output_dir(output_subdir)
-    log_path = next_available_filepath(log_dir, f"{safe_filename_base(topic)}_log", ".md")
+    log_path = next_available_filepath(log_dir, f"{safe_filename_base(topic)}_log_{started_at.strftime('%Y%m%d_%H%M%S')}", ".md")
     finished_at = datetime.utcnow()
     duration_s = max(0.0, time.perf_counter() - started_perf)
     header = (
@@ -614,6 +615,8 @@ def generate_post(
     except Exception as e:
         print(f"[ERROR] Failed to record log in DB: {e}")
         print(f"[INFO] Log available on filesystem: {log_path}")
+    if return_log_path:
+        return log_path
     return filepath
 
 

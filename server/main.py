@@ -58,6 +58,7 @@ async def _startup():
             types.BotCommand(command="lang_generate", description="Gen Language / Язык генерации"),
             types.BotCommand(command="generate", description="Generate / Сгенерировать"),
             types.BotCommand(command="provider", description="Provider / Провайдер"),
+            types.BotCommand(command="logs", description="Logs / Логи генерации"),
             types.BotCommand(command="cancel", description="Cancel / Отмена"),
         ])
         try:
