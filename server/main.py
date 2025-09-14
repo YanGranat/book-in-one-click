@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 from datetime import datetime
 import asyncio
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, HTMLResponse
 from aiogram import types, Bot, Dispatcher
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
 
 from utils.env import load_env_from_root
 from .bot import create_dispatcher
@@ -194,8 +196,22 @@ def _extract_meta_from_text(md: str) -> dict:
     return meta
 
 
+# ----- Admin UI auth (HTTP Basic) -----
+_basic = HTTPBasic()
+
+def require_admin(creds: HTTPBasicCredentials = Depends(_basic)) -> bool:
+    user = os.getenv("ADMIN_UI_USER", "admin")
+    pwd = os.getenv("ADMIN_UI_PASSWORD", "")
+    if not pwd:
+        # Explicitly deny when password is not configured
+        raise HTTPException(status_code=503, detail="ADMIN_UI_PASSWORD not configured")
+    if secrets.compare_digest(creds.username, user) and secrets.compare_digest(creds.password, pwd):
+        return True
+    raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
+
+
 @app.get("/logs-ui", response_class=HTMLResponse)
-async def logs_ui():
+async def logs_ui(_: bool = Depends(require_admin)):
     # Reuse /logs data
     data = await list_logs()
     items = data.get("items", [])
@@ -216,26 +232,34 @@ async def logs_ui():
     html_rows = []
     for it in items:
         html_rows.append(
-            f"<tr><td>{it.get('id')}</td><td><a href='/logs-ui/{it.get('id')}'>{it.get('topic')}</a></td>"
-            f"<td>{it.get('created_at','')}</td><td>{it.get('kind','')}</td></tr>"
+            f"<tr>"
+            f"<td><input type='checkbox' class='sel' value='{it.get('id')}'></td>"
+            f"<td>{it.get('id')}</td>"
+            f"<td><a href='/logs-ui/{it.get('id')}'>{it.get('topic')}</a></td>"
+            f"<td>{it.get('created_at','')}</td>"
+            f"<td>{it.get('kind','')}</td>"
+            f"<td><button class='delBtn' data-id='{it.get('id')}'>Delete</button></td>"
+            f"</tr>"
         )
     html = (
         "<html><head><meta charset='utf-8'><title>Logs</title>"
         "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;padding:20px}"
         "table{border-collapse:collapse;width:100%}th,td{border:1px solid #333;padding:8px;text-align:left}"
-        "th{background:#111;color:#eee}tr:nth-child(even){background:#1a1a1a;color:#eee}a{color:#6cf}</style></head><body>"
+        "th{background:#111;color:#eee}tr:nth-child(even){background:#1a1a1a;color:#eee}a{color:#6cf}button{padding:4px 8px}</style></head><body>"
         "<h1>Generation Logs</h1>"
         f"<p>Total: {len(items)}</p>"
-        "<table><thead><tr><th>ID</th><th>Topic</th><th>Created</th><th>Kind</th></tr></thead><tbody>"
+        "<button id='delSel'>Delete selected</button>"
+        "<table><thead><tr><th></th><th>ID</th><th>Topic</th><th>Created</th><th>Kind</th><th>Action</th></tr></thead><tbody>"
         + ("".join(html_rows) or "<tr><td colspan='4'>No logs yet</td></tr>")
         + "</tbody></table>"
+        "<script>document.addEventListener('click',async(e)=>{if(e.target.matches('.delBtn')){const id=e.target.getAttribute('data-id');if(confirm('Delete log '+id+'?')){const r=await fetch('/logs/'+id,{method:'DELETE'});const j=await r.json();if(j&&j.ok){location.reload();}}}});document.getElementById('delSel').onclick=async()=>{const ids=[...document.querySelectorAll('.sel:checked')].map(x=>parseInt(x.value));if(!ids.length)return;if(!confirm('Delete '+ids.length+' logs?'))return;const r=await fetch('/logs/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const j=await r.json();if(j&&j.ok){location.reload();}};</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
 
 
 @app.get("/logs-ui/{log_id}", response_class=HTMLResponse)
-async def log_view_ui(log_id: int):
+async def log_view_ui(log_id: int, _: bool = Depends(require_admin)):
     # Try to get initial content for instant render and title
     title = f"Log #{log_id}"
     initial_content = ""
@@ -284,10 +308,7 @@ async def log_view_ui(log_id: int):
 
 
 @app.delete("/logs/{log_id}")
-async def delete_log_api(log_id: int, secret: str = ""):
-    # simple secret guard (reuse webhook secret)
-    if WEBHOOK_SECRET and secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def delete_log_api(log_id: int, _: bool = Depends(require_admin)):
     if SessionLocal is None:
         raise HTTPException(status_code=500, detail="DB is not configured")
     async with SessionLocal() as s:
@@ -300,9 +321,7 @@ async def delete_log_api(log_id: int, secret: str = ""):
 
 
 @app.post("/logs/purge")
-async def purge_logs(payload: dict, secret: str = ""):
-    if WEBHOOK_SECRET and secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
     if SessionLocal is None:
         raise HTTPException(status_code=500, detail="DB is not configured")
     ids = payload.get("ids") or []
