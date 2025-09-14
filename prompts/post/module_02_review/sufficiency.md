@@ -19,6 +19,7 @@
 
 <requirements>
 - Никаких эссе; чёткое решение.
+- Верни строго JSON объекта SufficiencyDecision без Markdown.
 </requirements>
 
 

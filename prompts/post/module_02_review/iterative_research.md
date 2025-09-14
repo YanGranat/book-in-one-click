@@ -18,6 +18,7 @@
 
 <requirements>
 - Строго соблюдай структуру; без пролонгированных рассуждений вне полей.
+- Верни строго JSON объекта ResearchIterationNote без Markdown.
 </requirements>
 
 

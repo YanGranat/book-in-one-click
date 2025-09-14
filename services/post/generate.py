@@ -172,15 +172,38 @@ def generate_post(
         # strip code fences if any
         if txt.strip().startswith("```") and txt.strip().endswith("```"):
             txt = "\n".join([line for line in txt.strip().splitlines()[1:-1]])
+
+        def _norm_key(s: str) -> str:
+            return "".join(ch for ch in (s or "").lower() if ch.isalnum())
+
+        def _unwrap(obj):
+            try:
+                # unwrap named root {"ClassName": {...}}
+                if isinstance(obj, dict):
+                    keys = list(obj.keys())
+                    cname = _norm_key(cls.__name__)
+                    if len(keys) == 1 and _norm_key(keys[0]) == cname and isinstance(obj[keys[0]], (dict, list)):
+                        obj = obj[keys[0]]
+                    # unwrap common wrappers when they are the only key
+                    for k in ("data", "output", "result", "response"):
+                        if isinstance(obj, dict) and list(obj.keys()) == [k] and isinstance(obj[k], (dict, list)):
+                            obj = obj[k]
+                return obj
+            except Exception:
+                return obj
+
         try:
             data = json.loads(txt)
+            data = _unwrap(data)
             return cls.model_validate(data)
         except Exception:
-            # try to find first json block
+            # try to find last json block at end of text
             import re
             m = re.search(r"\{[\s\S]*\}\s*$", txt)
             if m:
-                return cls.model_validate(json.loads(m.group(0)))
+                data2 = json.loads(m.group(0))
+                data2 = _unwrap(data2)
+                return cls.model_validate(data2)
             raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
 
     user_message_local_writer = (
@@ -361,7 +384,13 @@ def generate_post(
             _emit("factcheck:init")
             base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
             p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
-            plan = run_json_with_provider(p_ident, f"<post>\n{content}\n</post>", ResearchPlan, speed="fast")
+            plan = run_json_with_provider(
+                p_ident
+                + "\n\n<format>\nВерни строго JSON-объект ResearchPlan без пояснений.\n</format>\n",
+                f"<post>\n{content}\n</post>",
+                ResearchPlan,
+                speed="fast",
+            )
             points = plan.points or []
             # Fallback: if Gemini/Claude produced empty plan, retry on heavy model with strict JSON requirement and min points
             if not points:
