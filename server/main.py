@@ -513,10 +513,18 @@ async def results_ui():
     items = await _list_result_files()
     rows = []
     for it in items:
-        rows.append(
-            f"<tr><td><a href='/results-ui/id/{it['id']}'>{it.get('name','result.md')}</a></td>"
-            f"<td>{it['created_at']}</td><td>{it.get('kind','')}</td><td>{it.get('provider','')}</td><td>{it.get('lang','')}</td><td>{it.get('topic','')}</td></tr>"
-        )
+        try:
+            if "id" in it and isinstance(it.get("id"), int):
+                link = f"/results-ui/id/{it['id']}"
+            else:
+                b64 = base64.urlsafe_b64encode((it.get("path") or "").encode("utf-8")).decode("ascii")
+                link = f"/results-ui/file/{b64}"
+            rows.append(
+                f"<tr><td><a href='{link}'>{it.get('name','result.md')}</a></td>"
+                f"<td>{it.get('created_at','')}</td><td>{it.get('kind','')}</td><td>{it.get('provider','')}</td><td>{it.get('lang','')}</td><td>{it.get('topic','')}</td></tr>"
+            )
+        except Exception:
+            continue
     html = (
         "<html><head><meta charset='utf-8'><title>Results</title>"
         "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;padding:20px}"
@@ -598,6 +606,41 @@ async def result_view_ui_id(res_id: int):
         f"<script>const RES_ID={res_id};let text=(document.getElementById('raw')?document.getElementById('raw').value:'');"
         "function render(md){let html='';try{html=(window.marked?window.marked.parse(md):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=md.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>';}document.getElementById('content').innerHTML=html;}"
         "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}}catch(_){}}refresh();</script>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html)
+
+
+@app.get("/results-ui/file/{b64}", response_class=HTMLResponse)
+async def result_view_ui_file(b64: str):
+    try:
+        path_str = base64.urlsafe_b64decode(b64.encode("ascii")).decode("utf-8")
+    except Exception:
+        return HTMLResponse("<h1>Bad request</h1>", status_code=400)
+    p = Path(path_str)
+    # Security: ensure under output/
+    try:
+        if not p.resolve().is_relative_to(Path("output").resolve()):
+            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
+    except Exception:
+        root = str(Path("output").resolve())
+        if root not in str(p.resolve()):
+            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
+    if not p.exists():
+        return HTMLResponse("<h1>Not found</h1>", status_code=404)
+    content = p.read_text(encoding="utf-8", errors="ignore")
+    title = p.name
+    html = (
+        "<html><head><meta charset='utf-8'><title>Result View</title>"
+        "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
+        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.5;font-size:14px}"
+        "header{background:#111;color:#eee;padding:6px 10px;display:flex;gap:10px;align-items:center}"
+        "main{padding:10px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
+        "h1,h2,h3{margin:0.6em 0 0.3em;font-weight:700}pre{white-space:pre-wrap;word-wrap:break-word}"
+        "</style></head><body>"
+        f"<header><a href='/results-ui'>← Back</a><div>{title}</div></header>"
+        "<main><div id='content'></div></main>"
+        "<script>const txt=`" + content.replace("`", "\\`") + "`;document.getElementById('content').innerHTML=marked.parse(txt);</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
