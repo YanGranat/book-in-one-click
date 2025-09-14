@@ -98,6 +98,12 @@ def generate_post(
     log("🧭 Config", f"provider={_prov}\nlang={lang}")
 
     instructions = build_post_instructions(topic, lang)
+    # Defaults for variables referenced by nested functions in non-OpenAI factcheck path
+    pref: list[str] = []
+    p_iter: Optional[str] = None
+    p_suff: Optional[str] = None
+    p_rec: Optional[str] = None
+    p_qs: Optional[str] = None
 
     def _run_openai_with(system: str, user_message_local: str, model: Optional[str] = None) -> str:
         agent = Agent(
@@ -412,7 +418,7 @@ def generate_post(
                     f"<web_context>\n{web_ctx}\n</web_context>\n"
                     "</input>"
                 )
-                note = run_json_with_provider(p_iter, rr_input, ResearchIterationNote, speed="fast")
+                note = run_json_with_provider(p_iter or "", rr_input, ResearchIterationNote, speed="fast")
                 notes.append(note)
 
                 suff_input = (
@@ -421,7 +427,7 @@ def generate_post(
                     f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
                     "</input>"
                 )
-                decision = run_json_with_provider(p_suff, suff_input, SufficiencyDecision, speed="fast")
+                decision = run_json_with_provider(p_suff or "", suff_input, SufficiencyDecision, speed="fast")
                 if decision.done:
                     break
 
@@ -444,7 +450,7 @@ def generate_post(
 
             rr = _TmpReport(p.id, notes)
             rec = run_json_with_provider(
-                p_rec,
+                p_rec or "",
                 f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
                 Recommendation,
                 speed="fast",
