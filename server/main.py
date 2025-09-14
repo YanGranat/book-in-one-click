@@ -116,26 +116,30 @@ async def get_log(log_id: int):
             if row is None:
                 return {"error": "not found"}
             
-            try:
-                # Try multiple path strategies for compatibility
-                log_file_path = Path(row.path)
-                
-                # Strategy 1: Use path as-is if absolute and exists
-                if log_file_path.is_absolute() and log_file_path.exists():
-                    pass
-                # Strategy 2: Try relative to current working directory
-                elif not log_file_path.is_absolute():
-                    log_file_path = Path.cwd() / log_file_path
-                # Strategy 3: If absolute path doesn't exist, try just the filename in output/
-                else:
-                    filename = log_file_path.name
-                    log_file_path = Path("output") / "post" / filename
-                
-                with open(log_file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-            except Exception as e:
-                print(f"[ERROR] Cannot read log file {row.path}: {e}")
-                content = f"Error reading log file: {e}\n\nTried paths:\n- {row.path}\n- {Path.cwd() / row.path}\n- {Path('output') / 'post' / Path(row.path).name}"
+            # Use content from DB if available, fallback to file
+            if row.content:
+                content = row.content
+            else:
+                try:
+                    # Try multiple path strategies for compatibility
+                    log_file_path = Path(row.path)
+                    
+                    # Strategy 1: Use path as-is if absolute and exists
+                    if log_file_path.is_absolute() and log_file_path.exists():
+                        pass
+                    # Strategy 2: Try relative to current working directory
+                    elif not log_file_path.is_absolute():
+                        log_file_path = Path.cwd() / log_file_path
+                    # Strategy 3: If absolute path doesn't exist, try just the filename in output/
+                    else:
+                        filename = log_file_path.name
+                        log_file_path = Path("output") / "post" / filename
+                    
+                    with open(log_file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except Exception as e:
+                    print(f"[ERROR] Cannot read log file {row.path}: {e}")
+                    content = f"Error reading log file: {e}\n\nTried paths:\n- {row.path}\n- {Path.cwd() / row.path}\n- {Path('output') / 'post' / Path(row.path).name}"
             
             return {
                 "id": row.id,

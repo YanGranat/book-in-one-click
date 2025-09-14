@@ -614,10 +614,18 @@ def generate_post(
                         job_id = int((job_meta or {}).get("job_id", 0))
                     except (ValueError, TypeError):
                         job_id = 0
-                    jl = JobLog(job_id=job_id, kind="md", path=rel_path)
+                    # Read log content to store in DB
+                    log_content = ""
+                    try:
+                        with open(log_path, "r", encoding="utf-8") as f:
+                            log_content = f.read()
+                    except Exception:
+                        pass
+                    
+                    jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=log_content)
                     s.add(jl)
                     s.commit()
-                    print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}")
+                    print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(log_content)}")
             else:
                 print(f"[INFO] No DB_URL configured, log saved to filesystem only: {log_path}")
         else:

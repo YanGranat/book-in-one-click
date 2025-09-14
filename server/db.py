@@ -57,6 +57,7 @@ class JobLog(Base):
     job_id: Mapped[int] = mapped_column(Integer, index=True)
     kind: Mapped[str] = mapped_column(String(32), default="md")  # md|txt|json
     path: Mapped[str] = mapped_column(String(512))
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Store log content directly
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
