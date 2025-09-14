@@ -627,7 +627,7 @@ def generate_post(
                     jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=full_log_content)
                     s.add(jl)
                     s.commit()
-                    print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(log_content)}")
+                    print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(full_log_content)}")
             else:
                 print(f"[INFO] No DB_URL configured, log saved to filesystem only: {log_path}")
         else:
