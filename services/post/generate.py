@@ -628,10 +628,17 @@ def generate_post(
                     # Store log content directly (avoid FS race/ephemeral issues)
                     # 1) Persist JobLog first (transactionally)
                     jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=full_log_content)
+                    result_job_id = job_id
                     try:
                         s.add(jl)
                         s.flush()
                         s.commit()
+                        try:
+                            # Prefer linking ResultDoc to the saved JobLog id for cascade delete
+                            if getattr(jl, "id", None):
+                                result_job_id = int(jl.id)
+                        except Exception:
+                            pass
                     except Exception as _e:
                         s.rollback()
                         print(f"[ERROR] JobLog commit failed: {_e}")
@@ -641,7 +648,7 @@ def generate_post(
                     except ValueError:
                         rel_doc = str(filepath)
                     rd = ResultDoc(
-                        job_id=job_id,
+                        job_id=result_job_id,
                         kind=output_subdir,
                         path=rel_doc,
                         topic=topic,

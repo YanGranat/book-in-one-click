@@ -598,6 +598,19 @@ async def get_result(res_id: int):
 async def result_view_ui_id(res_id: int):
     # Fetch initial content
     data = await get_result(res_id)
+    # Hide incognito docs from UI
+    try:
+        if isinstance(data, dict) and data.get("error") is None:
+            # need DB check for hidden flag
+            if SessionLocal is not None:
+                async with SessionLocal() as s:
+                    from sqlalchemy import select
+                    res = await s.execute(select(ResultDoc).where(ResultDoc.id == res_id))
+                    row = res.scalar_one_or_none()
+                    if row is not None and getattr(row, "hidden", 0) == 1:
+                        return HTMLResponse("<h1>Not found</h1>", status_code=404)
+    except Exception:
+        pass
     content = data.get("content", "") if isinstance(data, dict) else ""
     title = f"Result #{res_id}"
     from html import escape as _esc
