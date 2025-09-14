@@ -595,8 +595,8 @@ def generate_post(
             # Create sync connection from same DB_URL
             db_url = os.getenv("DB_URL", "")
             if db_url:
-                # Convert async URL to sync (preserve query params)
-                sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+                # Convert async URL to sync with psycopg2 driver
+                sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
                 sync_engine = create_engine(sync_url)
                 SyncSession = sessionmaker(sync_engine)
                 
