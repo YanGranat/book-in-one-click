@@ -568,7 +568,7 @@ def generate_post(
     )
     # Save log sidecar .md and register in DB if available
     log_dir = ensure_output_dir(output_subdir)
-    log_path = next_available_filepath(log_dir, f"{safe_filename_base(topic)}_log_{started_at.strftime('%Y%m%d_%H%M%S')}", ".md")
+    log_path = log_dir / f"{safe_filename_base(topic)}_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
     finished_at = datetime.utcnow()
     duration_s = max(0.0, time.perf_counter() - started_perf)
     header = (
@@ -603,7 +603,9 @@ def generate_post(
                 with SyncSession() as s:
                     # Import sync model
                     from server.db import JobLog
-                    jl = JobLog(job_id=int((job_meta or {}).get("job_id", 0)), kind="md", path=str(log_path))
+                    # Store relative path for portability
+                    rel_path = str(log_path.relative_to(Path.cwd())) if log_path.is_absolute() else str(log_path)
+                    jl = JobLog(job_id=int((job_meta or {}).get("job_id", 0)), kind="md", path=rel_path)
                     s.add(jl)
                     s.commit()
                     print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}")

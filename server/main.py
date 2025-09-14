@@ -100,29 +100,37 @@ async def list_logs():
         except Exception as e:
             print(f"[ERROR] DB read failed, falling back to filesystem: {e}")
     
-    # If DB failed or no DB configured, read from filesystem
-    if not items:
-        base = Path("output")
-        files = []
-        if base.exists():
-            # Find both old format (*_log.md) and new format (*_log_YYYYMMDD_HHMMSS.md)
-            files.extend(base.glob("**/*_log.md"))
-            files.extend(base.glob("**/*_log_*.md"))
-        files = list(set(files))  # Remove duplicates
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        for idx, p in enumerate(files, start=1):
+    # Always check filesystem for additional logs (old logs may not be in DB)
+    base = Path("output")
+    files = []
+    if base.exists():
+        # Find both old format (*_log.md) and new format (*_log_YYYYMMDD_HHMMSS.md)
+        files.extend(base.glob("**/*_log.md"))
+        files.extend(base.glob("**/*_log_*.md"))
+    files = list(set(files))  # Remove duplicates
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    
+    # Add filesystem logs that aren't already in DB
+    db_paths = {item.get("path", "") for item in items}
+    fs_id_start = max((item.get("id", 0) for item in items), default=0) + 1
+    for idx, p in enumerate(files):
+        rel_path = str(p.relative_to(Path.cwd())) if p.is_absolute() else str(p)
+        if rel_path not in db_paths and str(p) not in db_paths:
             try:
                 ts = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
             except Exception:
                 ts = ""
             items.append({
-                "id": idx,
+                "id": fs_id_start + idx,
                 "job_id": 0,
                 "kind": "md",
                 "path": str(p),
                 "created_at": ts,
                 "source": "fs",
             })
+    
+    # Re-sort all items by creation time
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     
     return {"items": items}
 
@@ -138,10 +146,15 @@ async def get_log(log_id: int):
                 row = res.scalar_one_or_none()
                 if row is not None:
                     try:
-                        with open(row.path, "r", encoding="utf-8") as f:
+                        # Try relative path first, then absolute
+                        log_file_path = Path(row.path)
+                        if not log_file_path.is_absolute():
+                            log_file_path = Path.cwd() / log_file_path
+                        with open(log_file_path, "r", encoding="utf-8") as f:
                             content = f.read()
-                    except Exception:
-                        content = ""
+                    except Exception as e:
+                        print(f"[ERROR] Cannot read log file {row.path}: {e}")
+                        content = f"Error reading log file: {e}"
                     return {
                         "id": row.id,
                         "job_id": row.job_id,
@@ -320,7 +333,7 @@ async def log_view_ui(log_id: int):
         f"<script>const b64='{b64}';"
         "const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}"
         "const text=new TextDecoder('utf-8').decode(bytes);"
-        "const escaped=text.replace(/</g,'&lt;').replace(/>/g,'&gt;');"
+        "const escaped=text.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');"
         "document.getElementById('content').innerHTML = marked.parse(escaped);</script>"
         "</body></html>"
     )
