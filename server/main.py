@@ -470,56 +470,35 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
 # ------------------- Results (final outputs on filesystem) -------------------
 
 async def _list_result_files() -> list[dict]:
-    # Prefer DB (ResultDoc), fallback to filesystem if empty
+    # DB-only results (no filesystem fallback)
     items: list[dict] = []
-    if SessionLocal is not None:
-        try:
-            async with SessionLocal() as s:
-                from sqlalchemy import select
-                from sqlalchemy import or_
-                res = await s.execute(
-                    select(ResultDoc)
-                    .where(or_(ResultDoc.hidden == 0, ResultDoc.hidden.is_(None)))
-                    .order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc())
-                )
-                rows = res.scalars().all()
-                for r in rows:
-                    items.append({
-                        "id": r.id,
-                        "path": r.path,
-                        "name": Path(r.path).name,
-                        "created_at": str(r.created_at),
-                        "kind": r.kind,
-                        "topic": getattr(r, "topic", "") or "",
-                        "provider": getattr(r, "provider", "") or "",
-                        "lang": getattr(r, "lang", "") or "",
-                    })
-        except Exception as e:
-            print(f"[ERROR] results db read failed: {e}")
-            items = []
-    if items:
+    if SessionLocal is None:
         return items
-    # Fallback: scan filesystem
-    fs_items: list[dict] = []
-    root = Path("output")
-    if not root.exists():
-        return fs_items
-    for p in root.rglob("*.md"):
-        if "_log_" in p.name or p.name.endswith("_log.md"):
-            continue
-        try:
-            stat = p.stat()
-            created = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-            fs_items.append({
-                "path": str(p),
-                "name": p.name,
-                "created_at": created,
-                "kind": p.parent.name,
-            })
-        except Exception:
-            continue
-    fs_items.sort(key=lambda x: x["created_at"], reverse=True)
-    return fs_items
+    try:
+        async with SessionLocal() as s:
+            from sqlalchemy import select
+            from sqlalchemy import or_
+            res = await s.execute(
+                select(ResultDoc)
+                .where(or_(ResultDoc.hidden == 0, ResultDoc.hidden.is_(None)))
+                .order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc())
+            )
+            rows = res.scalars().all()
+            for r in rows:
+                items.append({
+                    "id": r.id,
+                    "path": r.path,
+                    "name": Path(r.path).name,
+                    "created_at": str(r.created_at),
+                    "kind": r.kind,
+                    "topic": getattr(r, "topic", "") or "",
+                    "provider": getattr(r, "provider", "") or "",
+                    "lang": getattr(r, "lang", "") or "",
+                })
+    except Exception as e:
+        print(f"[ERROR] results db read failed: {e}")
+        items = []
+    return items
 
 
 @app.get("/results")
@@ -532,18 +511,12 @@ async def results_ui():
     items = await _list_result_files()
     rows = []
     for it in items:
-        try:
-            if "id" in it and isinstance(it.get("id"), int):
-                link = f"/results-ui/id/{it['id']}"
-            else:
-                b64 = base64.urlsafe_b64encode((it.get("path") or "").encode("utf-8")).decode("ascii")
-                link = f"/results-ui/file/{b64}"
+        if "id" in it and isinstance(it.get("id"), int):
+            link = f"/results-ui/id/{it['id']}"
             rows.append(
                 f"<tr><td><a href='{link}'>{it.get('name','result.md')}</a></td>"
                 f"<td>{it.get('created_at','')}</td><td>{it.get('kind','')}</td><td>{it.get('provider','')}</td><td>{it.get('lang','')}</td><td>{it.get('topic','')}</td></tr>"
             )
-        except Exception:
-            continue
     html = (
         "<html><head><meta charset='utf-8'><title>Results</title>"
         "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;padding:20px}"
@@ -643,39 +616,6 @@ async def result_view_ui_id(res_id: int):
     return HTMLResponse(content=html)
 
 
-@app.get("/results-ui/file/{b64}", response_class=HTMLResponse)
-async def result_view_ui_file(b64: str):
-    try:
-        path_str = base64.urlsafe_b64decode(b64.encode("ascii")).decode("utf-8")
-    except Exception:
-        return HTMLResponse("<h1>Bad request</h1>", status_code=400)
-    p = Path(path_str)
-    # Security: ensure under output/
-    try:
-        if not p.resolve().is_relative_to(Path("output").resolve()):
-            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
-    except Exception:
-        root = str(Path("output").resolve())
-        if root not in str(p.resolve()):
-            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
-    if not p.exists():
-        return HTMLResponse("<h1>Not found</h1>", status_code=404)
-    content = p.read_text(encoding="utf-8", errors="ignore")
-    title = p.name
-    html = (
-        "<html><head><meta charset='utf-8'><title>Result View</title>"
-        "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
-        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.5;font-size:14px}"
-        "header{background:#111;color:#eee;padding:6px 10px;display:flex;gap:10px;align-items:center}"
-        "main{padding:10px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
-        "h1,h2,h3{margin:0.6em 0 0.3em;font-weight:700}pre{white-space:pre-wrap;word-wrap:break-word}"
-        "</style></head><body>"
-        f"<header><a href='/results-ui'>← Back</a><div>{title}</div></header>"
-        "<main><div id='content'></div></main>"
-        "<script>const txt=`" + content.replace("`", "\\`") + "`;document.getElementById('content').innerHTML=marked.parse(txt);</script>"
-        "</body></html>"
-    )
-    return HTMLResponse(content=html)
 
 
 @app.get("/debug/results-summary")
