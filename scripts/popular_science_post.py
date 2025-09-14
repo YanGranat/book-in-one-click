@@ -58,6 +58,7 @@ def main() -> None:
     parser.add_argument("--factcheck-max-items", type=int, default=0, help="Limit number of points to research (0=all)")
     parser.add_argument("--research-iterations", type=int, default=2, help="Max research iterations per point")
     parser.add_argument("--research-concurrency", type=int, default=3, help="Parallel research workers per post")
+    parser.add_argument("--include-logs", action="store_true", help="Also save generation log file")
     args = parser.parse_args()
     ensure_project_root_on_syspath()
     load_env()
@@ -121,16 +122,42 @@ def main() -> None:
 
         # Use unified generate_post for all providers (simpler and consistent)
         from services.post.generate import generate_post
-        path = generate_post(
-            topic,
-            lang=args.lang,
-            provider=args.provider,
-            factcheck=not args.no_factcheck,
-            research_iterations=args.research_iterations,
-            research_concurrency=args.research_concurrency,
-            output_subdir=args.out,
-            job_meta={"source": "cli", "script": "Popular_science_post.py"},
-        )
+        if args.include_logs:
+            # Generate and return log path
+            log_path = generate_post(
+                topic,
+                lang=args.lang,
+                provider=args.provider,
+                factcheck=not args.no_factcheck,
+                research_iterations=args.research_iterations,
+                research_concurrency=args.research_concurrency,
+                output_subdir=args.out,
+                job_meta={"source": "cli", "script": "Popular_science_post.py"},
+                return_log_path=True,
+            )
+            print(f"📋 Лог сохранён: {log_path}")
+            # Also generate main result
+            path = generate_post(
+                topic,
+                lang=args.lang,
+                provider=args.provider,
+                factcheck=not args.no_factcheck,
+                research_iterations=args.research_iterations,
+                research_concurrency=args.research_concurrency,
+                output_subdir=args.out,
+                job_meta={"source": "cli", "script": "Popular_science_post.py"},
+            )
+        else:
+            path = generate_post(
+                topic,
+                lang=args.lang,
+                provider=args.provider,
+                factcheck=not args.no_factcheck,
+                research_iterations=args.research_iterations,
+                research_concurrency=args.research_concurrency,
+                output_subdir=args.out,
+                job_meta={"source": "cli", "script": "Popular_science_post.py"},
+            )
         print(f"💾 Сохранено: {path}")
         print("✅ Готово.")
 
