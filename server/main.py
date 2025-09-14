@@ -237,13 +237,16 @@ async def logs_ui():
         except Exception:
             pass
         
-        # Fallback to filename if topic not found in content
+        # Use topic from content, fallback to cleaned filename
         if topic_from_content:
             it["topic"] = topic_from_content
         else:
             stem = Path(it.get("path", "")).name
-            if stem.endswith("_log.md"):
-                stem = stem[:-7]
+            if stem.endswith(".md"):
+                stem = stem[:-3]
+            # Remove _log and timestamp suffix
+            import re
+            stem = re.sub(r"_log(_\d{8}_\d{6})?$", "", stem)
             it["topic"] = stem
             
         # Format timestamp as YYYY-MM-DD HH:MM
