@@ -81,7 +81,7 @@ async def root():
 async def list_logs():
     items = []
     
-    # Try DB first, then filesystem fallback
+    # Read only from DB
     if SessionLocal is not None:
         try:
             async with SessionLocal() as s:
@@ -95,106 +95,48 @@ async def list_logs():
                         "kind": r.kind,
                         "path": r.path,
                         "created_at": str(r.created_at),
-                        "source": "db",
                     })
         except Exception as e:
-            print(f"[ERROR] DB read failed, falling back to filesystem: {e}")
-    
-    # Always check filesystem for additional logs (old logs may not be in DB)
-    base = Path("output")
-    files = []
-    if base.exists():
-        # Find both old format (*_log.md) and new format (*_log_YYYYMMDD_HHMMSS.md)
-        files.extend(base.glob("**/*_log.md"))
-        files.extend(base.glob("**/*_log_*.md"))
-    files = list(set(files))  # Remove duplicates
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    
-    # Add filesystem logs that aren't already in DB
-    db_paths = {item.get("path", "") for item in items}
-    fs_id_start = max((item.get("id", 0) for item in items), default=0) + 1
-    for idx, p in enumerate(files):
-        rel_path = str(p.relative_to(Path.cwd())) if p.is_absolute() else str(p)
-        if rel_path not in db_paths and str(p) not in db_paths:
-            try:
-                ts = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
-            except Exception:
-                ts = ""
-            items.append({
-                "id": fs_id_start + idx,
-                "job_id": 0,
-                "kind": "md",
-                "path": str(p),
-                "created_at": ts,
-                "source": "fs",
-            })
-    
-    # Re-sort all items by creation time
-    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            print(f"[ERROR] DB read failed: {e}")
     
     return {"items": items}
 
 
 @app.get("/logs/{log_id}")
 async def get_log(log_id: int):
-    # Try DB first, then filesystem fallback (same logic as list_logs)
-    if SessionLocal is not None:
-        try:
-            async with SessionLocal() as s:
-                from sqlalchemy import select
-                res = await s.execute(select(JobLog).where(JobLog.id == log_id))
-                row = res.scalar_one_or_none()
-                if row is not None:
-                    try:
-                        # Try relative path first, then absolute
-                        log_file_path = Path(row.path)
-                        if not log_file_path.is_absolute():
-                            log_file_path = Path.cwd() / log_file_path
-                        with open(log_file_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-                    except Exception as e:
-                        print(f"[ERROR] Cannot read log file {row.path}: {e}")
-                        content = f"Error reading log file: {e}"
-                    return {
-                        "id": row.id,
-                        "job_id": row.job_id,
-                        "path": row.path,
-                        "created_at": str(row.created_at),
-                        "content": content,
-                        "source": "db",
-                    }
-        except Exception as e:
-            print(f"[ERROR] DB get_log failed, falling back to filesystem: {e}")
+    # Read only from DB
+    if SessionLocal is None:
+        return {"error": "db is not configured"}
     
-    # Fallback: map log_id to Nth recent file in output/**/*_log*.md
-    base = Path("output")
-    files = []
-    if base.exists():
-        # Find both old format (*_log.md) and new format (*_log_YYYYMMDD_HHMMSS.md)
-        files.extend(base.glob("**/*_log.md"))
-        files.extend(base.glob("**/*_log_*.md"))
-    files = list(set(files))  # Remove duplicates
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    if log_id <= 0 or log_id > len(files):
-        return {"error": "not found"}
-    p = files[log_id - 1]
     try:
-        with open(p, "r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception:
-        content = ""
-    try:
-        created = datetime.fromtimestamp(p.stat().st_mtime).isoformat()
-    except Exception:
-        created = ""
-    return {
-        "id": log_id,
-        "job_id": 0,
-        "path": str(p),
-        "created_at": created,
-        "content": content,
-        "source": "fs",
-    }
+        async with SessionLocal() as s:
+            from sqlalchemy import select
+            res = await s.execute(select(JobLog).where(JobLog.id == log_id))
+            row = res.scalar_one_or_none()
+            if row is None:
+                return {"error": "not found"}
+            
+            try:
+                # Try relative path first, then absolute
+                log_file_path = Path(row.path)
+                if not log_file_path.is_absolute():
+                    log_file_path = Path.cwd() / log_file_path
+                with open(log_file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"[ERROR] Cannot read log file {row.path}: {e}")
+                content = f"Error reading log file: {e}"
+            
+            return {
+                "id": row.id,
+                "job_id": row.job_id,
+                "path": row.path,
+                "created_at": str(row.created_at),
+                "content": content,
+            }
+    except Exception as e:
+        print(f"[ERROR] DB get_log failed: {e}")
+        return {"error": f"database error: {e}"}
 
 
 @app.api_route("/logs-seed", methods=["GET", "POST"])
