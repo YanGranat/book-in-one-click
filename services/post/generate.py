@@ -93,8 +93,7 @@ def generate_post(
     started_perf = time.perf_counter()
     log_lines = []
     def log(section: str, body: str):
-        ts = datetime.utcnow().isoformat()
-        log_lines.append(f"## {section}\n\n<time>{ts}</time>\n\n{body}\n")
+        log_lines.append(f"## {section}\n\n{body}\n")
     log("🧭 Config", f"provider={_prov}\nlang={lang}")
 
     instructions = build_post_instructions(topic, lang)
@@ -574,15 +573,15 @@ def generate_post(
     duration_s = max(0.0, time.perf_counter() - started_perf)
     header = (
         f"# 🧾 Generation Log\n\n"
-        f"- provider: `{_prov}`\n"
-        f"- lang: `{lang}`\n"
-        f"- model_heavy: `{os.getenv('OPENAI_MODEL' if _prov=='openai' else ('GEMINI_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}`\n"
-        f"- model_fast: `{os.getenv('OPENAI_FAST_MODEL' if _prov=='openai' else ('GEMINI_FAST_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}`\n"
-        f"- started_at: `{started_at.isoformat()}`\n"
-        f"- finished_at: `{finished_at.isoformat()}`\n"
-        f"- duration: `{duration_s:.1f}s`\n"
-        f"- topic: `{topic}`\n"
-        f"- factcheck: `{bool(factcheck)}`\n"
+        f"- provider: {_prov}\n"
+        f"- lang: {lang}\n"
+        f"- model_heavy: {os.getenv('OPENAI_MODEL' if _prov=='openai' else ('GEMINI_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}\n"
+        f"- model_fast: {os.getenv('OPENAI_FAST_MODEL' if _prov=='openai' else ('GEMINI_FAST_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}\n"
+        f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
+        f"- finished_at: {finished_at.strftime('%Y-%m-%d %H:%M')}\n"
+        f"- duration: {duration_s:.1f}s\n"
+        f"- topic: {topic}\n"
+        f"- factcheck: {bool(factcheck)}\n"
     )
     save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=header + "\n".join(log_lines))
     # Record log path in DB if available

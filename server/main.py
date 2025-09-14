@@ -295,7 +295,7 @@ async def log_view_ui(log_id: int):
         "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0}"
         "header{background:#111;color:#eee;padding:12px 16px;display:flex;gap:16px;align-items:center}"
         "main{padding:16px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
-        "code,pre{background:#0f0f0f;color:#ddd;padding:4px 6px;border-radius:4px}"
+        "code,pre{background:#0f0f0f;color:#ddd;padding:8px 12px;border-radius:4px;white-space:pre-wrap;word-wrap:break-word;overflow-x:auto}"
         "</style></head><body>"
         f"<header><a href='/logs-ui'>← Back</a><div>{title}</div>"
         f"<div style='margin-left:auto;opacity:.8'>provider={meta.get('provider','?')} | lang={meta.get('lang','?')}</div>"
