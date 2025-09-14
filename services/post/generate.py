@@ -585,9 +585,9 @@ def generate_post(
     )
     full_log_content = header + "\n".join(log_lines)
     save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=full_log_content)
-    # Record log path in DB if available
+    # Record log and result in DB if available
     try:
-        from server.db import SessionLocal, JobLog
+        from server.db import SessionLocal, JobLog, ResultDoc
         if SessionLocal is not None:
             # Use sync approach to avoid event loop conflicts in thread executor
             from sqlalchemy import create_engine
@@ -610,8 +610,8 @@ def generate_post(
                 SyncSession = sessionmaker(sync_engine)
                 
                 with SyncSession() as s:
-                    # Import sync model
-                    from server.db import JobLog
+                    # Import sync models
+                    from server.db import JobLog, ResultDoc
                     # Store relative path for portability
                     try:
                         rel_path = str(log_path.relative_to(Path.cwd())) if log_path.is_absolute() else str(log_path)
@@ -626,6 +626,21 @@ def generate_post(
                     # Store log content directly (avoid FS race/ephemeral issues)
                     jl = JobLog(job_id=job_id, kind="md", path=rel_path, content=full_log_content)
                     s.add(jl)
+                    # Store final result document as well
+                    try:
+                        rel_doc = str(filepath.relative_to(Path.cwd())) if filepath.is_absolute() else str(filepath)
+                    except ValueError:
+                        rel_doc = str(filepath)
+                    rd = ResultDoc(
+                        job_id=job_id,
+                        kind=output_subdir,
+                        path=rel_doc,
+                        topic=topic,
+                        provider=_prov,
+                        lang=lang,
+                        content=final_content,
+                    )
+                    s.add(rd)
                     s.commit()
                     print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}, content_size={len(full_log_content)}")
             else:

@@ -15,7 +15,7 @@ import base64
 from utils.env import load_env_from_root
 from .bot import create_dispatcher
 from .bot_commands import register_admin_commands, ensure_db_ready
-from .db import SessionLocal, JobLog, Job
+from .db import SessionLocal, JobLog, Job, ResultDoc
 
 
 def _load_env():
@@ -341,41 +341,57 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
 
 # ------------------- Results (final outputs on filesystem) -------------------
 
-def _list_result_files() -> list[dict]:
+async def _list_result_files() -> list[dict]:
+    # Prefer DB (ResultDoc), fallback to filesystem if empty
     items: list[dict] = []
+    if SessionLocal is not None:
+        try:
+            async with SessionLocal() as s:
+                from sqlalchemy import select
+                res = await s.execute(select(ResultDoc).order_by(ResultDoc.id.desc()).limit(500))
+                for r in res.scalars().all():
+                    items.append({
+                        "id": r.id,
+                        "path": r.path,
+                        "name": Path(r.path).name,
+                        "created_at": str(r.created_at),
+                        "kind": r.kind,
+                    })
+        except Exception:
+            items = []
+    if items:
+        return items
+    # Fallback: scan filesystem
+    fs_items: list[dict] = []
     root = Path("output")
     if not root.exists():
-        return items
-    md_files = list(root.rglob("*.md"))
-    # exclude logs
-    md_files = [p for p in md_files if "_log_" not in p.name and not p.name.endswith("_log.md")]
-    for p in md_files:
+        return fs_items
+    for p in root.rglob("*.md"):
+        if "_log_" in p.name or p.name.endswith("_log.md"):
+            continue
         try:
             stat = p.stat()
             created = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-            rel = str(p)
-            kind = p.parent.name  # post/article/summary
-            items.append({
-                "path": rel,
+            fs_items.append({
+                "path": str(p),
                 "name": p.name,
                 "created_at": created,
-                "kind": kind,
+                "kind": p.parent.name,
             })
         except Exception:
             continue
-    # newest first
-    items.sort(key=lambda x: x["created_at"], reverse=True)
-    return items
+    fs_items.sort(key=lambda x: x["created_at"], reverse=True)
+    return fs_items
 
 
 @app.get("/results")
 async def list_results():
-    return {"items": _list_result_files()}
+    return {"items": await _list_result_files()}
 
 
 @app.get("/results-ui", response_class=HTMLResponse)
 async def results_ui():
-    items = _list_result_files()
+    items = await _list_result_files()
     rows = []
     for it in items:
         b64 = base64.urlsafe_b64encode(it["path"].encode("utf-8")).decode("ascii")

@@ -62,6 +62,19 @@ class JobLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ResultDoc(Base):
+    __tablename__ = _t("results")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="post")  # post|article|summary
+    path: Mapped[str] = mapped_column(String(512))
+    topic: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    lang: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Tx(Base):
     __tablename__ = _t("tx")
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -135,6 +148,11 @@ async def init_db() -> None:
             print("[INFO] Added content column to job_logs table")
         except Exception:
             # Column already exists or other error - that's fine
+            pass
+        # Ensure results table exists (for final documents)
+        try:
+            await conn.run_sync(ResultDoc.__table__.create, checkfirst=True)
+        except Exception:
             pass
 
 
