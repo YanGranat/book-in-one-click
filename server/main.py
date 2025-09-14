@@ -283,6 +283,42 @@ async def log_view_ui(log_id: int):
     return HTMLResponse(content=html)
 
 
+@app.delete("/logs/{log_id}")
+async def delete_log_api(log_id: int, secret: str = ""):
+    # simple secret guard (reuse webhook secret)
+    if WEBHOOK_SECRET and secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if SessionLocal is None:
+        raise HTTPException(status_code=500, detail="DB is not configured")
+    async with SessionLocal() as s:
+        obj = await s.get(JobLog, log_id)
+        if obj is None:
+            return {"ok": False, "error": "not found"}
+        await s.delete(obj)
+        await s.commit()
+        return {"ok": True, "deleted_id": log_id}
+
+
+@app.post("/logs/purge")
+async def purge_logs(payload: dict, secret: str = ""):
+    if WEBHOOK_SECRET and secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if SessionLocal is None:
+        raise HTTPException(status_code=500, detail="DB is not configured")
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not all(isinstance(x, int) for x in ids):
+        return {"ok": False, "error": "ids must be list[int]"}
+    deleted = 0
+    async with SessionLocal() as s:
+        if ids:
+            from sqlalchemy import delete
+            stmt = delete(JobLog).where(JobLog.id.in_(ids))
+            res = await s.execute(stmt)
+            await s.commit()
+            deleted = res.rowcount or 0
+    return {"ok": True, "deleted": int(deleted)}
+
+
 @app.post("/webhook/{secret}")
 async def telegram_webhook(secret: str, request: Request):
     if not TELEGRAM_TOKEN:
