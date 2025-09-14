@@ -591,13 +591,21 @@ def generate_post(
             # Use sync approach to avoid event loop conflicts in thread executor
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
+            from urllib.parse import urlsplit, urlunsplit, parse_qs
             
             # Create sync connection from same DB_URL
             db_url = os.getenv("DB_URL", "")
             if db_url:
                 # Convert async URL to sync with psycopg2 driver
                 sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-                sync_engine = create_engine(sync_url)
+                parts = urlsplit(sync_url)
+                qs = parse_qs(parts.query)
+                base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, parts.fragment))
+                cargs = {}
+                # Ensure SSL for psycopg2 if not explicitly set
+                if "sslmode" not in {k.lower() for k in qs.keys()}:
+                    cargs["sslmode"] = "require"
+                sync_engine = create_engine(base_sync_url, connect_args=cargs)
                 SyncSession = sessionmaker(sync_engine)
                 
                 with SyncSession() as s:

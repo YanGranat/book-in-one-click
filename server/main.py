@@ -89,12 +89,29 @@ async def list_logs():
                 res = await s.execute(select(JobLog).order_by(JobLog.id.desc()).limit(200))
                 rows = res.scalars().all()
                 for r in rows:
+                    # Extract topic from stored content if available
+                    topic = ""
+                    try:
+                        if getattr(r, "content", None):
+                            meta = _extract_meta_from_text((r.content or "")[:2000])
+                            topic = meta.get("topic", "")
+                    except Exception:
+                        pass
+                    if not topic:
+                        # Fallback to filename-based topic
+                        stem = Path(getattr(r, "path", "")).name
+                        if stem.endswith(".md"):
+                            stem = stem[:-3]
+                        import re
+                        stem = re.sub(r"_log(_\d{8}_\d{6})?$", "", stem)
+                        topic = stem
                     items.append({
                         "id": r.id,
                         "job_id": r.job_id,
                         "kind": r.kind,
                         "path": r.path,
                         "created_at": str(r.created_at),
+                        "topic": topic,
                     })
         except Exception as e:
             print(f"[ERROR] DB read failed: {e}")
@@ -116,30 +133,18 @@ async def get_log(log_id: int):
             if row is None:
                 return {"error": "not found"}
             
-            # Use content from DB if available, fallback to file
+            # DB-only: return content from DB or report absence
             if row.content:
                 content = row.content
             else:
-                try:
-                    # Try multiple path strategies for compatibility
-                    log_file_path = Path(row.path)
-                    
-                    # Strategy 1: Use path as-is if absolute and exists
-                    if log_file_path.is_absolute() and log_file_path.exists():
-                        pass
-                    # Strategy 2: Try relative to current working directory
-                    elif not log_file_path.is_absolute():
-                        log_file_path = Path.cwd() / log_file_path
-                    # Strategy 3: If absolute path doesn't exist, try just the filename in output/
-                    else:
-                        filename = log_file_path.name
-                        log_file_path = Path("output") / "post" / filename
-                    
-                    with open(log_file_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                except Exception as e:
-                    print(f"[ERROR] Cannot read log file {row.path}: {e}")
-                    content = f"Error reading log file: {e}\n\nTried paths:\n- {row.path}\n- {Path.cwd() / row.path}\n- {Path('output') / 'post' / Path(row.path).name}"
+                return {
+                    "id": row.id,
+                    "job_id": row.job_id,
+                    "path": row.path,
+                    "created_at": str(row.created_at),
+                    "content": "",
+                    "error": "no content stored for this log"
+                }
             
             return {
                 "id": row.id,
@@ -202,37 +207,8 @@ async def logs_ui():
     # Reuse /logs data
     data = await list_logs()
     items = data.get("items", [])
-    # Extract topic from log content and format timestamp
+    # Format timestamp as YYYY-MM-DD HH:MM
     for it in items:
-        # Try to get topic from log file content first
-        topic_from_content = ""
-        try:
-            path_str = it.get("path", "")
-            if path_str:
-                # Handle both relative and absolute paths
-                log_file_path = Path(path_str)
-                if not log_file_path.is_absolute():
-                    log_file_path = Path.cwd() / log_file_path
-                if log_file_path.exists():
-                    with open(log_file_path, "r", encoding="utf-8") as f:
-                        content = f.read(2000)  # Read first 2KB to find topic
-                    meta = _extract_meta_from_text(content)
-                    topic_from_content = meta.get("topic", "")
-        except Exception:
-            pass
-        
-        # Use topic from content, fallback to cleaned filename
-        if topic_from_content:
-            it["topic"] = topic_from_content
-        else:
-            stem = Path(it.get("path", "")).name
-            if stem.endswith(".md"):
-                stem = stem[:-3]
-            # Remove _log and timestamp suffix
-            import re
-            stem = re.sub(r"_log(_\d{8}_\d{6})?$", "", stem)
-            it["topic"] = stem
-            
         # Format timestamp as YYYY-MM-DD HH:MM
         try:
             from datetime import datetime
