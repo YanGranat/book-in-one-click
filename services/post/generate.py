@@ -664,6 +664,20 @@ def generate_post(
                     except Exception as _e:
                         s.rollback()
                         print(f"[ERROR] ResultDoc commit failed: {_e}")
+                        # Attempt to create table on-the-fly if missing, then retry once
+                        try:
+                            from server.db import ResultDoc as _RD
+                            try:
+                                _RD.__table__.create(bind=sync_engine, checkfirst=True)
+                            except Exception:
+                                pass
+                            s.add(rd)
+                            s.flush()
+                            s.commit()
+                            print("[INFO] ResultDoc table created on-the-fly and record inserted")
+                        except Exception as _e2:
+                            s.rollback()
+                            print(f"[ERROR] ResultDoc create+retry failed: {_e2}")
                     try:
                         print(f"[INFO] Log recorded in DB: id={getattr(jl,'id',None)}, path={log_path}, content_size={len(full_log_content)}; result_job_id={result_job_id}")
                     except Exception:

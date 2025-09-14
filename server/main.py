@@ -41,6 +41,14 @@ register_admin_commands(DP, SessionLocal)
 async def _startup():
     # Initialize DB if configured; safe no-op otherwise
     await ensure_db_ready()
+    # Extra: ensure results table exists proactively (defense in depth)
+    try:
+        from .db import ResultDoc
+        if SessionLocal is not None:
+            async with SessionLocal() as s:
+                await s.run_sync(ResultDoc.__table__.create, checkfirst=True)
+    except Exception:
+        pass
     # Ensure enough worker threads for concurrent generations (5–10 users)
     import asyncio
     import concurrent.futures
