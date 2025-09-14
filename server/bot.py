@@ -314,6 +314,14 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     prov = "openai"
             async with GLOBAL_SEMAPHORE:
+                # Prepare job metadata for logging
+                job_meta = {
+                    "user_id": message.from_user.id if message.from_user else 0,
+                    "chat_id": message.chat.id,
+                    "topic": topic,
+                    "provider": prov or "openai",
+                    "lang": data.get("gen_lang") or "auto",
+                }
                 path = await loop.run_in_executor(
                     None,
                     lambda: generate_post(
@@ -321,6 +329,7 @@ def create_dispatcher() -> Dispatcher:
                         lang=(data.get("gen_lang") or "auto"),
                         provider=(prov or "openai"),
                         factcheck=False,
+                        job_meta=job_meta,
                     ),
                 )
             with open(path, "rb") as f:
