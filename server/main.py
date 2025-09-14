@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from aiogram import types, Bot, Dispatcher
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
+import base64
 
 from utils.env import load_env_from_root
 from .bot import create_dispatcher
@@ -336,6 +337,101 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
             await s.commit()
             deleted = res.rowcount or 0
     return {"ok": True, "deleted": int(deleted)}
+
+
+# ------------------- Results (final outputs on filesystem) -------------------
+
+def _list_result_files() -> list[dict]:
+    items: list[dict] = []
+    root = Path("output")
+    if not root.exists():
+        return items
+    md_files = list(root.rglob("*.md"))
+    # exclude logs
+    md_files = [p for p in md_files if "_log_" not in p.name and not p.name.endswith("_log.md")]
+    for p in md_files:
+        try:
+            stat = p.stat()
+            created = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+            rel = str(p)
+            kind = p.parent.name  # post/article/summary
+            items.append({
+                "path": rel,
+                "name": p.name,
+                "created_at": created,
+                "kind": kind,
+            })
+        except Exception:
+            continue
+    # newest first
+    items.sort(key=lambda x: x["created_at"], reverse=True)
+    return items
+
+
+@app.get("/results")
+async def list_results():
+    return {"items": _list_result_files()}
+
+
+@app.get("/results-ui", response_class=HTMLResponse)
+async def results_ui():
+    items = _list_result_files()
+    rows = []
+    for it in items:
+        b64 = base64.urlsafe_b64encode(it["path"].encode("utf-8")).decode("ascii")
+        rows.append(
+            f"<tr><td><a href='/results-ui/{b64}'>{it['name']}</a></td><td>{it['created_at']}</td><td>{it['kind']}</td></tr>"
+        )
+    html = (
+        "<html><head><meta charset='utf-8'><title>Results</title>"
+        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;padding:20px}"
+        "table{border-collapse:collapse;width:100%}th,td{border:1px solid #333;padding:8px;text-align:left}"
+        "th{background:#111;color:#eee}tr:nth-child(even){background:#1a1a1a;color:#eee}a{color:#6cf}</style></head><body>"
+        "<h1>Generated Results</h1>"
+        f"<p>Total: {len(items)}</p>"
+        "<table><thead><tr><th>Name</th><th>Created</th><th>Kind</th></tr></thead><tbody>"
+        + ("".join(rows) or "<tr><td colspan='3'>No results yet</td></tr>")
+        + "</tbody></table>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html)
+
+
+@app.get("/results-ui/{b64}", response_class=HTMLResponse)
+async def result_view_ui(b64: str):
+    try:
+        path_str = base64.urlsafe_b64decode(b64.encode("ascii")).decode("utf-8")
+    except Exception:
+        return HTMLResponse("<h1>Bad request</h1>", status_code=400)
+    p = Path(path_str)
+    # Security: ensure under output/
+    try:
+        if not p.resolve().is_relative_to(Path("output").resolve()):
+            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
+    except Exception:
+        # Python <3.9 compatibility not needed; fallback
+        root = str(Path("output").resolve())
+        if root not in str(p.resolve()):
+            return HTMLResponse("<h1>Forbidden</h1>", status_code=403)
+    if not p.exists():
+        return HTMLResponse("<h1>Not found</h1>", status_code=404)
+    content = p.read_text(encoding="utf-8", errors="ignore")
+    title = p.name
+    # Simple Markdown render (result already Markdown)
+    html = (
+        "<html><head><meta charset='utf-8'><title>Result View</title>"
+        "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
+        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.5;font-size:14px}"
+        "header{background:#111;color:#eee;padding:6px 10px;display:flex;gap:10px;align-items:center}"
+        "main{padding:10px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
+        "h1,h2,h3{margin:0.6em 0 0.3em;font-weight:700}pre{white-space:pre-wrap;word-wrap:break-word}"
+        "</style></head><body>"
+        f"<header><a href='/results-ui'>← Back</a><div>{title}</div></header>"
+        "<main><div id='content'></div></main>"
+        "<script>const txt=`" + content.replace("`", "\`") + "`;document.getElementById('content').innerHTML=marked.parse(txt);</script>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html)
 
 
 @app.post("/webhook/{secret}")
