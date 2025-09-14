@@ -440,11 +440,10 @@ async def delete_log_api(log_id: int, _: bool = Depends(require_admin)):
         obj = await s.get(JobLog, log_id)
         if obj is None:
             return {"ok": False, "error": "not found"}
-        # Also delete results for same job_id
+        # Also delete results linked to this log id (ResultDoc.job_id == JobLog.id)
         try:
-            if getattr(obj, "job_id", 0):
-                from sqlalchemy import delete as _sqdel
-                await s.execute(_sqdel(ResultDoc).where(ResultDoc.job_id == obj.job_id))
+            from sqlalchemy import delete as _sqdel
+            await s.execute(_sqdel(ResultDoc).where(ResultDoc.job_id == obj.id))
         except Exception:
             pass
         await s.delete(obj)
@@ -462,16 +461,12 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
     deleted = 0
     async with SessionLocal() as s:
         if ids:
-            from sqlalchemy import delete, select
-            # Collect affected job_ids first
-            res = await s.execute(select(JobLog.job_id).where(JobLog.id.in_(ids)))
-            job_ids = [jid for (jid,) in (res.fetchall() or []) if isinstance(jid, int) and jid > 0]
-            if job_ids:
-                await s.execute(delete(ResultDoc).where(ResultDoc.job_id.in_(job_ids)))
-            stmt = delete(JobLog).where(JobLog.id.in_(ids))
-            res2 = await s.execute(stmt)
+            from sqlalchemy import delete
+            # ResultDoc.job_id хранит id соответствующего JobLog → можно удалять напрямую по ids
+            await s.execute(delete(ResultDoc).where(ResultDoc.job_id.in_(ids)))
+            res2 = await s.execute(delete(JobLog).where(JobLog.id.in_(ids)))
             await s.commit()
-            deleted = res2.rowcount or 0
+            deleted = int(res2.rowcount or 0)
     return {"ok": True, "deleted": int(deleted)}
 
 
