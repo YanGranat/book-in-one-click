@@ -589,15 +589,28 @@ def generate_post(
     try:
         from server.db import SessionLocal, JobLog
         if SessionLocal is not None:
-            import asyncio as _a
-            async def _write():
-                async with SessionLocal() as s:
+            # Use sync approach to avoid event loop conflicts in thread executor
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            import os
+            
+            # Create sync connection from same DB_URL
+            db_url = os.getenv("DB_URL", "")
+            if db_url:
+                # Convert async URL to sync
+                sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://").split("?")[0]
+                sync_engine = create_engine(sync_url)
+                SyncSession = sessionmaker(sync_engine)
+                
+                with SyncSession() as s:
+                    # Import sync model
+                    from server.db import JobLog
                     jl = JobLog(job_id=int((job_meta or {}).get("job_id", 0)), kind="md", path=str(log_path))
                     s.add(jl)
-                    await s.commit()
-                    return jl.id
-            log_id = _a.run(_write())
-            print(f"[INFO] Log recorded in DB: id={log_id}, path={log_path}")
+                    s.commit()
+                    print(f"[INFO] Log recorded in DB: id={jl.id}, path={log_path}")
+            else:
+                print(f"[INFO] No DB_URL configured, log saved to filesystem only: {log_path}")
         else:
             print(f"[INFO] Log saved to filesystem only: {log_path}")
     except Exception as e:
