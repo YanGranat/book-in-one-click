@@ -79,8 +79,28 @@ async def root():
 @app.get("/logs")
 async def list_logs():
     items = []
-    # Fallback: if no SQL DB configured, read logs from filesystem
-    if SessionLocal is None:
+    
+    # Try DB first, then filesystem fallback
+    if SessionLocal is not None:
+        try:
+            async with SessionLocal() as s:
+                from sqlalchemy import select
+                res = await s.execute(select(JobLog).order_by(JobLog.id.desc()).limit(200))
+                rows = res.scalars().all()
+                for r in rows:
+                    items.append({
+                        "id": r.id,
+                        "job_id": r.job_id,
+                        "kind": r.kind,
+                        "path": r.path,
+                        "created_at": str(r.created_at),
+                        "source": "db",
+                    })
+        except Exception as e:
+            print(f"[ERROR] DB read failed, falling back to filesystem: {e}")
+    
+    # If DB failed or no DB configured, read from filesystem
+    if not items:
         base = Path("output")
         files = list(base.glob("**/*_log.md")) if base.exists() else []
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -97,19 +117,7 @@ async def list_logs():
                 "created_at": ts,
                 "source": "fs",
             })
-        return {"items": items}
-    async with SessionLocal() as s:
-        from sqlalchemy import select
-        res = await s.execute(select(JobLog).order_by(JobLog.id.desc()).limit(200))
-        rows = res.scalars().all()
-        for r in rows:
-            items.append({
-                "id": r.id,
-                "job_id": r.job_id,
-                "kind": r.kind,
-                "path": r.path,
-                "created_at": str(r.created_at),
-            })
+    
     return {"items": items}
 
 
