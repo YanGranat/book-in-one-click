@@ -269,7 +269,7 @@ async def log_view_ui(log_id: int):
         "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.6}"
         "header{background:#111;color:#eee;padding:12px 16px;display:flex;gap:16px;align-items:center}"
         "main{padding:16px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
-        "h1{font-size:1.8em;margin:1em 0 0.5em}h2{font-size:1.4em;margin:1em 0 0.5em}h3{font-size:1.2em;margin:0.8em 0 0.4em;color:#333}"
+        "h1{font-size:1.8em;margin:1em 0 0.5em}h2{font-size:1.1em;margin:0.8em 0 0.4em;color:#333;font-weight:600}h3{font-size:1.0em;margin:0.6em 0 0.3em;color:#555}"
         "code{background:none;color:inherit;padding:0}pre{background:none;color:inherit;padding:0;white-space:pre-wrap;word-wrap:break-word}"
         "p{margin:0.5em 0}ul,ol{margin:0.5em 0}li{margin:0.2em 0}"
         "</style></head><body>"
