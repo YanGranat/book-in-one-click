@@ -117,15 +117,25 @@ async def get_log(log_id: int):
                 return {"error": "not found"}
             
             try:
-                # Try relative path first, then absolute
+                # Try multiple path strategies for compatibility
                 log_file_path = Path(row.path)
-                if not log_file_path.is_absolute():
+                
+                # Strategy 1: Use path as-is if absolute and exists
+                if log_file_path.is_absolute() and log_file_path.exists():
+                    pass
+                # Strategy 2: Try relative to current working directory
+                elif not log_file_path.is_absolute():
                     log_file_path = Path.cwd() / log_file_path
+                # Strategy 3: If absolute path doesn't exist, try just the filename in output/
+                else:
+                    filename = log_file_path.name
+                    log_file_path = Path("output") / "post" / filename
+                
                 with open(log_file_path, "r", encoding="utf-8") as f:
                     content = f.read()
             except Exception as e:
                 print(f"[ERROR] Cannot read log file {row.path}: {e}")
-                content = f"Error reading log file: {e}"
+                content = f"Error reading log file: {e}\n\nTried paths:\n- {row.path}\n- {Path.cwd() / row.path}\n- {Path('output') / 'post' / Path(row.path).name}"
             
             return {
                 "id": row.id,
@@ -266,12 +276,12 @@ async def log_view_ui(log_id: int):
     html = (
         "<html><head><meta charset='utf-8'><title>Log View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
-        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.5;font-size:14px}"
-        "header{background:#111;color:#eee;padding:8px 12px;display:flex;gap:12px;align-items:center;font-size:14px}"
-        "main{padding:12px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
-        "h1{font-size:1.4em;margin:0.6em 0 0.3em;font-weight:600}h2{font-size:1.1em;margin:0.5em 0 0.3em;color:#333;font-weight:600}h3{font-size:1.0em;margin:0.4em 0 0.2em;color:#555}"
-        "code{background:none;color:inherit;padding:0;font-size:13px}pre{background:none;color:inherit;padding:0;white-space:pre-wrap;word-wrap:break-word;font-size:13px}"
-        "p{margin:0.3em 0;font-size:14px}ul,ol{margin:0.3em 0}li{margin:0.1em 0;font-size:14px}"
+        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.4;font-size:12px}"
+        "header{background:#111;color:#eee;padding:6px 10px;display:flex;gap:10px;align-items:center;font-size:12px}"
+        "main{padding:10px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
+        "h1{font-size:1.3em;margin:0.5em 0 0.2em;font-weight:600}h2{font-size:1.0em;margin:0.4em 0 0.2em;color:#333;font-weight:600}h3{font-size:0.9em;margin:0.3em 0 0.1em;color:#555}"
+        "code{background:none;color:inherit;padding:0;font-size:11px}pre{background:none;color:inherit;padding:0;white-space:pre-wrap;word-wrap:break-word;font-size:11px}"
+        "p{margin:0.2em 0;font-size:12px}ul,ol{margin:0.2em 0}li{margin:0.05em 0;font-size:12px}"
         "</style></head><body>"
         f"<header><a href='/logs-ui'>← Back</a><div>{title}</div>"
         f"<div style='margin-left:auto;opacity:.8'>provider={meta.get('provider','?')} | lang={meta.get('lang','?')}</div>"
@@ -282,7 +292,7 @@ async def log_view_ui(log_id: int):
         f"<script>const b64='{b64}';"
         "const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}"
         "const text=new TextDecoder('utf-8').decode(bytes);"
-        "const escaped=text.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');"
+        "const escaped=text.replace(/<input>/g,'&lt;input&gt;').replace(/<\\/input>/g,'&lt;/input&gt;').replace(/<topic>/g,'&lt;topic&gt;').replace(/<\\/topic>/g,'&lt;/topic&gt;').replace(/<lang>/g,'&lt;lang&gt;').replace(/<\\/lang>/g,'&lt;/lang&gt;').replace(/<post>/g,'&lt;post&gt;').replace(/<\\/post>/g,'&lt;/post&gt;').replace(/<critique_json>/g,'&lt;critique_json&gt;').replace(/<\\/critique_json>/g,'&lt;/critique_json&gt;');"
         "document.getElementById('content').innerHTML = marked.parse(escaped);</script>"
         "</body></html>"
     )

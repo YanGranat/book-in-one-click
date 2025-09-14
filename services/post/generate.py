@@ -186,7 +186,7 @@ def generate_post(
     # Log writer input for transparency
     log("⬇️ Writer · Input", f"{user_message_local_writer}")
     content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
-    log("✍️ Writer · Output", content[:2000])
+    log("✍️ Writer · Output", content)
     if not content:
         raise RuntimeError("Empty result from writer agent")
 
@@ -539,7 +539,7 @@ def generate_post(
             # Log rewrite input and output
             log("⬇️ Rewrite · Input", f"{rw_input}")
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
-            log("🛠️ Rewrite · Output", final_content[:4000])
+            log("🛠️ Rewrite · Output", final_content)
 
     from pathlib import Path
     p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
@@ -553,7 +553,7 @@ def generate_post(
     # Log refine input and output
     log("⬇️ Refine · Input", f"{refine_input}")
     final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
-    log("✨ Refine · Output", final_content[:4000])
+    log("✨ Refine · Output", final_content)
 
     # Save final
     output_dir = ensure_output_dir(output_subdir)
