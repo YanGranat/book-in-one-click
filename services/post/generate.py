@@ -94,7 +94,7 @@ def generate_post(
     started_perf = time.perf_counter()
     log_lines = []
     def log(section: str, body: str):
-        log_lines.append(f"## {section}\n\n{body}\n")
+        log_lines.append(f"---\n\n## {section}\n\n{body}\n")
     log("🧭 Config", f"provider={_prov}\nlang={lang}")
 
     instructions = build_post_instructions(topic, lang)
