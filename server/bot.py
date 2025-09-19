@@ -96,6 +96,51 @@ def build_genlang_inline(ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
+def build_ui_lang_inline() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text="Русский", callback_data="set:ui_lang:ru"))
+    kb.add(InlineKeyboardButton(text="English", callback_data="set:ui_lang:en"))
+    return kb
+
+
+def build_provider_inline() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text="OpenAI", callback_data="set:provider:openai"))
+    kb.add(InlineKeyboardButton(text="Gemini", callback_data="set:provider:gemini"))
+    kb.add(InlineKeyboardButton(text="Claude", callback_data="set:provider:claude"))
+    return kb
+
+
+def build_enable_disable_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    if _is_ru(ui_lang):
+        kb.add(InlineKeyboardButton(text="Включить", callback_data=f"set:{tag}:enable"))
+        kb.add(InlineKeyboardButton(text="Отключить", callback_data=f"set:{tag}:disable"))
+    else:
+        kb.add(InlineKeyboardButton(text="Enable", callback_data=f"set:{tag}:enable"))
+        kb.add(InlineKeyboardButton(text="Disable", callback_data=f"set:{tag}:disable"))
+    return kb
+
+
+def build_yesno_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    if _is_ru(ui_lang):
+        kb.add(InlineKeyboardButton(text="Да", callback_data=f"set:{tag}:yes"))
+        kb.add(InlineKeyboardButton(text="Нет", callback_data=f"set:{tag}:no"))
+    else:
+        kb.add(InlineKeyboardButton(text="Yes", callback_data=f"set:{tag}:yes"))
+        kb.add(InlineKeyboardButton(text="No", callback_data=f"set:{tag}:no"))
+    return kb
+
+
+def build_depth_inline() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text="1", callback_data="set:depth:1"))
+    kb.add(InlineKeyboardButton(text="2", callback_data="set:depth:2"))
+    kb.add(InlineKeyboardButton(text="3", callback_data="set:depth:3"))
+    return kb
+
+
 def build_lang_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("English"))
@@ -157,9 +202,8 @@ def create_dispatcher() -> Dispatcher:
         await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(onboarding=True)
         await message.answer(
             "Выберите язык интерфейса / Choose interface language:",
-            reply_markup=build_lang_keyboard(),
+            reply_markup=build_ui_lang_inline(),
         )
-        await GenerateStates.ChoosingLanguage.set()
 
     @dp.message_handler(commands=["info"])  # type: ignore
     async def cmd_info(message: types.Message, state: FSMContext):
@@ -232,31 +276,20 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(text)
 
 
-    @dp.message_handler(state=GenerateStates.ChoosingLanguage)  # type: ignore
-    async def choose_language(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip().lower()
-        if text.startswith("/generate"):
-            await state.finish()
-            await cmd_generate(message, state)
-            return
-        if text.startswith("english"):
-            ui_lang = "en"
-        elif text.startswith("рус"):
-            ui_lang = "ru"
-        else:
-            # Default UI language to Russian when unspecified
-            ui_lang = "ru"
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:ui_lang:"))  # type: ignore
+    async def cb_set_ui_lang(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        ui_lang = "en" if val == "en" else "ru"
         await state.update_data(ui_lang=ui_lang)
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
         confirm = "Язык интерфейса установлен." if ui_lang == "ru" else "Interface language set."
-        await message.answer(confirm, reply_markup=ReplyKeyboardRemove())
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, confirm)
         data = await state.get_data()
         onboarding = bool(data.get("onboarding"))
         if onboarding:
-            # Next: choose generation language (inline keyboard, no FSM until click)
             prompt = "Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"
-            await message.answer(prompt, reply_markup=build_genlang_inline(ui_lang))
-        else:
-            await state.finish()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_genlang_inline(ui_lang))
 
     @dp.message_handler(commands=["lang_generate"])  # type: ignore
     async def cmd_lang_generate(message: types.Message, state: FSMContext):
@@ -307,40 +340,30 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if ui_lang == "ru" else "Choose provider (OpenAI/Gemini/Claude):"
-        await message.answer(prompt, reply_markup=build_provider_keyboard())
-        await GenerateStates.ChoosingProvider.set()
+        await message.answer(prompt, reply_markup=build_provider_inline())
 
-    @dp.message_handler(state=GenerateStates.ChoosingProvider)  # type: ignore
-    async def choose_provider(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip().lower()
-        if text.startswith("/generate"):
-            await state.finish()
-            await cmd_generate(message, state)
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:provider:"))  # type: ignore
+    async def cb_set_provider(query: types.CallbackQuery, state: FSMContext):
+        prov = (query.data or "").split(":")[-1]
+        if prov not in {"openai","gemini","claude"}:
+            await query.answer()
             return
-        prov_map = {"openai": "openai", "gemini": "gemini", "claude": "claude"}
-        prov = prov_map.get(text, None)
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        if not prov:
-            msg = "Пожалуйста, выберите: OpenAI, Gemini или Claude." if ui_lang == "ru" else "Please choose: OpenAI, Gemini or Claude."
-            await message.answer(msg, reply_markup=build_provider_keyboard())
-            return
         await state.update_data(provider=prov)
         try:
-            if message.from_user:
-                await set_provider(message.from_user.id, prov)  # type: ignore
+            if query.from_user:
+                await set_provider(query.from_user.id, prov)  # type: ignore
         except Exception:
             pass
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
         ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
-        await message.answer(ok, reply_markup=ReplyKeyboardRemove())
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ok)
         onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
-            # Next: logs
             prompt = "Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"
-            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
-            await GenerateStates.ChoosingLogs.set()
-        else:
-            await state.finish()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("logs", ui_lang))
 
     @dp.message_handler(commands=["lang"])  # type: ignore
     async def cmd_lang(message: types.Message, state: FSMContext):
@@ -364,86 +387,55 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Отправлять логи генерации?" if ui_lang == "ru" else "Send generation logs?"
-        await message.answer(prompt, reply_markup=build_logs_keyboard())
-        await GenerateStates.ChoosingLogs.set()
+        await message.answer(prompt, reply_markup=build_enable_disable_inline("logs", ui_lang))
 
-    @dp.message_handler(state=GenerateStates.ChoosingLogs)  # type: ignore
-    async def choose_logs(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip().lower()
-        if text.startswith("/generate"):
-            await state.finish()
-            await cmd_generate(message, state)
-            return
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:logs:"))  # type: ignore
+    async def cb_set_logs(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        enabled = (val == "enable")
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        
-        if text.startswith("включ") or text.startswith("enable") or text in {"да","yes"}:
-            enabled = True
-            msg = "Логи включены." if ui_lang == "ru" else "Logs enabled."
-        elif text.startswith("отключ") or text.startswith("disable") or text in {"нет","no"}:
-            enabled = False
-            msg = "Логи отключены." if ui_lang == "ru" else "Logs disabled."
-        else:
-            prompt = "Выберите: Включить или Отключить." if _is_ru(ui_lang) else "Choose: Enable or Disable."
-            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
-            return
-            
         try:
-            if message.from_user:
-                await set_logs_enabled(message.from_user.id, enabled)
+            if query.from_user:
+                await set_logs_enabled(query.from_user.id, enabled)
         except Exception:
             pass
-        await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        onboarding = bool(data.get("onboarding"))
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
+        msg = "Логи включены." if (enabled and ui_lang=="ru") else ("Logs enabled." if enabled else ("Логи отключены." if ui_lang=="ru" else "Logs disabled."))
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+        onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
-            # Next: incognito
             prompt = "Инкогнито режим: включить или отключить?" if _is_ru(ui_lang) else "Incognito: Enable or Disable?"
-            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
-            await GenerateStates.ChoosingIncognito.set()
-        else:
-            await state.finish()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
     @dp.message_handler(commands=["incognito"])  # type: ignore
     async def cmd_incognito(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
-        await message.answer(prompt, reply_markup=build_incognito_keyboard())
-        await GenerateStates.ChoosingIncognito.set()
+        await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
-    @dp.message_handler(state=GenerateStates.ChoosingIncognito)  # type: ignore
-    async def choose_incognito(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip().lower()
-        if text.startswith("/generate"):
-            await state.finish()
-            await cmd_generate(message, state)
-            return
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog:"))  # type: ignore
+    async def cb_set_incog(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        enabled = (val == "enable")
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        if text.startswith("включ") or text.startswith("enable") or text in {"да","yes"}:
-            enabled = True
-            msg = "Инкогнито: включён." if ui_lang == "ru" else "Incognito: enabled."
-        elif text.startswith("отключ") or text.startswith("disable") or text in {"нет","no"}:
-            enabled = False
-            msg = "Инкогнито: отключён." if ui_lang == "ru" else "Incognito: disabled."
-        else:
-            prompt = "Выберите: Включить или Отключить." if _is_ru(ui_lang) else "Choose: Enable or Disable."
-            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
-            return
         try:
-            if message.from_user:
-                await set_incognito(message.from_user.id, enabled)
+            if query.from_user:
+                await set_incognito(query.from_user.id, enabled)
         except Exception:
             pass
-        await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        onboarding = bool(data.get("onboarding"))
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
+        msg = "Инкогнито: включён." if (enabled and ui_lang=="ru") else ("Incognito: enabled." if enabled else ("Инкогнито: отключён." if ui_lang=="ru" else "Incognito: disabled."))
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+        onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
-            # Next: ask for topic
             prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-            await message.answer(prompt)
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
             await GenerateStates.WaitingTopic.set()
-        else:
-            await state.finish()
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
