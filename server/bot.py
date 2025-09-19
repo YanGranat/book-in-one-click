@@ -108,13 +108,54 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_info(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
+
+        # Read current user settings from KV (with safe fallbacks)
+        prov = (data.get("provider") or "openai").strip().lower()
+        gen_lang = (data.get("gen_lang") or "auto").strip().lower()
+        incognito = False
+        logs_enabled = False
+        try:
+            if message.from_user:
+                try:
+                    prov = await get_provider(message.from_user.id)  # type: ignore
+                except Exception:
+                    prov = prov or "openai"
+                try:
+                    gen_lang = await get_gen_lang(message.from_user.id)  # type: ignore
+                except Exception:
+                    gen_lang = gen_lang or "auto"
+                try:
+                    incognito = await get_incognito(message.from_user.id)  # type: ignore
+                except Exception:
+                    incognito = False
+                try:
+                    logs_enabled = await get_logs_enabled(message.from_user.id)  # type: ignore
+                except Exception:
+                    logs_enabled = False
+        except Exception:
+            pass
+
+        def _prov_name(p: str) -> str:
+            m = {"openai": "OpenAI", "gemini": "Gemini", "claude": "Claude"}
+            return m.get((p or "").strip().lower(), p or "openai")
+
+        def _lang_human(l: str, ru: bool) -> str:
+            if ru:
+                return {"ru": "русский", "en": "английский", "auto": "авто"}.get((l or "auto").lower(), "авто")
+            return {"ru": "Russian", "en": "English", "auto": "Auto"}.get((l or "auto").lower(), "Auto")
+
         if ui_lang == "ru":
             text = (
                 "Этот бот генерирует научно-популярные посты.\n"
                 "1) Выберите язык генерации: /lang_generate (Auto/RU/EN).\n"
                 "2) Нажмите /generate и отправьте тему.\n"
                 "На выходе получите Markdown-файл с постом.\n"
-                "GitHub проекта: https://github.com/YanGranat/book-in-one-click"
+                "GitHub проекта: https://github.com/YanGranat/book-in-one-click\n\n"
+                "Текущие настройки:\n"
+                f"- Провайдер: {_prov_name(prov)}\n"
+                f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
+                f"- Инкогнито: {'включён' if incognito else 'отключён'}\n"
+                f"- Логи: {'включены' if logs_enabled else 'отключены'}"
             )
         else:
             text = (
@@ -122,7 +163,12 @@ def create_dispatcher() -> Dispatcher:
                 "1) Pick generation language: /lang_generate (Auto/RU/EN).\n"
                 "2) Press /generate and send a topic.\n"
                 "You will get a Markdown file with the post.\n"
-                "Project GitHub: https://github.com/YanGranat/book-in-one-click"
+                "Project GitHub: https://github.com/YanGranat/book-in-one-click\n\n"
+                "Current settings:\n"
+                f"- Provider: {_prov_name(prov)}\n"
+                f"- Generation language: {_lang_human(gen_lang, False)}\n"
+                f"- Incognito: {'enabled' if incognito else 'disabled'}\n"
+                f"- Logs: {'enabled' if logs_enabled else 'disabled'}"
             )
         await message.answer(text)
 
