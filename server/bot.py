@@ -11,6 +11,7 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 from utils.env import load_env_from_root
+# i18n and language detection
 from utils.lang import detect_lang_from_text
 from services.post.generate import generate_post
 from utils.slug import safe_filename_base
@@ -41,6 +42,45 @@ class GenerateStates(StatesGroup):
     ChoosingFactcheck = State()
     ChoosingDepth = State()
     ChoosingRefine = State()
+
+
+def _is_ru(ui_lang: str) -> bool:
+    # Treat anything except 'en' as Russian UI by default
+    return (ui_lang or "").strip().lower() != "en"
+
+
+def build_enable_disable_keyboard_lang(ui_lang: str) -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    if _is_ru(ui_lang):
+        kb.add(KeyboardButton("Включить"), KeyboardButton("Отключить"))
+    else:
+        kb.add(KeyboardButton("Enable"), KeyboardButton("Disable"))
+    return kb
+
+
+def build_yesno_keyboard_lang(ui_lang: str) -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    if _is_ru(ui_lang):
+        kb.add(KeyboardButton("Да"), KeyboardButton("Нет"))
+    else:
+        kb.add(KeyboardButton("Yes"), KeyboardButton("No"))
+    return kb
+
+
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
+
+def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    # Packs: 1, 3, 5 credits at 200 stars per credit
+    if _is_ru(ui_lang):
+        kb.add(InlineKeyboardButton(text="Купить 1 кредит — 200⭐", callback_data="buy:stars:1"))
+        kb.add(InlineKeyboardButton(text="Купить 3 кредита — 600⭐", callback_data="buy:stars:3"))
+        kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 1000⭐", callback_data="buy:stars:5"))
+    else:
+        kb.add(InlineKeyboardButton(text="Buy 1 credit — 200⭐", callback_data="buy:stars:1"))
+        kb.add(InlineKeyboardButton(text="Buy 3 credits — 600⭐", callback_data="buy:stars:3"))
+        kb.add(InlineKeyboardButton(text="Buy 5 credits — 1000⭐", callback_data="buy:stars:5"))
+    return kb
 
 
 def build_lang_keyboard() -> ReplyKeyboardMarkup:
@@ -191,7 +231,8 @@ def create_dispatcher() -> Dispatcher:
         elif text.startswith("рус"):
             ui_lang = "ru"
         else:
-            ui_lang = "auto"
+            # Default UI language to Russian when unspecified
+            ui_lang = "ru"
         await state.update_data(ui_lang=ui_lang)
         confirm = "Язык интерфейса установлен." if ui_lang == "ru" else "Interface language set."
         await message.answer(confirm, reply_markup=ReplyKeyboardRemove())
@@ -199,7 +240,7 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool(data.get("onboarding"))
         if onboarding:
             # Next: choose generation language
-            prompt = "Выберите язык генерации / Choose generation language:" if ui_lang == "ru" else "Choose generation language:"
+            prompt = "Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"
             await message.answer(prompt, reply_markup=build_genlang_keyboard())
             await GenerateStates.ChoosingGenLanguage.set()
         else:
@@ -211,7 +252,7 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         await message.answer(
-            "Выберите язык генерации / Choose generation language:" if ui_lang == "ru" else "Choose generation language:",
+            "Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:",
             reply_markup=build_genlang_keyboard(),
         )
         await GenerateStates.ChoosingGenLanguage.set()
@@ -253,9 +294,8 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool(data.get("onboarding"))
         if onboarding:
             # Next: refine preference
-            prompt = "Финальная редактура?" if ui_lang == "ru" else "Final refine?"
-            # Use Yes/No keyboard
-            await message.answer(prompt, reply_markup=build_yesno_keyboard())
+            prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+            await message.answer(prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
             await GenerateStates.ChoosingRefine.set()
         else:
             await state.finish()
@@ -294,8 +334,8 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
             # Next: logs
-            prompt = "Отправлять логи генерации?" if ui_lang == "ru" else "Send generation logs?"
-            await message.answer(prompt, reply_markup=build_logs_keyboard())
+            prompt = "Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"
+            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
             await GenerateStates.ChoosingLogs.set()
         else:
             await state.finish()
@@ -326,15 +366,15 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         
-        if text.startswith("включ") or text.startswith("enable"):
+        if text.startswith("включ") or text.startswith("enable") or text in {"да","yes"}:
             enabled = True
             msg = "Логи включены." if ui_lang == "ru" else "Logs enabled."
-        elif text.startswith("отключ") or text.startswith("disable"):
+        elif text.startswith("отключ") or text.startswith("disable") or text in {"нет","no"}:
             enabled = False
             msg = "Логи отключены." if ui_lang == "ru" else "Logs disabled."
         else:
-            prompt = "Выберите: Включить или Отключить." if ui_lang == "ru" else "Choose: Enable or Disable."
-            await message.answer(prompt, reply_markup=build_logs_keyboard())
+            prompt = "Выберите: Включить или Отключить." if _is_ru(ui_lang) else "Choose: Enable or Disable."
+            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
             return
             
         try:
@@ -346,8 +386,8 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool(data.get("onboarding"))
         if onboarding:
             # Next: incognito
-            prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
-            await message.answer(prompt, reply_markup=build_incognito_keyboard())
+            prompt = "Инкогнито режим: включить или отключить?" if _is_ru(ui_lang) else "Incognito: Enable or Disable?"
+            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
             await GenerateStates.ChoosingIncognito.set()
         else:
             await state.finish()
@@ -369,15 +409,15 @@ def create_dispatcher() -> Dispatcher:
             return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        if text.startswith("включ") or text.startswith("enable"):
+        if text.startswith("включ") or text.startswith("enable") or text in {"да","yes"}:
             enabled = True
             msg = "Инкогнито: включён." if ui_lang == "ru" else "Incognito: enabled."
-        elif text.startswith("отключ") or text.startswith("disable"):
+        elif text.startswith("отключ") or text.startswith("disable") or text in {"нет","no"}:
             enabled = False
             msg = "Инкогнито: отключён." if ui_lang == "ru" else "Incognito: disabled."
         else:
-            prompt = "Выберите: Включить или Отключить." if ui_lang == "ru" else "Choose: Enable or Disable."
-            await message.answer(prompt, reply_markup=build_incognito_keyboard())
+            prompt = "Выберите: Включить или Отключить." if _is_ru(ui_lang) else "Choose: Enable or Disable."
+            await message.answer(prompt, reply_markup=build_enable_disable_keyboard_lang(ui_lang))
             return
         try:
             if message.from_user:
@@ -388,7 +428,7 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool(data.get("onboarding"))
         if onboarding:
             # Next: ask for topic
-            prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
+            prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
             await message.answer(prompt)
             await GenerateStates.WaitingTopic.set()
         else:
@@ -399,11 +439,9 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = (
-            "Финальная редактура?"
-            if ui_lang == "ru"
-            else "Final refine?"
+            "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
         )
-        await message.answer(prompt, reply_markup=build_yesno_keyboard())
+        await message.answer(prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
         await GenerateStates.ChoosingRefine.set()
 
     @dp.message_handler(state=GenerateStates.ChoosingRefine)  # type: ignore
@@ -425,9 +463,9 @@ def create_dispatcher() -> Dispatcher:
             msg = "Финальная редактура: отключена." if ui_lang == "ru" else "Final refine: disabled."
         else:
             prompt = (
-                "Пожалуйста, ответьте Да или Нет." if ui_lang == "ru" else "Please answer Yes or No."
+                "Пожалуйста, ответьте Да или Нет." if _is_ru(ui_lang) else "Please answer Yes or No."
             )
-            await message.answer(prompt, reply_markup=build_yesno_keyboard())
+            await message.answer(prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
             return
         try:
             if message.from_user:
@@ -438,7 +476,7 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool(data.get("onboarding"))
         if onboarding:
             # Next: provider
-            prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if ui_lang == "ru" else "Choose provider (OpenAI/Gemini/Claude):"
+            prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if _is_ru(ui_lang) else "Choose provider (OpenAI/Gemini/Claude):"
             await message.answer(prompt, reply_markup=build_provider_keyboard())
             await GenerateStates.ChoosingProvider.set()
         else:
@@ -484,7 +522,7 @@ def create_dispatcher() -> Dispatcher:
             await state.finish()
             return
         # yes in en = y/yes; in ru = д/да
-        factcheck = text.startswith("y") or text.startswith("д")
+        factcheck = text.startswith("y") or text.startswith("д") or text == "да"
 
         # If fact-checking is enabled, ask for depth first
         if factcheck:
@@ -517,9 +555,18 @@ def create_dispatcher() -> Dispatcher:
             if not charged and message.from_user:
                 ok, remaining = await charge_credits_kv(message.from_user.id, 1)
                 if not ok:
-                    warn = "Недостаточно кредитов" if ui_lang == "ru" else "Insufficient credits"
+                    warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
                     await message.answer(warn, reply_markup=ReplyKeyboardRemove())
+                    # Offer to buy credits
+                    try:
+                        await message.answer(
+                            ("Купить кредиты за ⭐? Один кредит = 200⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 200⭐"),
+                            reply_markup=build_buy_keyboard(ui_lang),
+                        )
+                    except Exception:
+                        pass
                     await state.finish()
+                    RUNNING_CHATS.discard(chat_id)
                     return
         except SQLAlchemyError:
             warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
@@ -550,13 +597,13 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 persisted_gen_lang = None
             gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-            # Refine preference
-            refine_enabled = False
-            try:
-                if message.from_user:
-                    refine_enabled = await get_refine_enabled(message.from_user.id)
-            except Exception:
-                refine_enabled = False
+            eff_lang = gen_lang
+            if (gen_lang or "auto").strip().lower() == "auto":
+                try:
+                    det = (detect_lang_from_text(topic) or "").lower()
+                    eff_lang = "en" if det.startswith("en") else "ru"
+                except Exception:
+                    eff_lang = "ru"
             async with GLOBAL_SEMAPHORE:
                 # Prepare job metadata for logging
                 job_meta = {
@@ -564,19 +611,19 @@ def create_dispatcher() -> Dispatcher:
                     "chat_id": message.chat.id,
                     "topic": topic,
                     "provider": prov or "openai",
-                    "lang": gen_lang,
+                    "lang": eff_lang,
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
-                    "refine": refine_enabled,
+                    "refine": (await get_refine_enabled(message.from_user.id)) if message.from_user else False,
                 }
                 path = await loop.run_in_executor(
                     None,
                     lambda: generate_post(
                         topic,
-                        lang=gen_lang,
+                        lang=eff_lang,
                         provider=(prov or "openai"),
                         factcheck=False,
                         job_meta=job_meta,
-                        use_refine=refine_enabled,
+                        use_refine=(job_meta["refine"]) is True,
                     ),
                 )
             # Send main result
@@ -680,6 +727,13 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 persisted_gen_lang = None
             gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+            eff_lang = gen_lang
+            if (gen_lang or "auto").strip().lower() == "auto":
+                try:
+                    det = (detect_lang_from_text(topic) or "").lower()
+                    eff_lang = "en" if det.startswith("en") else "ru"
+                except Exception:
+                    eff_lang = "ru"
             # Refine preference
             refine_enabled = False
             try:
@@ -694,7 +748,7 @@ def create_dispatcher() -> Dispatcher:
                     "chat_id": message.chat.id,
                     "topic": topic,
                     "provider": prov or "openai",
-                    "lang": gen_lang,
+                    "lang": eff_lang,
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                     "refine": refine_enabled,
                 }
@@ -702,7 +756,7 @@ def create_dispatcher() -> Dispatcher:
                     None,
                     lambda: generate_post(
                         topic,
-                        lang=gen_lang,
+                        lang=eff_lang,
                         provider=(prov or "openai"),
                         factcheck=True,
                         research_iterations=depth,
@@ -738,6 +792,99 @@ def create_dispatcher() -> Dispatcher:
         RUNNING_CHATS.discard(chat_id)
 
     return dp
+
+
+# ---- Balance and purchasing with Telegram Stars ----
+@dp.message_handler(commands=["balance"])  # type: ignore
+async def cmd_balance(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    ui_lang = (data.get("ui_lang") or "ru").strip()
+    try:
+        from .kv import get_balance_kv
+        bal = await get_balance_kv(message.from_user.id) if message.from_user else 0
+    except Exception:
+        bal = 0
+    txt = (f"Баланс: {bal} кредит(ов)." if _is_ru(ui_lang) else f"Balance: {bal} credits.")
+    try:
+        await message.answer(
+            txt + ("\nХотите купить кредиты за ⭐?" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐?"),
+            reply_markup=build_buy_keyboard(ui_lang),
+        )
+    except Exception:
+        await message.answer(txt)
+
+
+@dp.message_handler(commands=["buy"])  # type: ignore
+async def cmd_buy(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    ui_lang = (data.get("ui_lang") or "ru").strip()
+    await message.answer(
+        ("Выберите пакет кредитов:" if _is_ru(ui_lang) else "Choose a credits pack:"),
+        reply_markup=build_buy_keyboard(ui_lang),
+    )
+
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
+async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
+    credits_map = {"1": 1, "3": 3, "5": 5}
+    parts = (query.data or "").split(":")
+    pack = credits_map.get(parts[-1], 1)
+    user_id = query.from_user.id
+    chat_id = query.message.chat.id if query.message else user_id
+    # Env gating
+    import os as _os
+    enable_stars = (_os.getenv("TELEGRAM_STARS_ENABLED", "0").strip() == "1")
+    provider_token = _os.getenv("TELEGRAM_STARS_PROVIDER_TOKEN", "").strip()
+    if not enable_stars:
+        await query.answer("Not configured", show_alert=True)
+        return
+    try:
+        prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 200)]
+        payload = f"credits={pack}&stars={pack*200}"
+        title = f"Credits x{pack}"
+        description = "Buy generation credits using Telegram Stars"
+        await DP.bot.send_invoice(
+            chat_id=chat_id,
+            title=title,
+            description=description,
+            payload=payload,
+            provider_token=provider_token,
+            currency="XTR",
+            prices=prices,
+            start_parameter=f"buy_{pack}",
+        )
+        await query.answer()
+    except Exception as e:
+        await query.answer(str(e)[:180], show_alert=True)
+
+
+@dp.pre_checkout_query_handler(lambda q: True)  # type: ignore
+async def process_pre_checkout_query(pre_checkout_q: types.PreCheckoutQuery):
+    try:
+        await DP.bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
+    except Exception:
+        pass
+
+
+@dp.message_handler(content_types=types.ContentTypes.SUCCESSFUL_PAYMENT)  # type: ignore
+async def got_payment(message: types.Message):
+    try:
+        payload = (message.successful_payment.invoice_payload or "")
+        # payload format: credits=N&stars=S
+        num = 0
+        try:
+            for kv in payload.split("&"):
+                k, v = kv.split("=", 1)
+                if k == "credits":
+                    num = int(v)
+        except Exception:
+            num = 0
+        if num > 0 and message.from_user:
+            from .kv import topup_kv
+            await topup_kv(message.from_user.id, num)
+        await message.answer("Спасибо! Кредиты начислены." if (await dp.current_state(user=message.from_user.id, chat=message.chat.id).get_data()).get("ui_lang","ru")=="ru" else "Thank you! Credits added.")
+    except Exception:
+        pass
 
 
 

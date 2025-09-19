@@ -77,6 +77,23 @@ async def _startup():
             types.BotCommand(command="refine", description="Refine Step / Финальная редактура"),
             types.BotCommand(command="cancel", description="Cancel / Отмена"),
         ])
+        # RU-localized menu
+        try:
+            await DP.bot.set_my_commands([
+                types.BotCommand(command="start", description="Начать"),
+                types.BotCommand(command="generate", description="Сгенерировать"),
+                types.BotCommand(command="balance", description="Баланс"),
+                types.BotCommand(command="info", description="Инфо"),
+                types.BotCommand(command="lang", description="Язык интерфейса"),
+                types.BotCommand(command="lang_generate", description="Язык генерации"),
+                types.BotCommand(command="provider", description="Провайдер"),
+                types.BotCommand(command="logs", description="Логи генерации"),
+                types.BotCommand(command="incognito", description="Инкогнито"),
+                types.BotCommand(command="refine", description="Финальная редактура"),
+                types.BotCommand(command="cancel", description="Отмена"),
+            ], language_code="ru")
+        except Exception:
+            pass
         try:
             await DP.bot.set_chat_menu_button(menu_button=types.MenuButtonCommands())
         except Exception:
