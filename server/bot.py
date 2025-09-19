@@ -21,12 +21,61 @@ from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 from .kv import set_gen_lang, get_gen_lang
 from .kv import set_refine_enabled, get_refine_enabled
-from .kv import (
-    set_factcheck_enabled,
-    get_factcheck_enabled,
-    set_factcheck_depth,
-    get_factcheck_depth,
-)
+# Fact-check settings (KV). Use robust import with fallbacks for older deployments
+try:
+    from .kv import (
+        set_factcheck_enabled,
+        get_factcheck_enabled,
+        set_factcheck_depth,
+        get_factcheck_depth,
+    )
+except Exception:
+    # Provide minimal fallbacks via direct KV access to avoid startup import errors
+    try:
+        from . import kv as _KV
+    except Exception:
+        _KV = None  # type: ignore
+
+    async def set_factcheck_enabled(telegram_id: int, enabled: bool) -> None:  # type: ignore
+        if _KV is None:
+            return
+        r = _KV.get_redis()
+        await r.set(f"{_KV.kv_prefix()}:fc_enabled:{telegram_id}", "1" if enabled else "0")
+
+    async def get_factcheck_enabled(telegram_id: int) -> bool:  # type: ignore
+        if _KV is None:
+            return False
+        r = _KV.get_redis()
+        val = await r.get(f"{_KV.kv_prefix()}:fc_enabled:{telegram_id}")
+        try:
+            s = (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "0")).strip()
+        except Exception:
+            s = str(val or "0").strip()
+        return s == "1"
+
+    async def set_factcheck_depth(telegram_id: int, depth: int) -> None:  # type: ignore
+        if _KV is None:
+            return
+        try:
+            d = int(depth)
+        except Exception:
+            d = 1
+        if d not in (1, 2, 3):
+            d = 1
+        r = _KV.get_redis()
+        await r.set(f"{_KV.kv_prefix()}:fc_depth:{telegram_id}", str(d))
+
+    async def get_factcheck_depth(telegram_id: int) -> int:  # type: ignore
+        if _KV is None:
+            return 2
+        r = _KV.get_redis()
+        val = await r.get(f"{_KV.kv_prefix()}:fc_depth:{telegram_id}")
+        try:
+            s = (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "2")).strip()
+            d = int(s)
+        except Exception:
+            d = 2
+        return 2 if d not in (1, 2, 3) else d
 
 
 def _load_env():
