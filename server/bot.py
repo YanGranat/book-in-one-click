@@ -113,14 +113,16 @@ def create_dispatcher() -> Dispatcher:
                 "Этот бот генерирует научно-популярные посты.\n"
                 "1) Выберите язык генерации: /lang_generate (Auto/RU/EN).\n"
                 "2) Нажмите /generate и отправьте тему.\n"
-                "На выходе получите Markdown-файл с постом."
+                "На выходе получите Markdown-файл с постом.\n"
+                "GitHub проекта: https://github.com/YanGranat/book-in-one-click"
             )
         else:
             text = (
                 "This bot generates popular-science posts.\n"
                 "1) Pick generation language: /lang_generate (Auto/RU/EN).\n"
                 "2) Press /generate and send a topic.\n"
-                "You will get a Markdown file with the post."
+                "You will get a Markdown file with the post.\n"
+                "Project GitHub: https://github.com/YanGranat/book-in-one-click"
             )
         await message.answer(text)
 
