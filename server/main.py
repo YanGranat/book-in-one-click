@@ -74,6 +74,7 @@ async def _startup():
             types.BotCommand(command="provider", description="Provider / Провайдер"),
             types.BotCommand(command="logs", description="Logs / Логи генерации"),
             types.BotCommand(command="incognito", description="Incognito / Инкогнито"),
+            types.BotCommand(command="factcheck", description="Fact-check / Факт-чекинг"),
             types.BotCommand(command="refine", description="Refine Step / Финальная редактура"),
             types.BotCommand(command="cancel", description="Cancel / Отмена"),
         ])
@@ -89,6 +90,7 @@ async def _startup():
                 types.BotCommand(command="provider", description="Провайдер"),
                 types.BotCommand(command="logs", description="Логи генерации"),
                 types.BotCommand(command="incognito", description="Инкогнито"),
+                types.BotCommand(command="factcheck", description="Факт-чекинг"),
                 types.BotCommand(command="refine", description="Финальная редактура"),
                 types.BotCommand(command="cancel", description="Отмена"),
             ], language_code="ru")
