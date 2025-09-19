@@ -380,9 +380,9 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_lang(message: types.Message, state: FSMContext):
         await message.answer(
             "Выберите язык интерфейса / Choose interface language:",
-            reply_markup=build_lang_keyboard(),
+            reply_markup=build_ui_lang_inline(),
         )
-        await GenerateStates.ChoosingLanguage.set()
+        # Inline only; no FSM step
 
     @dp.message_handler(commands=["generate"])  # type: ignore
     async def cmd_generate(message: types.Message, state: FSMContext):
@@ -416,13 +416,11 @@ def create_dispatcher() -> Dispatcher:
         await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
         onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
-            # In onboarding chain, tag incognito callbacks with a special token to ensure the next step (fact-check) always follows
             prompt = "Инкогнито режим: включить или отключить?" if _is_ru(ui_lang) else "Incognito: Enable or Disable?"
-            kb = build_enable_disable_inline("incog_onb", ui_lang)
             await dp.bot.send_message(
                 query.message.chat.id if query.message else query.from_user.id,
                 prompt,
-                reply_markup=kb,
+                reply_markup=build_enable_disable_inline("incog", ui_lang),
             )
 
     @dp.message_handler(commands=["incognito"])  # type: ignore
@@ -432,10 +430,9 @@ def create_dispatcher() -> Dispatcher:
         prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
         await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog"))  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog:"))  # type: ignore
     async def cb_set_incog(query: types.CallbackQuery, state: FSMContext):
-        data_str = (query.data or "")
-        val = data_str.split(":")[-1]
+        val = (query.data or "").split(":")[-1]
         enabled = (val == "enable")
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
@@ -448,10 +445,8 @@ def create_dispatcher() -> Dispatcher:
         await query.answer()
         msg = "Инкогнито: включён." if (enabled and ui_lang=="ru") else ("Incognito: enabled." if enabled else ("Инкогнито: отключён." if ui_lang=="ru" else "Incognito: disabled."))
         await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
-        # Continue to fact-check question if this callback came from onboarding chain
-        onboarding_cb = ("incog_onb" in data_str)
         onboarding_flag = bool((await state.get_data()).get("onboarding"))
-        if onboarding_cb or onboarding_flag:
+        if onboarding_flag:
             # After incognito, ask fact-check preference before topic
             prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
             await dp.bot.send_message(
