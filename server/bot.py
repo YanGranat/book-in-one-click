@@ -295,11 +295,11 @@ def create_dispatcher() -> Dispatcher:
         }
         await query.message.edit_reply_markup() if query.message else None
         await query.answer()
-        await DP.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
         onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
             prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-            await DP.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
             await GenerateStates.ChoosingRefine.set()
 
     @dp.message_handler(commands=["provider"])  # type: ignore
@@ -349,6 +349,15 @@ def create_dispatcher() -> Dispatcher:
             reply_markup=build_lang_keyboard(),
         )
         await GenerateStates.ChoosingLanguage.set()
+
+    @dp.message_handler(commands=["generate"])  # type: ignore
+    async def cmd_generate(message: types.Message, state: FSMContext):
+        # Always ask for topic immediately
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
+        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
+        await GenerateStates.WaitingTopic.set()
 
     @dp.message_handler(commands=["logs"])  # type: ignore
     async def cmd_logs(message: types.Message, state: FSMContext):
