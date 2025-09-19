@@ -360,44 +360,79 @@ async def logs_ui(_: bool = Depends(require_admin)):
     # Reuse /logs data
     data = await list_logs()
     items = data.get("items", [])
-    # Format timestamp as YYYY-MM-DD HH:MM
+    # Format timestamp as YYYY-MM-DD HH:MM for initial render
     for it in items:
-        # Format timestamp as YYYY-MM-DD HH:MM
         try:
             from datetime import datetime
             ts_str = it.get("created_at", "")
             if ts_str:
-                if "T" in ts_str:  # ISO format
+                if "T" in ts_str:
                     dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                else:  # Already formatted
+                else:
                     dt = datetime.fromisoformat(ts_str)
                 it["created_at"] = dt.strftime("%Y-%m-%d %H:%M")
         except Exception:
             pass
     html_rows = []
     for it in items:
+        topic = (it.get("topic") or "").replace("<", "&lt;").replace(">", "&gt;")
         html_rows.append(
-            f"<tr>"
+            f"<tr data-id='{it.get('id')}' data-kind='{it.get('kind','')}' data-topic='{topic.lower()}'>"
             f"<td><input type='checkbox' class='sel' value='{it.get('id')}'></td>"
-            f"<td>{it.get('id')}</td>"
-            f"<td><a href='/logs-ui/{it.get('id')}'>{it.get('topic')}</a></td>"
-            f"<td>{it.get('created_at','')}</td>"
-            f"<td>{it.get('kind','')}</td>"
-            f"<td><button class='delBtn' data-id='{it.get('id')}'>Delete</button></td>"
+            f"<td class='t-id'>{it.get('id')}</td>"
+            f"<td class='t-topic'><a href='/logs-ui/{it.get('id')}'>{topic or '(no topic)'}</a></td>"
+            f"<td class='t-created'>{it.get('created_at','')}</td>"
+            f"<td class='t-kind'><span class='badge'>{it.get('kind','')}</span></td>"
+            f"<td class='t-actions'><a class='btn-link' href='/logs/{it.get('id')}'>Raw</a>"
+            f" <button class='delBtn' data-id='{it.get('id')}'>Delete</button></td>"
             f"</tr>"
         )
     html = (
-        "<html><head><meta charset='utf-8'><title>Logs</title>"
-        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;padding:20px}"
-        "table{border-collapse:collapse;width:100%}th,td{border:1px solid #333;padding:8px;text-align:left}"
-        "th{background:#111;color:#eee}tr:nth-child(even){background:#1a1a1a;color:#eee}a{color:#6cf}button{padding:4px 8px}</style></head><body>"
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Logs</title>"
+        "<style>"
+        ":root{--bg:#0e0f12;--panel:#151821;--muted:#9aa4b2;--text:#e6e9ef;--brand:#6cf;--ok:#4caf50;--warn:#ff9800;--err:#f44336;--line:#242938}"
+        "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;padding:24px}"
+        ".topbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px}"
+        ".topbar h1{font-size:20px;margin:0 16px 0 0}"
+        ".spacer{flex:1}"
+        "input[type=text],select{background:#0f121a;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;min-width:200px}"
+        "button,.btn{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}"
+        "button:hover,.btn:hover{border-color:#2f3a4f}a{color:var(--brand);text-decoration:none}a.btn-link{padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#131824;color:var(--text)}"
+        "table{border-collapse:separate;border-spacing:0;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}"
+        "th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}"
+        "thead th{position:sticky;top:0;background:#0f1218;color:#cbd5e1;font-weight:600}"
+        "tbody tr:hover{background:#121722}"
+        ".badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#1e2636;color:#cbd5e1;font-size:12px}"
+        ".muted{color:var(--muted)}"
+        ".actions{display:flex;gap:8px}"
+        "footer{margin-top:18px;color:var(--muted)}"
+        "</style></head><body>"
+        "<div class='topbar'>"
         "<h1>Generation Logs</h1>"
-        f"<p>Total: {len(items)}</p>"
+        "<a class='btn' href='/results-ui'>Results</a>"
+        "<div class='spacer'></div>"
+        "<input id='q' type='text' placeholder='Search topic...'>"
+        "<select id='k'><option value=''>All kinds</option><option>md</option><option>json</option><option>txt</option></select>"
+        "<button id='refresh'>Refresh</button>"
         "<button id='delSel'>Delete selected</button>"
-        "<table><thead><tr><th></th><th>ID</th><th>Topic</th><th>Created</th><th>Kind</th><th>Action</th></tr></thead><tbody>"
-        + ("".join(html_rows) or "<tr><td colspan='4'>No logs yet</td></tr>")
+        "</div>"
+        f"<div class='muted'>Total: {len(items)}</div>"
+        "<table id='tbl'><thead><tr><th><input id='selAll' type='checkbox'></th><th data-sort='id'>ID</th><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Actions</th></tr></thead><tbody>"
+        + ("".join(html_rows) or "<tr><td colspan='6' class='muted'>No logs yet</td></tr>")
         + "</tbody></table>"
-        "<script>document.addEventListener('click',async(e)=>{if(e.target.matches('.delBtn')){const id=e.target.getAttribute('data-id');if(confirm('Delete log '+id+'?')){const r=await fetch('/logs/'+id,{method:'DELETE'});const j=await r.json();if(j&&j.ok){location.reload();}}}});document.getElementById('delSel').onclick=async()=>{const ids=[...document.querySelectorAll('.sel:checked')].map(x=>parseInt(x.value));if(!ids.length)return;if(!confirm('Delete '+ids.length+' logs?'))return;const r=await fetch('/logs/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const j=await r.json();if(j&&j.ok){location.reload();}};</script>"
+        "<footer>Tip: Click column headers to sort. Use search and kind filter to narrow down.</footer>"
+        "<script>"
+        "const $$=(s,el=document)=>el.querySelector(s);const $$$=(s,el=document)=>[...el.querySelectorAll(s)];"
+        "const q=$$('#q'),k=$$('#k'),selAll=$$('#selAll'),tbody=$$('#tbl tbody');"
+        "function applyFilter(){const term=(q.value||'').toLowerCase();const kind=(k.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const t=tr.getAttribute('data-topic')||'';const kd=(tr.getAttribute('data-kind')||'').toLowerCase();const ok=(t.includes(term)) && (!kind||kd===kind);tr.style.display=ok?'':'none';}}"
+        "q.oninput=applyFilter;k.onchange=applyFilter;"
+        "selAll.onchange=()=>{$$$('input.sel',tbody).forEach(x=>{if(x.closest('tr').style.display!=='none')x.checked=selAll.checked;});};"
+        "document.addEventListener('click',async(e)=>{if(e.target.matches('.delBtn')){const id=e.target.getAttribute('data-id');if(confirm('Delete log '+id+'?')){const r=await fetch('/logs/'+id,{method:'DELETE'});const j=await r.json();if(j&&j.ok){location.reload();}}}});"
+        "$$('#delSel').onclick=async()=>{const ids=$$$('input.sel:checked',tbody).map(x=>parseInt(x.value));if(!ids.length)return;if(!confirm('Delete '+ids.length+' logs?'))return;const r=await fetch('/logs/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const j=await r.json();if(j&&j.ok){location.reload();}};"
+        "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim();const B=(b.querySelector('.t-'+key)?.textContent||'').trim();if(key==='id')return (asc?1:-1)*(parseInt(A)-parseInt(B));return (asc?1:-1)*(A.localeCompare(B));});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
+        "$$('#refresh').onclick=()=>location.reload();"
+        "</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
@@ -418,35 +453,35 @@ async def log_view_ui(log_id: int, _: bool = Depends(require_admin)):
     from html import escape as _esc
     _raw = (_esc(initial_content or "").replace("</textarea>", "&lt;/textarea&gt;") if initial_content else "")
     html = (
-        "<html><head><meta charset='utf-8'><title>Log View</title>"
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Log View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
-        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.5;font-size:12px}"
-        "header{background:#111;color:#eee;padding:6px 10px;display:flex;gap:10px;align-items:center;font-size:12px}"
-        "main{padding:10px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
-        "h1{font-size:1.8em;margin:0.6em 0 0.3em;font-weight:700}h2{font-size:1.5em;margin:0.6em 0 0.3em;color:#333;font-weight:700}h3{font-size:1.25em;margin:0.5em 0 0.25em;color:#555;font-weight:600}"
-        "code{background:#0b0b0b0a;color:inherit;padding:0;font-size:12px}pre{background:#0b0b0b0a;color:inherit;padding:8px;border-radius:6px;white-space:pre-wrap;word-wrap:break-word;font-size:12px}"
-        "p{margin:0.25em 0;font-size:12px}ul,ol{margin:0.25em 0}li{margin:0.1em 0;font-size:12px}"
+        "<style>"
+        ":root{--bg:#0e0f12;--panel:#151821;--muted:#9aa4b2;--text:#e6e9ef;--brand:#6cf;--line:#242938}"
+        "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;}"
+        "header{background:#0f1218;border-bottom:1px solid var(--line);color:#e6e9ef;padding:10px 14px;display:flex;gap:12px;align-items:center}"
+        "header a{color:var(--brand)}.spacer{flex:1}.toolbar button{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer;margin-left:8px}"
+        "main{padding:14px}#content{max-width:1000px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}a{color:var(--brand)}"
+        "h1{font-size:18px;margin:0;font-weight:700}.meta{opacity:.8;font-size:12px}"
+        "code{background:#0f121a;color:inherit;padding:0 2px;font-size:12px}pre{background:#0f121a;color:inherit;padding:12px;border-radius:8px;white-space:pre-wrap;word-wrap:break-word;font-size:12px}"
         "</style></head><body>"
-        f"<header><a href='/logs-ui'>← Back</a><div>{title}</div>"
-        f"<div id='meta' style='margin-left:auto;opacity:.8'>provider=? | lang=?</div>"
-        "</header>"
-        "<main>"
-        "<div id='content'></div>"
-        f"<textarea id='raw' style='display:none'>{_raw}</textarea>"
-        "</main>"
+        f"<header><a href='/logs-ui'>← Logs</a><a href='/results-ui'>Results</a><div class='spacer'></div><div class='toolbar'><button id='copy'>Copy</button><button id='download'>Download .md</button><button id='toggleRaw'>Show raw</button></div></header>"
+        f"<main><div class='meta' id='meta'>Log: {title}</div><div id='content'></div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
         f"<script>const LOG_ID={log_id};"
         "const TAGS=['input','topic','lang','post','critique_json'];"
-        "function escapeOutsideCode(md){const lines=md.split('\\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\\n');}"
-        "function extractMeta(md){const out={};const lines=md.split('\\n');for(let i=0;i<Math.min(lines.length,80);i++){const line=lines[i].trim();if(line.startsWith('- provider:')){out.provider=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- lang:')){out.lang=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- topic:')){out.topic=line.split(':').slice(1).join(':').trim();}}return out;}"
-        "let text=(document.getElementById('raw')?document.getElementById('raw').value:'');"
-        "function render(md){const raw=(md||'');const fencedRaw=raw.replace(/<input>[\\s\\S]*?<\\/input>/g, m=> '```\\n'+m+'\\n```');const escaped=escapeOutsideCode(fencedRaw);"
-        "let html='';try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}"
-        "if(!html||html.trim()===''){const safe=escaped.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>'; }"
-        "const m=extractMeta(md||'');const metaEl=document.getElementById('meta');if(metaEl){metaEl.textContent=`provider=${m.provider||'?'} | lang=${m.lang||'?'}`;}"
-        "document.getElementById('content').innerHTML = html;}"
+        "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
+        "function extractMeta(md){const out={};const lines=md.split('\n');for(let i=0;i<Math.min(lines.length,120);i++){const line=lines[i].trim();if(line.startsWith('- provider:')){out.provider=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- lang:')){out.lang=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- topic:')){out.topic=line.split(':').slice(1).join(':').trim();}}return out;}"
+        "let text=(document.getElementById('raw')?document.getElementById('raw').value:'');let showRaw=false;"
+        "function render(md){const raw=(md||'');const fencedRaw=raw.replace(/<input>[\s\S]*?<\/input>/g, m=> '```\n'+m+'\n```');const escaped=escapeOutsideCode(fencedRaw);let html='';"
+        "try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=escaped.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>'; }"
+        "const m=extractMeta(md||'');const metaEl=document.getElementById('meta');if(metaEl){metaEl.textContent=`provider=${m.provider||'?'} | lang=${m.lang||'?'} | topic=${m.topic||'?'} | id=${LOG_ID}`;}"
+        "document.getElementById('content').innerHTML = showRaw?('<pre>'+md.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>'):html;}"
         "render(text);"
-        "async function refresh(){try{const r=await fetch('/logs/'+LOG_ID,{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}}catch(_){/* ignore */}}"
-        "refresh();</script>"
+        "async function refresh(){try{const r=await fetch('/logs/'+LOG_ID,{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}}catch(_){}}refresh();"
+        "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
+        "document.getElementById('download').onclick=()=>{const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'log')+'.md';a.click();};"
+        "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}"
+        "</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
@@ -536,20 +571,54 @@ async def results_ui():
     for it in items:
         if "id" in it and isinstance(it.get("id"), int):
             link = f"/results-ui/id/{it['id']}"
+            topic = (it.get('topic','') or '').replace('<','&lt;').replace('>','&gt;')
             rows.append(
-                f"<tr><td><a href='{link}'>{it.get('name','result.md')}</a></td>"
-                f"<td>{it.get('created_at','')}</td><td>{it.get('kind','')}</td><td>{it.get('provider','')}</td><td>{it.get('lang','')}</td><td>{it.get('topic','')}</td></tr>"
+                f"<tr data-id='{it.get('id')}' data-topic='{topic.lower()}' data-prov='{(it.get('provider','') or '').lower()}' data-lang='{(it.get('lang','') or '').lower()}'>"
+                f"<td class='t-name'><a href='{link}'>{it.get('name','result.md')}</a></td>"
+                f"<td class='t-created'>{it.get('created_at','')}</td><td class='t-kind'>{it.get('kind','')}</td>"
+                f"<td class='t-prov'>{it.get('provider','')}</td><td class='t-lang'>{it.get('lang','')}</td><td class='t-topic'>{topic}</td>"
+                f"<td class='t-actions'><a class='btn-link' href='{link}'>Open</a> <button class='dlBtn' data-id='{it.get('id')}'>Download</button></td>"
+                f"</tr>"
             )
     html = (
-        "<html><head><meta charset='utf-8'><title>Results</title>"
-        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;padding:20px}"
-        "table{border-collapse:collapse;width:100%}th,td{border:1px solid #333;padding:8px;text-align:left}"
-        "th{background:#111;color:#eee}tr:nth-child(even){background:#1a1a1a;color:#eee}a{color:#6cf}</style></head><body>"
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Results</title>"
+        "<style>"
+        ":root{--bg:#0e0f12;--panel:#151821;--muted:#9aa4b2;--text:#e6e9ef;--brand:#6cf;--line:#242938}"
+        "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;padding:24px}"
+        ".topbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px}"
+        ".topbar h1{font-size:20px;margin:0 16px 0 0}a{color:var(--brand)}.spacer{flex:1}"
+        "input[type=text],select{background:#0f121a;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;min-width:200px}"
+        "button,.btn{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}"
+        "button:hover,.btn:hover{border-color:#2f3a4f}a.btn-link{padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#131824;color:var(--text)}"
+        "table{border-collapse:separate;border-spacing:0;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}"
+        "th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}"
+        "thead th{position:sticky;top:0;background:#0f1218;color:#cbd5e1;font-weight:600}tbody tr:hover{background:#121722}"
+        "footer{margin-top:18px;color:var(--muted)}"
+        "</style></head><body>"
+        "<div class='topbar'>"
         "<h1>Generated Results</h1>"
-        f"<p>Total: {len(items)}</p>"
-        "<table><thead><tr><th>Name</th><th>Created</th><th>Kind</th><th>Provider</th><th>Lang</th><th>Topic</th></tr></thead><tbody>"
-        + ("".join(rows) or "<tr><td colspan='6'>No results yet</td></tr>")
+        "<a class='btn' href='/logs-ui'>Logs</a>"
+        "<div class='spacer'></div>"
+        "<input id='q' type='text' placeholder='Search topic...'>"
+        "<select id='prov'><option value=''>All providers</option><option>openai</option><option>gemini</option><option>claude</option></select>"
+        "<select id='lang'><option value=''>All languages</option><option>ru</option><option>en</option></select>"
+        "<button id='refresh'>Refresh</button>"
+        "</div>"
+        f"<div class='muted'>Total: {len(items)}</div>"
+        "<table id='tbl'><thead><tr><th data-sort='name'>Name</th><th data-sort='created'>Created</th><th>Kind</th><th data-sort='prov'>Provider</th><th data-sort='lang'>Lang</th><th data-sort='topic'>Topic</th><th>Actions</th></tr></thead><tbody>"
+        + ("".join(rows) or "<tr><td colspan='7' class='muted'>No results yet</td></tr>")
         + "</tbody></table>"
+        "<footer>Tip: Filter by provider/lang and search by topic. Click headers to sort.</footer>"
+        "<script>"
+        "const $$=(s,el=document)=>el.querySelector(s);const $$$=(s,el=document)=>[...el.querySelectorAll(s)];"
+        "const q=$$('#q'),prov=$$('#prov'),lang=$$('#lang'),tbody=$$('#tbl tbody');"
+        "function applyFilter(){const term=(q.value||'').toLowerCase();const p=(prov.value||'').toLowerCase();const l=(lang.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const tt=(tr.getAttribute('data-topic')||'');const tp=(tr.getAttribute('data-prov')||'');const tl=(tr.getAttribute('data-lang')||'');const ok=tt.includes(term)&&(!p||tp===p)&&(!l||tl===l);tr.style.display=ok?'':'none';}}"
+        "q.oninput=applyFilter;prov.onchange=applyFilter;lang.onchange=applyFilter;"
+        "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();const B=(b.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();return (asc?1:-1)*A.localeCompare(B);});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
+        "document.addEventListener('click',async(e)=>{if(e.target.matches('.dlBtn')){const id=e.target.getAttribute('data-id');try{const r=await fetch('/results/'+id,{cache:'no-store'});const j=await r.json();if(j&&j.content){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([j.content],{type:'text/markdown'}));a.download=(j.path?j.path.split('/').pop():'result.md');a.click();}}catch(_){}}});"
+        "$$('#refresh').onclick=()=>location.reload();"
+        "</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
@@ -619,21 +688,26 @@ async def result_view_ui_id(res_id: int):
     from html import escape as _esc
     _raw = (_esc(content or "").replace("</textarea>", "&lt;/textarea&gt;") if content else "")
     html = (
-        "<html><head><meta charset='utf-8'><title>Result View</title>"
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Result View</title>"
         "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
-        "<style>body{font-family:system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;line-height:1.5;font-size:14px}"
-        "header{background:#111;color:#eee;padding:6px 10px;display:flex;gap:10px;align-items:center}"
-        "main{padding:10px}#content{max-width:1000px;margin:0 auto}a{color:#6cf}"
-        "h1,h2,h3{margin:0.6em 0 0.3em;font-weight:700}pre{white-space:pre-wrap;word-wrap:break-word}"
+        "<style>"
+        ":root{--bg:#0e0f12;--panel:#151821;--muted:#9aa4b2;--text:#e6e9ef;--brand:#6cf;--line:#242938}"
+        "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;}"
+        "header{background:#0f1218;border-bottom:1px solid var(--line);color:#e6e9ef;padding:10px 14px;display:flex;gap:12px;align-items:center}"
+        "header a{color:var(--brand)}.spacer{flex:1}.toolbar button{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer;margin-left:8px}"
+        "main{padding:14px}#content{max-width:1000px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}a{color:var(--brand)}"
+        ".meta{opacity:.8;font-size:12px;margin:0 0 8px}pre{white-space:pre-wrap;word-wrap:break-word;background:#0f121a;border-radius:8px;padding:12px;border:1px solid var(--line)}"
         "</style></head><body>"
-        f"<header><a href='/results-ui'>← Back</a><div>{title}</div></header>"
-        "<main>"
-        "<div id='content'></div>"
-        f"<textarea id='raw' style='display:none'>{_raw}</textarea>"
-        "</main>"
-        f"<script>const RES_ID={res_id};let text=(document.getElementById('raw')?document.getElementById('raw').value:'');"
-        "function render(md){let html='';try{html=(window.marked?window.marked.parse(md):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=md.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>';}document.getElementById('content').innerHTML=html;}"
-        "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}}catch(_){}}refresh();</script>"
+        f"<header><a href='/results-ui'>← Results</a><a href='/logs-ui'>Logs</a><div class='spacer'></div><div class='toolbar'><button id='copy'>Copy</button><button id='download'>Download .md</button><button id='toggleRaw'>Show raw</button></div></header>"
+        f"<main><div class='meta' id='meta'>Result: {title}</div><div id='content'></div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
+        f"<script>const RES_ID={res_id};let text=(document.getElementById('raw')?document.getElementById('raw').value:'');let showRaw=false;"
+        "function render(md){let html='';try{html=(window.marked?window.marked.parse(md):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=md.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>';}document.getElementById('content').innerHTML=showRaw?('<pre>'+md.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>'):html;}"
+        "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&(j.content||j.path)){if(j.content)text=j.content;const meta=document.getElementById('meta');if(meta){meta.textContent=`provider=${j.provider||'?'} | lang=${j.lang||'?'} | topic=${j.topic||'?'} | id=${RES_ID}`;}render(text);}}catch(_){}}refresh();"
+        "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
+        "document.getElementById('download').onclick=()=>{const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'result')+'.md';a.click();};"
+        "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}"
+        "</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
