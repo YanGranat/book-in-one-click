@@ -21,6 +21,12 @@ from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 from .kv import set_gen_lang, get_gen_lang
 from .kv import set_refine_enabled, get_refine_enabled
+from .kv import (
+    set_factcheck_enabled,
+    get_factcheck_enabled,
+    set_factcheck_depth,
+    get_factcheck_depth,
+)
 
 
 def _load_env():
@@ -139,6 +145,12 @@ def build_depth_inline() -> InlineKeyboardMarkup:
     kb.add(InlineKeyboardButton(text="2", callback_data="set:depth:2"))
     kb.add(InlineKeyboardButton(text="3", callback_data="set:depth:3"))
     return kb
+
+
+def _stars_enabled() -> bool:
+    # Stars поддерживаются нативно Bot API (provider_token="STARS").
+    # Делаем включённым по умолчанию; при ошибке sendInvoice покажем алерт.
+    return True
 
 
 def build_lang_keyboard() -> ReplyKeyboardMarkup:
@@ -374,7 +386,6 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["generate"])  # type: ignore
     async def cmd_generate(message: types.Message, state: FSMContext):
-        # Always ask for topic immediately
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
@@ -405,8 +416,14 @@ def create_dispatcher() -> Dispatcher:
         await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
         onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
+            # In onboarding chain, tag incognito callbacks with a special token to ensure the next step (fact-check) always follows
             prompt = "Инкогнито режим: включить или отключить?" if _is_ru(ui_lang) else "Incognito: Enable or Disable?"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
+            kb = build_enable_disable_inline("incog_onb", ui_lang)
+            await dp.bot.send_message(
+                query.message.chat.id if query.message else query.from_user.id,
+                prompt,
+                reply_markup=kb,
+            )
 
     @dp.message_handler(commands=["incognito"])  # type: ignore
     async def cmd_incognito(message: types.Message, state: FSMContext):
@@ -415,9 +432,10 @@ def create_dispatcher() -> Dispatcher:
         prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
         await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog:"))  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog"))  # type: ignore
     async def cb_set_incog(query: types.CallbackQuery, state: FSMContext):
-        val = (query.data or "").split(":")[-1]
+        data_str = (query.data or "")
+        val = data_str.split(":")[-1]
         enabled = (val == "enable")
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
@@ -430,11 +448,17 @@ def create_dispatcher() -> Dispatcher:
         await query.answer()
         msg = "Инкогнито: включён." if (enabled and ui_lang=="ru") else ("Incognito: enabled." if enabled else ("Инкогнито: отключён." if ui_lang=="ru" else "Incognito: disabled."))
         await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
-        onboarding = bool((await state.get_data()).get("onboarding"))
-        if onboarding:
-            prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
-            await GenerateStates.WaitingTopic.set()
+        # Continue to fact-check question if this callback came from onboarding chain
+        onboarding_cb = ("incog_onb" in data_str)
+        onboarding_flag = bool((await state.get_data()).get("onboarding"))
+        if onboarding_cb or onboarding_flag:
+            # After incognito, ask fact-check preference before topic
+            prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
+            await dp.bot.send_message(
+                query.message.chat.id if query.message else query.from_user.id,
+                prompt,
+                reply_markup=build_yesno_inline("fc", ui_lang),
+            )
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
@@ -471,6 +495,74 @@ def create_dispatcher() -> Dispatcher:
         await state.finish()
         await message.answer(done, reply_markup=ReplyKeyboardRemove())
 
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"))  # type: ignore
+    async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        enabled = (val == "yes")
+        await state.update_data(factcheck=enabled)
+        try:
+            if query.from_user:
+                await set_factcheck_enabled(query.from_user.id, enabled)
+        except Exception:
+            pass
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
+        if enabled:
+            prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
+        else:
+            prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
+            await GenerateStates.WaitingTopic.set()
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
+    async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        try:
+            depth = int(val)
+        except Exception:
+            depth = 1
+        await state.update_data(research_iterations=depth)
+        try:
+            if query.from_user:
+                await set_factcheck_depth(query.from_user.id, depth)
+        except Exception:
+            pass
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
+        await GenerateStates.WaitingTopic.set()
+
+    # ---- Fact-check settings command ----
+    @dp.message_handler(commands=["factcheck"])  # type: ignore
+    async def cmd_factcheck(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Факт-чекинг: включить или отключить?" if _is_ru(ui_lang) else "Fact-check: Enable or Disable?"
+        await message.answer(prompt, reply_markup=build_enable_disable_inline("fc_cmd", ui_lang))
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc_cmd:"))  # type: ignore
+    async def cb_fc_cmd_toggle(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        enabled = (val == "enable")
+        await set_factcheck_enabled(query.from_user.id, enabled)
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        if enabled:
+            prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
+        else:
+            msg = "Факт-чекинг: отключён." if _is_ru(ui_lang) else "Fact-check: disabled."
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+
+
     @dp.message_handler(state=GenerateStates.WaitingTopic, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def topic_received(message: types.Message, state: FSMContext):
         text_raw = (message.text or "").strip()
@@ -487,9 +579,13 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(msg)
             return
         await state.update_data(topic=topic)
-        q = "Включить факт-чекинг?" if ui_lang == "ru" else "Enable fact-checking?"
-        await message.answer(q, reply_markup=build_yesno_keyboard())
-        await GenerateStates.ChoosingFactcheck.set()
+        # Если факт-чекинг не выбран заранее (через /generate поток) — спросим сейчас
+        fc = bool(data.get("factcheck"))
+        if fc is None or (not data.get("factcheck") and data.get("research_iterations") is None):
+            prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
+            await message.answer(prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+            return
+        # иначе ничего не спрашиваем — пойдём в генерацию при выборе Да/Нет/Глубины
 
     @dp.message_handler(state=GenerateStates.ChoosingFactcheck)  # type: ignore
     async def choose_factcheck(message: types.Message, state: FSMContext):
@@ -783,22 +879,28 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             bal = 0
         txt = (f"Баланс: {bal} кредит(ов)." if _is_ru(ui_lang) else f"Balance: {bal} credits.")
-        try:
-            await message.answer(
-                txt + ("\nХотите купить кредиты за ⭐?" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐?"),
-                reply_markup=build_buy_keyboard(ui_lang),
-            )
-        except Exception:
+        if _stars_enabled():
+            try:
+                await message.answer(
+                    txt + ("\nХотите купить кредиты за ⭐?" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐?"),
+                    reply_markup=build_buy_keyboard(ui_lang),
+                )
+            except Exception:
+                await message.answer(txt)
+        else:
             await message.answer(txt)
 
     @dp.message_handler(commands=["buy"])  # type: ignore
     async def cmd_buy(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        await message.answer(
-            ("Выберите пакет кредитов:" if _is_ru(ui_lang) else "Choose a credits pack:"),
-            reply_markup=build_buy_keyboard(ui_lang),
-        )
+        if _stars_enabled():
+            await message.answer(
+                ("Выберите пакет кредитов:" if _is_ru(ui_lang) else "Choose a credits pack:"),
+                reply_markup=build_buy_keyboard(ui_lang),
+            )
+        else:
+            await message.answer("Покупка через ⭐ недоступна." if _is_ru(ui_lang) else "Buying with ⭐ is unavailable.")
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
     async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
@@ -809,7 +911,7 @@ def create_dispatcher() -> Dispatcher:
         chat_id = query.message.chat.id if query.message else user_id
         # Env gating
         import os as _os
-        enable_stars = (_os.getenv("TELEGRAM_STARS_ENABLED", "0").strip() == "1")
+        enable_stars = _stars_enabled()
         provider_token = _os.getenv("TELEGRAM_STARS_PROVIDER_TOKEN", "").strip()
         if not enable_stars:
             await query.answer("Not configured", show_alert=True)
