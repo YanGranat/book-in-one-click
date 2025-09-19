@@ -83,6 +83,19 @@ def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
+def build_genlang_inline(ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    if _is_ru(ui_lang):
+        kb.add(InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"))
+        kb.add(InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"))
+        kb.add(InlineKeyboardButton(text="Авто", callback_data="set:gen_lang:auto"))
+    else:
+        kb.add(InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"))
+        kb.add(InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"))
+        kb.add(InlineKeyboardButton(text="Auto", callback_data="set:gen_lang:auto"))
+    return kb
+
+
 def build_lang_keyboard() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("English"))
@@ -239,10 +252,9 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         onboarding = bool(data.get("onboarding"))
         if onboarding:
-            # Next: choose generation language
+            # Next: choose generation language (inline keyboard, no FSM until click)
             prompt = "Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"
-            await message.answer(prompt, reply_markup=build_genlang_keyboard())
-            await GenerateStates.ChoosingGenLanguage.set()
+            await message.answer(prompt, reply_markup=build_genlang_inline(ui_lang))
         else:
             await state.finish()
 
@@ -253,29 +265,20 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         await message.answer(
             "Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:",
-            reply_markup=build_genlang_keyboard(),
+            reply_markup=build_genlang_inline(ui_lang),
         )
-        await GenerateStates.ChoosingGenLanguage.set()
+        # Inline only; no FSM step
 
-    @dp.message_handler(state=GenerateStates.ChoosingGenLanguage)  # type: ignore
-    async def choose_gen_language(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip().lower()
-        if text.startswith("/generate"):
-            await state.finish()
-            await cmd_generate(message, state)
-            return
-        if text.startswith("ru"):
-            gen_lang = "ru"
-        elif text.startswith("en"):
-            gen_lang = "en"
-        else:
-            gen_lang = "auto"
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:gen_lang:"))  # type: ignore
+    async def cb_set_gen_lang(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        gen_lang = val if val in {"ru","en","auto"} else "auto"
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         await state.update_data(gen_lang=gen_lang)
         try:
-            if message.from_user:
-                await set_gen_lang(message.from_user.id, gen_lang)  # persist per-user
+            if query.from_user:
+                await set_gen_lang(query.from_user.id, gen_lang)
         except Exception:
             pass
         msg = {
@@ -290,15 +293,14 @@ def create_dispatcher() -> Dispatcher:
                 "auto": "Generation language: auto (by topic).",
             },
         }
-        await message.answer(msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"), reply_markup=ReplyKeyboardRemove())
-        onboarding = bool(data.get("onboarding"))
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
+        await DP.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
+        onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
-            # Next: refine preference
             prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-            await message.answer(prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
+            await DP.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
             await GenerateStates.ChoosingRefine.set()
-        else:
-            await state.finish()
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
