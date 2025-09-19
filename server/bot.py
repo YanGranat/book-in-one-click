@@ -791,100 +791,100 @@ def create_dispatcher() -> Dispatcher:
         await state.finish()
         RUNNING_CHATS.discard(chat_id)
 
-    return dp
+    # ---- Balance and purchasing with Telegram Stars ----
+    @dp.message_handler(commands=["balance"])  # type: ignore
+    async def cmd_balance(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        try:
+            from .kv import get_balance_kv
+            bal = await get_balance_kv(message.from_user.id) if message.from_user else 0
+        except Exception:
+            bal = 0
+        txt = (f"Баланс: {bal} кредит(ов)." if _is_ru(ui_lang) else f"Balance: {bal} credits.")
+        try:
+            await message.answer(
+                txt + ("\nХотите купить кредиты за ⭐?" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐?"),
+                reply_markup=build_buy_keyboard(ui_lang),
+            )
+        except Exception:
+            await message.answer(txt)
 
-
-# ---- Balance and purchasing with Telegram Stars ----
-@dp.message_handler(commands=["balance"])  # type: ignore
-async def cmd_balance(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    ui_lang = (data.get("ui_lang") or "ru").strip()
-    try:
-        from .kv import get_balance_kv
-        bal = await get_balance_kv(message.from_user.id) if message.from_user else 0
-    except Exception:
-        bal = 0
-    txt = (f"Баланс: {bal} кредит(ов)." if _is_ru(ui_lang) else f"Balance: {bal} credits.")
-    try:
+    @dp.message_handler(commands=["buy"])  # type: ignore
+    async def cmd_buy(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
         await message.answer(
-            txt + ("\nХотите купить кредиты за ⭐?" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐?"),
+            ("Выберите пакет кредитов:" if _is_ru(ui_lang) else "Choose a credits pack:"),
             reply_markup=build_buy_keyboard(ui_lang),
         )
-    except Exception:
-        await message.answer(txt)
 
-
-@dp.message_handler(commands=["buy"])  # type: ignore
-async def cmd_buy(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    ui_lang = (data.get("ui_lang") or "ru").strip()
-    await message.answer(
-        ("Выберите пакет кредитов:" if _is_ru(ui_lang) else "Choose a credits pack:"),
-        reply_markup=build_buy_keyboard(ui_lang),
-    )
-
-
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
-async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
-    credits_map = {"1": 1, "3": 3, "5": 5}
-    parts = (query.data or "").split(":")
-    pack = credits_map.get(parts[-1], 1)
-    user_id = query.from_user.id
-    chat_id = query.message.chat.id if query.message else user_id
-    # Env gating
-    import os as _os
-    enable_stars = (_os.getenv("TELEGRAM_STARS_ENABLED", "0").strip() == "1")
-    provider_token = _os.getenv("TELEGRAM_STARS_PROVIDER_TOKEN", "").strip()
-    if not enable_stars:
-        await query.answer("Not configured", show_alert=True)
-        return
-    try:
-        prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 200)]
-        payload = f"credits={pack}&stars={pack*200}"
-        title = f"Credits x{pack}"
-        description = "Buy generation credits using Telegram Stars"
-        await DP.bot.send_invoice(
-            chat_id=chat_id,
-            title=title,
-            description=description,
-            payload=payload,
-            provider_token=provider_token,
-            currency="XTR",
-            prices=prices,
-            start_parameter=f"buy_{pack}",
-        )
-        await query.answer()
-    except Exception as e:
-        await query.answer(str(e)[:180], show_alert=True)
-
-
-@dp.pre_checkout_query_handler(lambda q: True)  # type: ignore
-async def process_pre_checkout_query(pre_checkout_q: types.PreCheckoutQuery):
-    try:
-        await DP.bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
-    except Exception:
-        pass
-
-
-@dp.message_handler(content_types=types.ContentTypes.SUCCESSFUL_PAYMENT)  # type: ignore
-async def got_payment(message: types.Message):
-    try:
-        payload = (message.successful_payment.invoice_payload or "")
-        # payload format: credits=N&stars=S
-        num = 0
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
+    async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
+        credits_map = {"1": 1, "3": 3, "5": 5}
+        parts = (query.data or "").split(":")
+        pack = credits_map.get(parts[-1], 1)
+        user_id = query.from_user.id
+        chat_id = query.message.chat.id if query.message else user_id
+        # Env gating
+        import os as _os
+        enable_stars = (_os.getenv("TELEGRAM_STARS_ENABLED", "0").strip() == "1")
+        provider_token = _os.getenv("TELEGRAM_STARS_PROVIDER_TOKEN", "").strip()
+        if not enable_stars:
+            await query.answer("Not configured", show_alert=True)
+            return
         try:
-            for kv in payload.split("&"):
-                k, v = kv.split("=", 1)
-                if k == "credits":
-                    num = int(v)
+            prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 200)]
+            payload = f"credits={pack}&stars={pack*200}"
+            title = f"Credits x{pack}"
+            description = "Buy generation credits using Telegram Stars"
+            await dp.bot.send_invoice(
+                chat_id=chat_id,
+                title=title,
+                description=description,
+                payload=payload,
+                provider_token=provider_token,
+                currency="XTR",
+                prices=prices,
+                start_parameter=f"buy_{pack}",
+            )
+            await query.answer()
+        except Exception as e:
+            await query.answer(str(e)[:180], show_alert=True)
+
+    @dp.pre_checkout_query_handler(lambda q: True)  # type: ignore
+    async def process_pre_checkout_query(pre_checkout_q: types.PreCheckoutQuery):
+        try:
+            await dp.bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
         except Exception:
+            pass
+
+    @dp.message_handler(content_types=types.ContentTypes.SUCCESSFUL_PAYMENT)  # type: ignore
+    async def got_payment(message: types.Message):
+        try:
+            payload = (message.successful_payment.invoice_payload or "")
+            # payload format: credits=N&stars=S
             num = 0
-        if num > 0 and message.from_user:
-            from .kv import topup_kv
-            await topup_kv(message.from_user.id, num)
-        await message.answer("Спасибо! Кредиты начислены." if (await dp.current_state(user=message.from_user.id, chat=message.chat.id).get_data()).get("ui_lang","ru")=="ru" else "Thank you! Credits added.")
-    except Exception:
-        pass
+            try:
+                for kv in payload.split("&"):
+                    k, v = kv.split("=", 1)
+                    if k == "credits":
+                        num = int(v)
+            except Exception:
+                num = 0
+            if num > 0 and message.from_user:
+                from .kv import topup_kv
+                await topup_kv(message.from_user.id, num)
+            try:
+                st = await dp.current_state(user=message.from_user.id, chat=message.chat.id).get_data()
+                ui_lang = (st.get("ui_lang") or "ru").strip()
+            except Exception:
+                ui_lang = "ru"
+            await message.answer("Спасибо! Кредиты начислены." if _is_ru(ui_lang) else "Thank you! Credits added.")
+        except Exception:
+            pass
+
+    return dp
 
 
 
