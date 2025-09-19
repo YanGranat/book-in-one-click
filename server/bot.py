@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardRemove
 
 from utils.env import load_env_from_root
 # i18n and language detection
@@ -104,22 +104,7 @@ def _is_ru(ui_lang: str) -> bool:
     return (ui_lang or "").strip().lower() != "en"
 
 
-def build_enable_disable_keyboard_lang(ui_lang: str) -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    if _is_ru(ui_lang):
-        kb.add(KeyboardButton("Включить"), KeyboardButton("Отключить"))
-    else:
-        kb.add(KeyboardButton("Enable"), KeyboardButton("Disable"))
-    return kb
-
-
-def build_yesno_keyboard_lang(ui_lang: str) -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    if _is_ru(ui_lang):
-        kb.add(KeyboardButton("Да"), KeyboardButton("Нет"))
-    else:
-        kb.add(KeyboardButton("Yes"), KeyboardButton("No"))
-    return kb
+# Legacy ReplyKeyboard builders removed; we use inline keyboards everywhere
 
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
@@ -197,53 +182,12 @@ def build_depth_inline() -> InlineKeyboardMarkup:
 
 
 def _stars_enabled() -> bool:
-    # Stars поддерживаются нативно Bot API (provider_token="STARS").
-    # Делаем включённым по умолчанию; при ошибке sendInvoice покажем алерт.
-    return True
+    # Enable Stars only when explicitly configured via env
+    flag = os.getenv("TELEGRAM_STARS_ENABLED", "").strip().lower()
+    return flag in ("1", "true", "yes")
 
 
-def build_lang_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("English"))
-    kb.add(KeyboardButton("Русский"))
-    kb.add(KeyboardButton("Other / Auto"))
-    return kb
-
-
-def build_yesno_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Yes"), KeyboardButton("No"))
-    return kb
-
-
-def build_depth_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("1"), KeyboardButton("2"), KeyboardButton("3"))
-    return kb
-
-
-def build_genlang_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Auto"), KeyboardButton("RU"), KeyboardButton("EN"))
-    return kb
-def build_provider_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("OpenAI"), KeyboardButton("Gemini"), KeyboardButton("Claude"))
-    return kb
-
-
-def build_logs_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Включить"), KeyboardButton("Отключить"))
-    return kb
-
-def build_incognito_keyboard() -> ReplyKeyboardMarkup:
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Включить"), KeyboardButton("Отключить"))
-    return kb
-
-
-# Removed unused build_cancel_keyboard - we use /cancel command instead
+# Removed legacy ReplyKeyboard-based builders to unify inline-only UI
 
 
 def create_dispatcher() -> Dispatcher:
@@ -306,6 +250,18 @@ def create_dispatcher() -> Dispatcher:
                 return {"ru": "русский", "en": "английский", "auto": "авто"}.get((l or "auto").lower(), "авто")
             return {"ru": "Russian", "en": "English", "auto": "Auto"}.get((l or "auto").lower(), "Auto")
 
+        # Extra settings
+        refine_enabled = False
+        fc_enabled = False
+        fc_depth = 2
+        try:
+            if message.from_user:
+                refine_enabled = await get_refine_enabled(message.from_user.id)
+                fc_enabled = await get_factcheck_enabled(message.from_user.id)
+                fc_depth = await get_factcheck_depth(message.from_user.id)
+        except Exception:
+            pass
+
         if ui_lang == "ru":
             text = (
                 "Этот бот генерирует научно-популярные посты.\n"
@@ -318,7 +274,10 @@ def create_dispatcher() -> Dispatcher:
                 f"- Провайдер: {_prov_name(prov)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Инкогнито: {'включён' if incognito else 'отключён'}\n"
-                f"- Логи: {'включены' if logs_enabled else 'отключены'}"
+                f"- Логи: {'включены' if logs_enabled else 'отключены'}\n"
+                f"- Финальная редактура: {'включена' if refine_enabled else 'отключена'}\n"
+                f"- Факт-чекинг: {'включён' if fc_enabled else 'отключён'}"
+                + (f" (глубина {fc_depth})" if fc_enabled else "")
             )
         else:
             text = (
@@ -332,7 +291,10 @@ def create_dispatcher() -> Dispatcher:
                 f"- Provider: {_prov_name(prov)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Incognito: {'enabled' if incognito else 'disabled'}\n"
-                f"- Logs: {'enabled' if logs_enabled else 'disabled'}"
+                f"- Logs: {'enabled' if logs_enabled else 'disabled'}\n"
+                f"- Final refine: {'enabled' if refine_enabled else 'disabled'}\n"
+                f"- Fact-check: {'enabled' if fc_enabled else 'disabled'}"
+                + (f" (depth {fc_depth})" if fc_enabled else "")
             )
         await message.answer(text)
 
@@ -812,286 +774,9 @@ def create_dispatcher() -> Dispatcher:
         await state.finish()
         RUNNING_CHATS.discard(chat_id)
 
-    @dp.message_handler(state=GenerateStates.ChoosingFactcheck)  # type: ignore
-    async def choose_factcheck(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip().lower()
-        data = await state.get_data()
-        topic = data.get("topic", "")
-        ui_lang = data.get("ui_lang", "ru")
-        if text in {"/cancel"}:
-            done = "Отменено." if ui_lang == "ru" else "Cancelled."
-            await message.answer(done, reply_markup=ReplyKeyboardRemove())
-            await state.finish()
-            return
-        # yes in en = y/yes; in ru = д/да
-        factcheck = text.startswith("y") or text.startswith("д") or text == "да"
+    # Legacy state handler removed: fact-check choices are inline-only now
 
-        # If fact-checking is enabled, ask for depth first
-        if factcheck:
-            await state.update_data(factcheck=True)
-            prompt = "Выберите глубину проверки (1–3):" if ui_lang == "ru" else "Select research depth (1–3):"
-            await message.answer(prompt, reply_markup=build_depth_keyboard())
-            await GenerateStates.ChoosingDepth.set()
-            return
-
-        chat_id = message.chat.id
-        if chat_id in RUNNING_CHATS:
-            # Silently ignore duplicate start while previous job is running
-            return
-        RUNNING_CHATS.add(chat_id)
-
-        # Charge 1 credit before starting (DB if configured, else Redis KV)
-        from sqlalchemy.exc import SQLAlchemyError
-        try:
-            charged = False
-            # Admins generate for free
-            if message.from_user and message.from_user.id in ADMIN_IDS:
-                charged = True
-            if SessionLocal is not None and message.from_user:
-                async with SessionLocal() as session:
-                    user = await ensure_user_with_credits(session, message.from_user.id)
-                    ok, remaining = await charge_credits(session, user, 1, reason="post")
-                    if ok:
-                        await session.commit()
-                        charged = True
-            if not charged and message.from_user:
-                ok, remaining = await charge_credits_kv(message.from_user.id, 1)
-                if not ok:
-                    warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
-                    await message.answer(warn, reply_markup=ReplyKeyboardRemove())
-                    # Offer to buy credits
-                    try:
-                        await message.answer(
-                            ("Купить кредиты за ⭐? Один кредит = 200⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 200⭐"),
-                            reply_markup=build_buy_keyboard(ui_lang),
-                        )
-                    except Exception:
-                        pass
-                    await state.finish()
-                    RUNNING_CHATS.discard(chat_id)
-                    return
-        except SQLAlchemyError:
-            warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
-            await message.answer(warn, reply_markup=ReplyKeyboardRemove())
-            await state.finish()
-            RUNNING_CHATS.discard(chat_id)
-            return
-
-        working = "Генерирую. Это может занять несколько минут..." if ui_lang == "ru" else "Working on it. This may take a few minutes..."
-        await message.answer(working, reply_markup=ReplyKeyboardRemove())
-
-        # Run generation in a thread to avoid blocking the event loop
-        import asyncio
-        loop = asyncio.get_running_loop()
-        try:
-            # Resolve provider before jumping into executor
-            prov = (data.get("provider") or "").strip().lower()
-            if not prov and message.from_user:
-                try:
-                    prov = await get_provider(message.from_user.id)  # type: ignore
-                except Exception:
-                    prov = "openai"
-            # Ensure gen_lang from KV if FSM lost it
-            persisted_gen_lang = None
-            try:
-                if message.from_user:
-                    persisted_gen_lang = await get_gen_lang(message.from_user.id)
-            except Exception:
-                persisted_gen_lang = None
-            gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-            eff_lang = gen_lang
-            if (gen_lang or "auto").strip().lower() == "auto":
-                try:
-                    det = (detect_lang_from_text(topic) or "").lower()
-                    eff_lang = "en" if det.startswith("en") else "ru"
-                except Exception:
-                    eff_lang = "ru"
-            async with GLOBAL_SEMAPHORE:
-                # Prepare job metadata for logging
-                job_meta = {
-                    "user_id": message.from_user.id if message.from_user else 0,
-                    "chat_id": message.chat.id,
-                    "topic": topic,
-                    "provider": prov or "openai",
-                    "lang": eff_lang,
-                    "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
-                    "refine": (await get_refine_enabled(message.from_user.id)) if message.from_user else False,
-                }
-                path = await loop.run_in_executor(
-                    None,
-                    lambda: generate_post(
-                        topic,
-                        lang=eff_lang,
-                        provider=(prov or "openai"),
-                        factcheck=False,
-                        job_meta=job_meta,
-                        use_refine=(job_meta["refine"]) is True,
-                    ),
-                )
-            # Send main result
-            with open(path, "rb") as f:
-                cap = f"Готово: {path.name}" if ui_lang == "ru" else f"Done: {path.name}"
-                await message.answer_document(f, caption=cap)
-            
-            # Send logs if enabled
-            try:
-                if message.from_user:
-                    logs_enabled = await get_logs_enabled(message.from_user.id)
-                    if logs_enabled:
-                        # Find corresponding log file by scanning directory
-                        topic_base = safe_filename_base(topic)
-                        log_files = list(path.parent.glob(f"{topic_base}_log_*.md"))
-                        if log_files:
-                            log_path = log_files[0]  # Take first match
-                            with open(log_path, "rb") as log_f:
-                                log_cap = f"Лог: {log_path.name}" if ui_lang == "ru" else f"Log: {log_path.name}"
-                                await message.answer_document(log_f, caption=log_cap)
-            except Exception:
-                pass
-        except Exception as e:
-            err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
-            await message.answer(err)
-
-        await state.finish()
-        RUNNING_CHATS.discard(chat_id)
-
-    @dp.message_handler(state=GenerateStates.ChoosingDepth)  # type: ignore
-    async def choose_depth(message: types.Message, state: FSMContext):
-        txt = (message.text or "").strip()
-        data = await state.get_data()
-        ui_lang = data.get("ui_lang", "ru")
-        topic = data.get("topic", "")
-        if txt.lower() in {"/cancel"}:
-            done = "Отменено." if ui_lang == "ru" else "Cancelled."
-            await message.answer(done, reply_markup=ReplyKeyboardRemove())
-            await state.finish()
-            return
-        if txt not in {"1", "2", "3"}:
-            prompt = "Выберите 1, 2 или 3:" if ui_lang == "ru" else "Please choose 1, 2 or 3:"
-            await message.answer(prompt, reply_markup=build_depth_keyboard())
-            return
-        depth = int(txt)
-        await state.update_data(research_iterations=depth)
-
-        chat_id = message.chat.id
-        if chat_id in RUNNING_CHATS:
-            return
-        RUNNING_CHATS.add(chat_id)
-
-        # Charge 1 credit before starting (DB if configured, else Redis KV)
-        from sqlalchemy.exc import SQLAlchemyError
-        try:
-            charged = False
-            # Admins generate for free
-            if message.from_user and message.from_user.id in ADMIN_IDS:
-                charged = True
-            if SessionLocal is not None and message.from_user:
-                async with SessionLocal() as session:
-                    user = await ensure_user_with_credits(session, message.from_user.id)
-                    ok, remaining = await charge_credits(session, user, 1, reason="post")
-                    if ok:
-                        await session.commit()
-                        charged = True
-            if not charged and message.from_user:
-                ok, remaining = await charge_credits_kv(message.from_user.id, 1)
-                if not ok:
-                    warn = "Недостаточно кредитов" if ui_lang == "ru" else "Insufficient credits"
-                    await message.answer(warn, reply_markup=ReplyKeyboardRemove())
-                    await state.finish()
-                    RUNNING_CHATS.discard(chat_id)
-                    return
-        except SQLAlchemyError:
-            warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
-            await message.answer(warn, reply_markup=ReplyKeyboardRemove())
-            await state.finish()
-            RUNNING_CHATS.discard(chat_id)
-            return
-
-        working = "Генерирую. Это может занять несколько минут..." if ui_lang == "ru" else "Working on it. This may take a few minutes..."
-        await message.answer(working, reply_markup=ReplyKeyboardRemove())
-
-        # Run generation in a thread to avoid blocking the event loop
-        import asyncio
-        loop = asyncio.get_running_loop()
-        try:
-            # Resolve provider before jumping into executor
-            prov = (data.get("provider") or "").strip().lower()
-            if not prov and message.from_user:
-                try:
-                    prov = await get_provider(message.from_user.id)  # type: ignore
-                except Exception:
-                    prov = "openai"
-            # Ensure gen_lang from KV if FSM lost it
-            persisted_gen_lang = None
-            try:
-                if message.from_user:
-                    persisted_gen_lang = await get_gen_lang(message.from_user.id)
-            except Exception:
-                persisted_gen_lang = None
-            gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-            eff_lang = gen_lang
-            if (gen_lang or "auto").strip().lower() == "auto":
-                try:
-                    det = (detect_lang_from_text(topic) or "").lower()
-                    eff_lang = "en" if det.startswith("en") else "ru"
-                except Exception:
-                    eff_lang = "ru"
-            # Refine preference
-            refine_enabled = False
-            try:
-                if message.from_user:
-                    refine_enabled = await get_refine_enabled(message.from_user.id)
-            except Exception:
-                refine_enabled = False
-            async with GLOBAL_SEMAPHORE:
-                # Prepare job metadata for logging
-                job_meta = {
-                    "user_id": message.from_user.id if message.from_user else 0,
-                    "chat_id": message.chat.id,
-                    "topic": topic,
-                    "provider": prov or "openai",
-                    "lang": eff_lang,
-                    "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
-                    "refine": refine_enabled,
-                }
-                path = await loop.run_in_executor(
-                    None,
-                    lambda: generate_post(
-                        topic,
-                        lang=eff_lang,
-                        provider=(prov or "openai"),
-                        factcheck=True,
-                        research_iterations=depth,
-                        job_meta=job_meta,
-                        use_refine=refine_enabled,
-                    ),
-                )
-            # Send main result
-            with open(path, "rb") as f:
-                cap = f"Готово: {path.name}" if ui_lang == "ru" else f"Done: {path.name}"
-                await message.answer_document(f, caption=cap)
-            
-            # Send logs if enabled
-            try:
-                if message.from_user:
-                    logs_enabled = await get_logs_enabled(message.from_user.id)
-                    if logs_enabled:
-                        # Find corresponding log file by scanning directory
-                        topic_base = safe_filename_base(topic)
-                        log_files = list(path.parent.glob(f"{topic_base}_log_*.md"))
-                        if log_files:
-                            log_path = log_files[0]  # Take first match
-                            with open(log_path, "rb") as log_f:
-                                log_cap = f"Лог: {log_path.name}" if ui_lang == "ru" else f"Log: {log_path.name}"
-                                await message.answer_document(log_f, caption=log_cap)
-            except Exception:
-                pass
-        except Exception as e:
-            err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
-            await message.answer(err)
-
-        await state.finish()
-        RUNNING_CHATS.discard(chat_id)
+    # Legacy depth state handler removed: depth is inline-only now
 
     # ---- Balance and purchasing with Telegram Stars ----
     @dp.message_handler(commands=["balance"])  # type: ignore
