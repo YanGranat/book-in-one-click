@@ -332,8 +332,7 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
             prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
-            await GenerateStates.ChoosingRefine.set()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
@@ -441,49 +440,28 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_refine(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        prompt = (
-            "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-        )
-        await message.answer(prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
-        await GenerateStates.ChoosingRefine.set()
+        prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+        await message.answer(prompt, reply_markup=build_yesno_inline("refine", ui_lang))
 
-    @dp.message_handler(state=GenerateStates.ChoosingRefine)  # type: ignore
-    async def choose_refine(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip().lower()
-        if text.startswith("/generate"):
-            await state.finish()
-            await cmd_generate(message, state)
-            return
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:refine:"))  # type: ignore
+    async def cb_set_refine(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        enabled = (val == "yes")
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        yes = {"y", "yes", "д", "да"}
-        no = {"n", "no", "н", "нет"}
-        if any(text.startswith(x) for x in yes):
-            enabled = True
-            msg = "Финальная редактура: включена." if ui_lang == "ru" else "Final refine: enabled."
-        elif any(text.startswith(x) for x in no):
-            enabled = False
-            msg = "Финальная редактура: отключена." if ui_lang == "ru" else "Final refine: disabled."
-        else:
-            prompt = (
-                "Пожалуйста, ответьте Да или Нет." if _is_ru(ui_lang) else "Please answer Yes or No."
-            )
-            await message.answer(prompt, reply_markup=build_yesno_keyboard_lang(ui_lang))
-            return
         try:
-            if message.from_user:
-                await set_refine_enabled(message.from_user.id, enabled)
+            if query.from_user:
+                await set_refine_enabled(query.from_user.id, enabled)
         except Exception:
             pass
-        await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        onboarding = bool(data.get("onboarding"))
+        await query.message.edit_reply_markup() if query.message else None
+        await query.answer()
+        msg = "Финальная редактура: включена." if (enabled and ui_lang=="ru") else ("Final refine: enabled." if enabled else ("Финальная редактура: отключена." if ui_lang=="ru" else "Final refine: disabled."))
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+        onboarding = bool((await state.get_data()).get("onboarding"))
         if onboarding:
-            # Next: provider
             prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if _is_ru(ui_lang) else "Choose provider (OpenAI/Gemini/Claude):"
-            await message.answer(prompt, reply_markup=build_provider_keyboard())
-            await GenerateStates.ChoosingProvider.set()
-        else:
-            await state.finish()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
 
     @dp.message_handler(commands=["cancel"])  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
