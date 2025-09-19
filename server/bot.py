@@ -335,7 +335,7 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = (
-            "Финальная редактуры: Включить или Отключить?"
+            "Финальная редактура: включить или отключить?"
             if ui_lang == "ru"
             else "Final refine step: Enable or Disable?"
         )
@@ -349,10 +349,10 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         if text.startswith("включ") or text.startswith("enable"):
             enabled = True
-            msg = "Финальная редактуры: включена." if ui_lang == "ru" else "Final refine: enabled."
+            msg = "Финальная редактура: включена." if ui_lang == "ru" else "Final refine: enabled."
         elif text.startswith("отключ") or text.startswith("disable"):
             enabled = False
-            msg = "Финальная редактуры: отключена." if ui_lang == "ru" else "Final refine: disabled."
+            msg = "Финальная редактура: отключена." if ui_lang == "ru" else "Final refine: disabled."
         else:
             prompt = (
                 "Выберите: Включить или Отключить."
