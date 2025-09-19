@@ -100,6 +100,8 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["start"])  # type: ignore
     async def cmd_start(message: types.Message):
+        # Mark onboarding flow active
+        await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(onboarding=True)
         await message.answer(
             "Выберите язык интерфейса / Choose interface language:",
             reply_markup=build_lang_keyboard(),
@@ -152,7 +154,8 @@ def create_dispatcher() -> Dispatcher:
                 "1) Выберите язык генерации: /lang_generate (Auto/RU/EN).\n"
                 "2) Нажмите /generate и отправьте тему.\n"
                 "На выходе получите Markdown-файл с постом.\n"
-                "GitHub проекта: https://github.com/YanGranat/book-in-one-click\n\n"
+                "GitHub проекта: https://github.com/YanGranat/book-in-one-click\n"
+                "Список всех результатов: https://bio1c-bot.onrender.com/results-ui\n\n"
                 "Текущие настройки:\n"
                 f"- Провайдер: {_prov_name(prov)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
@@ -165,7 +168,8 @@ def create_dispatcher() -> Dispatcher:
                 "1) Pick generation language: /lang_generate (Auto/RU/EN).\n"
                 "2) Press /generate and send a topic.\n"
                 "You will get a Markdown file with the post.\n"
-                "Project GitHub: https://github.com/YanGranat/book-in-one-click\n\n"
+                "Project GitHub: https://github.com/YanGranat/book-in-one-click\n"
+                "All results list: https://bio1c-bot.onrender.com/results-ui\n\n"
                 "Current settings:\n"
                 f"- Provider: {_prov_name(prov)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
@@ -187,9 +191,25 @@ def create_dispatcher() -> Dispatcher:
         await state.update_data(ui_lang=ui_lang)
         confirm = "Язык интерфейса установлен." if ui_lang == "ru" else "Interface language set."
         await message.answer(confirm, reply_markup=ReplyKeyboardRemove())
-        # Next: choose generation language
-        prompt = "Выберите язык генерации / Choose generation language:" if ui_lang == "ru" else "Choose generation language / Pick generation language:"
-        await message.answer(prompt, reply_markup=build_genlang_keyboard())
+        data = await state.get_data()
+        onboarding = bool(data.get("onboarding"))
+        if onboarding:
+            # Next: choose generation language
+            prompt = "Выберите язык генерации / Choose generation language:" if ui_lang == "ru" else "Choose generation language:"
+            await message.answer(prompt, reply_markup=build_genlang_keyboard())
+            await GenerateStates.ChoosingGenLanguage.set()
+        else:
+            await state.finish()
+
+    @dp.message_handler(commands=["lang_generate"])  # type: ignore
+    async def cmd_lang_generate(message: types.Message, state: FSMContext):
+        # Single-step: do not enable onboarding
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        await message.answer(
+            "Выберите язык генерации / Choose generation language:" if ui_lang == "ru" else "Choose generation language:",
+            reply_markup=build_genlang_keyboard(),
+        )
         await GenerateStates.ChoosingGenLanguage.set()
 
     @dp.message_handler(state=GenerateStates.ChoosingGenLanguage)  # type: ignore
@@ -222,10 +242,15 @@ def create_dispatcher() -> Dispatcher:
             },
         }
         await message.answer(msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"), reply_markup=ReplyKeyboardRemove())
-        # Next: refine preference
-        prompt = "Финальная редактура: включить или отключить?" if ui_lang == "ru" else "Final refine step: Enable or Disable?"
-        await message.answer(prompt, reply_markup=build_logs_keyboard())
-        await GenerateStates.ChoosingRefine.set()
+        onboarding = bool(data.get("onboarding"))
+        if onboarding:
+            # Next: refine preference
+            prompt = "Финальная редактура?" if ui_lang == "ru" else "Final refine?"
+            # Use Yes/No keyboard
+            await message.answer(prompt, reply_markup=build_yesno_keyboard())
+            await GenerateStates.ChoosingRefine.set()
+        else:
+            await state.finish()
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
@@ -254,10 +279,14 @@ def create_dispatcher() -> Dispatcher:
             pass
         ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
         await message.answer(ok, reply_markup=ReplyKeyboardRemove())
-        # Next: logs
-        prompt = "Отправлять логи генерации?" if ui_lang == "ru" else "Send generation logs?"
-        await message.answer(prompt, reply_markup=build_logs_keyboard())
-        await GenerateStates.ChoosingLogs.set()
+        onboarding = bool((await state.get_data()).get("onboarding"))
+        if onboarding:
+            # Next: logs
+            prompt = "Отправлять логи генерации?" if ui_lang == "ru" else "Send generation logs?"
+            await message.answer(prompt, reply_markup=build_logs_keyboard())
+            await GenerateStates.ChoosingLogs.set()
+        else:
+            await state.finish()
 
     @dp.message_handler(commands=["lang"])  # type: ignore
     async def cmd_lang(message: types.Message, state: FSMContext):
@@ -298,10 +327,14 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        # Next: incognito
-        prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
-        await message.answer(prompt, reply_markup=build_incognito_keyboard())
-        await GenerateStates.ChoosingIncognito.set()
+        onboarding = bool(data.get("onboarding"))
+        if onboarding:
+            # Next: incognito
+            prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
+            await message.answer(prompt, reply_markup=build_incognito_keyboard())
+            await GenerateStates.ChoosingIncognito.set()
+        else:
+            await state.finish()
 
     @dp.message_handler(commands=["incognito"])  # type: ignore
     async def cmd_incognito(message: types.Message, state: FSMContext):
@@ -332,21 +365,25 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        # Next: ask for topic
-        prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
-        await message.answer(prompt)
-        await GenerateStates.WaitingTopic.set()
+        onboarding = bool(data.get("onboarding"))
+        if onboarding:
+            # Next: ask for topic
+            prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
+            await message.answer(prompt)
+            await GenerateStates.WaitingTopic.set()
+        else:
+            await state.finish()
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = (
-            "Финальная редактура: включить или отключить?"
+            "Финальная редактура?"
             if ui_lang == "ru"
-            else "Final refine step: Enable or Disable?"
+            else "Final refine?"
         )
-        await message.answer(prompt, reply_markup=build_logs_keyboard())  # reuse yes/no style RU buttons
+        await message.answer(prompt, reply_markup=build_yesno_keyboard())
         await GenerateStates.ChoosingRefine.set()
 
     @dp.message_handler(state=GenerateStates.ChoosingRefine)  # type: ignore
@@ -354,19 +391,19 @@ def create_dispatcher() -> Dispatcher:
         text = (message.text or "").strip().lower()
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        if text.startswith("включ") or text.startswith("enable"):
+        yes = {"y", "yes", "д", "да"}
+        no = {"n", "no", "н", "нет"}
+        if any(text.startswith(x) for x in yes):
             enabled = True
             msg = "Финальная редактура: включена." if ui_lang == "ru" else "Final refine: enabled."
-        elif text.startswith("отключ") or text.startswith("disable"):
+        elif any(text.startswith(x) for x in no):
             enabled = False
             msg = "Финальная редактура: отключена." if ui_lang == "ru" else "Final refine: disabled."
         else:
             prompt = (
-                "Выберите: Включить или Отключить."
-                if ui_lang == "ru"
-                else "Choose: Enable or Disable."
+                "Пожалуйста, ответьте Да или Нет." if ui_lang == "ru" else "Please answer Yes or No."
             )
-            await message.answer(prompt, reply_markup=build_logs_keyboard())
+            await message.answer(prompt, reply_markup=build_yesno_keyboard())
             return
         try:
             if message.from_user:
@@ -374,10 +411,14 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        # Next: provider
-        prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if ui_lang == "ru" else "Choose provider (OpenAI/Gemini/Claude):"
-        await message.answer(prompt, reply_markup=build_provider_keyboard())
-        await GenerateStates.ChoosingProvider.set()
+        onboarding = bool(data.get("onboarding"))
+        if onboarding:
+            # Next: provider
+            prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if ui_lang == "ru" else "Choose provider (OpenAI/Gemini/Claude):"
+            await message.answer(prompt, reply_markup=build_provider_keyboard())
+            await GenerateStates.ChoosingProvider.set()
+        else:
+            await state.finish()
 
     @dp.message_handler(commands=["cancel"])  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
