@@ -187,14 +187,9 @@ def create_dispatcher() -> Dispatcher:
         await state.update_data(ui_lang=ui_lang)
         confirm = "Язык интерфейса установлен." if ui_lang == "ru" else "Interface language set."
         await message.answer(confirm, reply_markup=ReplyKeyboardRemove())
-        await state.finish()
-
-    @dp.message_handler(commands=["lang_generate"])  # type: ignore
-    async def cmd_lang_generate(message: types.Message, state: FSMContext):
-        await message.answer(
-            "Выберите язык генерации / Choose generation language:",
-            reply_markup=build_genlang_keyboard(),
-        )
+        # Next: choose generation language
+        prompt = "Выберите язык генерации / Choose generation language:" if ui_lang == "ru" else "Choose generation language / Pick generation language:"
+        await message.answer(prompt, reply_markup=build_genlang_keyboard())
         await GenerateStates.ChoosingGenLanguage.set()
 
     @dp.message_handler(state=GenerateStates.ChoosingGenLanguage)  # type: ignore
@@ -227,7 +222,10 @@ def create_dispatcher() -> Dispatcher:
             },
         }
         await message.answer(msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"), reply_markup=ReplyKeyboardRemove())
-        await state.finish()
+        # Next: refine preference
+        prompt = "Финальная редактура: включить или отключить?" if ui_lang == "ru" else "Final refine step: Enable or Disable?"
+        await message.answer(prompt, reply_markup=build_logs_keyboard())
+        await GenerateStates.ChoosingRefine.set()
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
@@ -256,7 +254,10 @@ def create_dispatcher() -> Dispatcher:
             pass
         ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
         await message.answer(ok, reply_markup=ReplyKeyboardRemove())
-        await state.finish()
+        # Next: logs
+        prompt = "Отправлять логи генерации?" if ui_lang == "ru" else "Send generation logs?"
+        await message.answer(prompt, reply_markup=build_logs_keyboard())
+        await GenerateStates.ChoosingLogs.set()
 
     @dp.message_handler(commands=["lang"])  # type: ignore
     async def cmd_lang(message: types.Message, state: FSMContext):
@@ -297,7 +298,10 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        await state.finish()
+        # Next: incognito
+        prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
+        await message.answer(prompt, reply_markup=build_incognito_keyboard())
+        await GenerateStates.ChoosingIncognito.set()
 
     @dp.message_handler(commands=["incognito"])  # type: ignore
     async def cmd_incognito(message: types.Message, state: FSMContext):
@@ -328,7 +332,10 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        await state.finish()
+        # Next: ask for topic
+        prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
+        await message.answer(prompt)
+        await GenerateStates.WaitingTopic.set()
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
@@ -367,7 +374,10 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
-        await state.finish()
+        # Next: provider
+        prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if ui_lang == "ru" else "Choose provider (OpenAI/Gemini/Claude):"
+        await message.answer(prompt, reply_markup=build_provider_keyboard())
+        await GenerateStates.ChoosingProvider.set()
 
     @dp.message_handler(commands=["cancel"])  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
