@@ -18,6 +18,7 @@ from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
+from .kv import set_gen_lang, get_gen_lang
 
 
 def _load_env():
@@ -158,6 +159,11 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         await state.update_data(gen_lang=gen_lang)
+        try:
+            if message.from_user:
+                await set_gen_lang(message.from_user.id, gen_lang)  # persist per-user
+        except Exception:
+            pass
         msg = {
             "ru": {
                 "ru": "Язык генерации: русский.",
@@ -185,6 +191,15 @@ def create_dispatcher() -> Dispatcher:
                 prov = "openai"
         if prov:
             await state.update_data(provider=prov)
+        # Load persisted generation language if available
+        persisted_gen_lang = None
+        try:
+            if message.from_user:
+                persisted_gen_lang = await get_gen_lang(message.from_user.id)
+        except Exception:
+            persisted_gen_lang = None
+        gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+        await state.update_data(gen_lang=gen_lang)
         prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
@@ -388,6 +403,14 @@ def create_dispatcher() -> Dispatcher:
                     prov = await get_provider(message.from_user.id)  # type: ignore
                 except Exception:
                     prov = "openai"
+            # Ensure gen_lang from KV if FSM lost it
+            persisted_gen_lang = None
+            try:
+                if message.from_user:
+                    persisted_gen_lang = await get_gen_lang(message.from_user.id)
+            except Exception:
+                persisted_gen_lang = None
+            gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
             async with GLOBAL_SEMAPHORE:
                 # Prepare job metadata for logging
                 job_meta = {
@@ -395,14 +418,14 @@ def create_dispatcher() -> Dispatcher:
                     "chat_id": message.chat.id,
                     "topic": topic,
                     "provider": prov or "openai",
-                    "lang": data.get("gen_lang") or "auto",
+                    "lang": gen_lang,
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                 }
                 path = await loop.run_in_executor(
                     None,
                     lambda: generate_post(
                         topic,
-                        lang=(data.get("gen_lang") or "auto"),
+                        lang=gen_lang,
                         provider=(prov or "openai"),
                         factcheck=False,
                         job_meta=job_meta,
@@ -501,6 +524,14 @@ def create_dispatcher() -> Dispatcher:
                     prov = await get_provider(message.from_user.id)  # type: ignore
                 except Exception:
                     prov = "openai"
+            # Ensure gen_lang from KV if FSM lost it
+            persisted_gen_lang = None
+            try:
+                if message.from_user:
+                    persisted_gen_lang = await get_gen_lang(message.from_user.id)
+            except Exception:
+                persisted_gen_lang = None
+            gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
             async with GLOBAL_SEMAPHORE:
                 # Prepare job metadata for logging
                 job_meta = {
@@ -508,14 +539,14 @@ def create_dispatcher() -> Dispatcher:
                     "chat_id": message.chat.id,
                     "topic": topic,
                     "provider": prov or "openai",
-                    "lang": data.get("gen_lang") or "auto",
+                    "lang": gen_lang,
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                 }
                 path = await loop.run_in_executor(
                     None,
                     lambda: generate_post(
                         topic,
-                        lang=(data.get("gen_lang") or "auto"),
+                        lang=gen_lang,
                         provider=(prov or "openai"),
                         factcheck=True,
                         research_iterations=depth,

@@ -135,3 +135,32 @@ async def get_incognito(telegram_id: int) -> bool:
         return False
 
 
+# ---- Generation language preference ----
+
+async def set_gen_lang(telegram_id: int, gen_lang: str) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:gen_lang:{telegram_id}"
+    # normalize to ru/en/auto
+    text = (gen_lang or "").strip().lower()
+    if text.startswith("ru"):
+        norm = "ru"
+    elif text.startswith("en"):
+        norm = "en"
+    else:
+        norm = "auto"
+    await r.set(key, norm)
+
+
+async def get_gen_lang(telegram_id: int) -> str:
+    r = get_redis()
+    key = f"{kv_prefix()}:gen_lang:{telegram_id}"
+    val = await r.get(key)
+    try:
+        s = (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "")).strip().lower()
+    except Exception:
+        s = str(val or "").strip().lower()
+    if s in {"ru", "en", "auto"}:
+        return s
+    return "auto"
+
+
