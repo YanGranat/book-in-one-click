@@ -47,6 +47,7 @@ def generate_post(
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
     return_log_path: bool = False,
+    use_refine: bool = True,
 ) -> Path:
     """
     Generate a popular science post and save it to output/<output_subdir>/.
@@ -775,18 +776,21 @@ def generate_post(
             log("🛠️ Rewrite · Output", final_content)
 
     from pathlib import Path
-    p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
-    refine_input = (
-        "<input>\n"
-        f"<topic>{topic}</topic>\n"
-        f"<lang>{lang}</lang>\n"
-        f"<post>\n\n{final_content}\n\n</post>\n"
-        "</input>"
-    )
-    # Log refine input and output (plain text)
-    log("⬇️ Refine · Input", refine_input)
-    final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
-    log("✨ Refine · Output", final_content)
+    if use_refine:
+        p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
+        refine_input = (
+            "<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{lang}</lang>\n"
+            f"<post>\n\n{final_content}\n\n</post>\n"
+            "</input>"
+        )
+        # Log refine input and output (plain text)
+        log("⬇️ Refine · Input", refine_input)
+        final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
+        log("✨ Refine · Output", final_content)
+    else:
+        log("✨ Refine · Skipped", "Refine step disabled by configuration")
 
     # Save final
     output_dir = ensure_output_dir(output_subdir)
@@ -815,6 +819,7 @@ def generate_post(
         f"- duration: {duration_s:.1f}s\n"
         f"- topic: {topic}\n"
         f"- factcheck: {bool(factcheck)}\n"
+        f"- refine: {bool(use_refine)}\n"
     )
     full_log_content = header + "\n".join(log_lines)
     save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=full_log_content)

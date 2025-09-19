@@ -74,6 +74,7 @@ async def _startup():
             types.BotCommand(command="provider", description="Provider / Провайдер"),
             types.BotCommand(command="logs", description="Logs / Логи генерации"),
             types.BotCommand(command="incognito", description="Incognito / Инкогнито"),
+            types.BotCommand(command="refine", description="Refine Step / Финальная редактуры"),
             types.BotCommand(command="cancel", description="Cancel / Отмена"),
         ])
         try:

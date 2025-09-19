@@ -19,6 +19,7 @@ from .bot_commands import ADMIN_IDS
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 from .kv import set_gen_lang, get_gen_lang
+from .kv import set_refine_enabled, get_refine_enabled
 
 
 def _load_env():
@@ -39,6 +40,7 @@ class GenerateStates(StatesGroup):
     WaitingTopic = State()
     ChoosingFactcheck = State()
     ChoosingDepth = State()
+    ChoosingRefine = State()
 
 
 def build_lang_keyboard() -> ReplyKeyboardMarkup:
@@ -227,31 +229,6 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"), reply_markup=ReplyKeyboardRemove())
         await state.finish()
 
-    @dp.message_handler(commands=["generate"])  # type: ignore
-    async def cmd_generate(message: types.Message, state: FSMContext):
-        data = await state.get_data()
-        ui_lang = (data.get("ui_lang") or "ru").strip()
-        prov = (data.get("provider") or "").strip().lower()
-        if not prov and message.from_user:
-            try:
-                prov = await get_provider(message.from_user.id)  # type: ignore
-            except Exception:
-                prov = "openai"
-        if prov:
-            await state.update_data(provider=prov)
-        # Load persisted generation language if available
-        persisted_gen_lang = None
-        try:
-            if message.from_user:
-                persisted_gen_lang = await get_gen_lang(message.from_user.id)
-        except Exception:
-            persisted_gen_lang = None
-        gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-        await state.update_data(gen_lang=gen_lang)
-        prompt = "Отправьте тему для поста:" if ui_lang == "ru" else "Send a topic for your post:"
-        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
-        await GenerateStates.WaitingTopic.set()
-
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
         data = await state.get_data()
@@ -348,6 +325,45 @@ def create_dispatcher() -> Dispatcher:
         try:
             if message.from_user:
                 await set_incognito(message.from_user.id, enabled)
+        except Exception:
+            pass
+        await message.answer(msg, reply_markup=ReplyKeyboardRemove())
+        await state.finish()
+
+    @dp.message_handler(commands=["refine"])  # type: ignore
+    async def cmd_refine(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = (
+            "Финальная редактуры: Включить или Отключить?"
+            if ui_lang == "ru"
+            else "Final refine step: Enable or Disable?"
+        )
+        await message.answer(prompt, reply_markup=build_logs_keyboard())  # reuse yes/no style RU buttons
+        await GenerateStates.ChoosingRefine.set()
+
+    @dp.message_handler(state=GenerateStates.ChoosingRefine)  # type: ignore
+    async def choose_refine(message: types.Message, state: FSMContext):
+        text = (message.text or "").strip().lower()
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        if text.startswith("включ") or text.startswith("enable"):
+            enabled = True
+            msg = "Финальная редактуры: включена." if ui_lang == "ru" else "Final refine: enabled."
+        elif text.startswith("отключ") or text.startswith("disable"):
+            enabled = False
+            msg = "Финальная редактуры: отключена." if ui_lang == "ru" else "Final refine: disabled."
+        else:
+            prompt = (
+                "Выберите: Включить или Отключить."
+                if ui_lang == "ru"
+                else "Choose: Enable or Disable."
+            )
+            await message.answer(prompt, reply_markup=build_logs_keyboard())
+            return
+        try:
+            if message.from_user:
+                await set_refine_enabled(message.from_user.id, enabled)
         except Exception:
             pass
         await message.answer(msg, reply_markup=ReplyKeyboardRemove())
@@ -459,6 +475,13 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 persisted_gen_lang = None
             gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+            # Refine preference
+            refine_enabled = False
+            try:
+                if message.from_user:
+                    refine_enabled = await get_refine_enabled(message.from_user.id)
+            except Exception:
+                refine_enabled = False
             async with GLOBAL_SEMAPHORE:
                 # Prepare job metadata for logging
                 job_meta = {
@@ -468,6 +491,7 @@ def create_dispatcher() -> Dispatcher:
                     "provider": prov or "openai",
                     "lang": gen_lang,
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
+                    "refine": refine_enabled,
                 }
                 path = await loop.run_in_executor(
                     None,
@@ -477,6 +501,7 @@ def create_dispatcher() -> Dispatcher:
                         provider=(prov or "openai"),
                         factcheck=False,
                         job_meta=job_meta,
+                        use_refine=refine_enabled,
                     ),
                 )
             # Send main result
@@ -580,6 +605,13 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 persisted_gen_lang = None
             gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+            # Refine preference
+            refine_enabled = False
+            try:
+                if message.from_user:
+                    refine_enabled = await get_refine_enabled(message.from_user.id)
+            except Exception:
+                refine_enabled = False
             async with GLOBAL_SEMAPHORE:
                 # Prepare job metadata for logging
                 job_meta = {
@@ -589,6 +621,7 @@ def create_dispatcher() -> Dispatcher:
                     "provider": prov or "openai",
                     "lang": gen_lang,
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
+                    "refine": refine_enabled,
                 }
                 path = await loop.run_in_executor(
                     None,
@@ -599,6 +632,7 @@ def create_dispatcher() -> Dispatcher:
                         factcheck=True,
                         research_iterations=depth,
                         job_meta=job_meta,
+                        use_refine=refine_enabled,
                     ),
                 )
             # Send main result

@@ -163,4 +163,21 @@ async def get_gen_lang(telegram_id: int) -> str:
         return s
     return "auto"
 
+# ---- Refine preference ----
+
+async def set_refine_enabled(telegram_id: int, enabled: bool) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:refine:{telegram_id}"
+    await r.set(key, "1" if enabled else "0")
+
+
+async def get_refine_enabled(telegram_id: int) -> bool:
+    r = get_redis()
+    key = f"{kv_prefix()}:refine:{telegram_id}"
+    val = await r.get(key)
+    try:
+        return (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "0")).strip() == "1"
+    except Exception:
+        return False
+
 
