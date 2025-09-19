@@ -563,13 +563,17 @@ def create_dispatcher() -> Dispatcher:
             pass
         await query.message.edit_reply_markup() if query.message else None
         await query.answer()
+        onboarding = bool((await state.get_data()).get("onboarding"))
         if enabled:
             prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
         else:
-            prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
-            await GenerateStates.WaitingTopic.set()
+            # Mark FC decision as done in onboarding to avoid asking again on topic
+            await state.update_data(factcheck=False, research_iterations=None, fc_ready=True)
+            if onboarding:
+                prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
+                await GenerateStates.WaitingTopic.set()
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
@@ -578,7 +582,8 @@ def create_dispatcher() -> Dispatcher:
             depth = int(val)
         except Exception:
             depth = 1
-        await state.update_data(research_iterations=depth)
+        # Finalize FC choices
+        await state.update_data(factcheck=True, research_iterations=depth, fc_ready=True)
         try:
             if query.from_user:
                 await set_factcheck_depth(query.from_user.id, depth)
@@ -588,9 +593,15 @@ def create_dispatcher() -> Dispatcher:
         await query.answer()
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
-        await GenerateStates.WaitingTopic.set()
+        onboarding = bool(data.get("onboarding"))
+        if onboarding:
+            prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
+            await GenerateStates.WaitingTopic.set()
+        else:
+            # Standalone /factcheck flow: confirm and stay
+            msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
 
     # ---- Fact-check settings command ----
     @dp.message_handler(commands=["factcheck"])  # type: ignore
