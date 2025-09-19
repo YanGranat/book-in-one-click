@@ -437,6 +437,16 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_generate(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
+        # Preload default fact-check preferences from KV for /generate flow
+        try:
+            fc_enabled = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
+        except Exception:
+            fc_enabled = False
+        try:
+            fc_depth = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
+        except Exception:
+            fc_depth = 2
+        await state.update_data(factcheck=bool(fc_enabled), research_iterations=(int(fc_depth) if fc_enabled else None), fc_ready=True)
         prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
@@ -623,13 +633,173 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(msg)
             return
         await state.update_data(topic=topic)
-        # Если факт-чекинг не выбран заранее (через /generate поток) — спросим сейчас
-        fc = bool(data.get("factcheck"))
-        if fc is None or (not data.get("factcheck") and data.get("research_iterations") is None):
+        # Decide whether to ask fact-check during onboarding only; otherwise use defaults and start
+        onboarding = bool(data.get("onboarding"))
+        fc_ready = bool(data.get("fc_ready"))
+        if onboarding and not fc_ready:
             prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
             await message.answer(prompt, reply_markup=build_yesno_inline("fc", ui_lang))
             return
-        # иначе ничего не спрашиваем — пойдём в генерацию при выборе Да/Нет/Глубины
+
+        # Use current state (or KV defaults) to start generation immediately
+        # Resolve provider, language, refine, incognito
+        chat_id = message.chat.id
+        if chat_id in RUNNING_CHATS:
+            return
+        RUNNING_CHATS.add(chat_id)
+
+        # Charge 1 credit before starting (DB if configured, else Redis KV)
+        from sqlalchemy.exc import SQLAlchemyError
+        try:
+            charged = False
+            # Admins generate for free
+            if message.from_user and message.from_user.id in ADMIN_IDS:
+                charged = True
+            if SessionLocal is not None and message.from_user:
+                async with SessionLocal() as session:
+                    user = await ensure_user_with_credits(session, message.from_user.id)
+                    ok, remaining = await charge_credits(session, user, 1, reason="post")
+                    if ok:
+                        await session.commit()
+                        charged = True
+            if not charged and message.from_user:
+                ok, remaining = await charge_credits_kv(message.from_user.id, 1)
+                if not ok:
+                    warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
+                    await message.answer(warn, reply_markup=ReplyKeyboardRemove())
+                    try:
+                        await message.answer(
+                            ("Купить кредиты за ⭐? Один кредит = 200⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 200⭐"),
+                            reply_markup=build_buy_keyboard(ui_lang),
+                        )
+                    except Exception:
+                        pass
+                    await state.finish()
+                    RUNNING_CHATS.discard(chat_id)
+                    return
+        except SQLAlchemyError:
+            warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
+            await message.answer(warn, reply_markup=ReplyKeyboardRemove())
+            await state.finish()
+            RUNNING_CHATS.discard(chat_id)
+            return
+
+        working = "Генерирую. Это может занять несколько минут..." if _is_ru(ui_lang) else "Working on it. This may take a few minutes..."
+        await message.answer(working, reply_markup=ReplyKeyboardRemove())
+
+        # Run generation
+        import asyncio
+        loop = asyncio.get_running_loop()
+        try:
+            # Resolve provider and language
+            prov = (data.get("provider") or "").strip().lower()
+            if not prov and message.from_user:
+                try:
+                    prov = await get_provider(message.from_user.id)  # type: ignore
+                except Exception:
+                    prov = "openai"
+            # Ensure gen_lang from KV if FSM lost it
+            persisted_gen_lang = None
+            try:
+                if message.from_user:
+                    persisted_gen_lang = await get_gen_lang(message.from_user.id)
+            except Exception:
+                persisted_gen_lang = None
+            gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+            eff_lang = gen_lang
+            if (gen_lang or "auto").strip().lower() == "auto":
+                try:
+                    det = (detect_lang_from_text(topic) or "").lower()
+                    eff_lang = "en" if det.startswith("en") else "ru"
+                except Exception:
+                    eff_lang = "ru"
+
+            # Refine preference
+            refine_enabled = False
+            try:
+                if message.from_user:
+                    refine_enabled = await get_refine_enabled(message.from_user.id)
+            except Exception:
+                refine_enabled = False
+
+            # Fact-check decision
+            fc_enabled_state = data.get("factcheck")
+            if fc_enabled_state is None and message.from_user:
+                try:
+                    fc_enabled_state = await get_factcheck_enabled(message.from_user.id)
+                except Exception:
+                    fc_enabled_state = False
+            fc_enabled_state = bool(fc_enabled_state)
+            depth = data.get("research_iterations")
+            if fc_enabled_state and depth is None and message.from_user:
+                try:
+                    depth = await get_factcheck_depth(message.from_user.id)
+                except Exception:
+                    depth = 2
+            if not fc_enabled_state:
+                depth = None
+
+            async with GLOBAL_SEMAPHORE:
+                # Prepare job metadata for logging
+                job_meta = {
+                    "user_id": message.from_user.id if message.from_user else 0,
+                    "chat_id": message.chat.id,
+                    "topic": topic,
+                    "provider": prov or "openai",
+                    "lang": eff_lang,
+                    "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
+                    "refine": refine_enabled,
+                }
+                if fc_enabled_state:
+                    path = await loop.run_in_executor(
+                        None,
+                        lambda: generate_post(
+                            topic,
+                            lang=eff_lang,
+                            provider=(prov or "openai"),
+                            factcheck=True,
+                            research_iterations=int(depth or 2),
+                            job_meta=job_meta,
+                            use_refine=refine_enabled,
+                        ),
+                    )
+                else:
+                    path = await loop.run_in_executor(
+                        None,
+                        lambda: generate_post(
+                            topic,
+                            lang=eff_lang,
+                            provider=(prov or "openai"),
+                            factcheck=False,
+                            job_meta=job_meta,
+                            use_refine=refine_enabled,
+                        ),
+                    )
+            # Send main result
+            with open(path, "rb") as f:
+                cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"
+                await message.answer_document(f, caption=cap)
+
+            # Send logs if enabled
+            try:
+                if message.from_user:
+                    logs_enabled = await get_logs_enabled(message.from_user.id)
+                    if logs_enabled:
+                        topic_base = safe_filename_base(topic)
+                        log_files = list(path.parent.glob(f"{topic_base}_log_*.md"))
+                        if log_files:
+                            log_path = log_files[0]
+                            with open(log_path, "rb") as log_f:
+                                log_cap = f"Лог: {log_path.name}" if _is_ru(ui_lang) else f"Log: {log_path.name}"
+                                await message.answer_document(log_f, caption=log_cap)
+            except Exception:
+                pass
+        except Exception as e:
+            err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
+            await message.answer(err)
+
+        await state.finish()
+        RUNNING_CHATS.discard(chat_id)
 
     @dp.message_handler(state=GenerateStates.ChoosingFactcheck)  # type: ignore
     async def choose_factcheck(message: types.Message, state: FSMContext):
