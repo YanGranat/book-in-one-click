@@ -182,6 +182,10 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(state=GenerateStates.ChoosingLanguage)  # type: ignore
     async def choose_language(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
+        if text.startswith("/generate"):
+            await state.finish()
+            await cmd_generate(message, state)
+            return
         if text.startswith("english"):
             ui_lang = "en"
         elif text.startswith("рус"):
@@ -215,6 +219,10 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(state=GenerateStates.ChoosingGenLanguage)  # type: ignore
     async def choose_gen_language(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
+        if text.startswith("/generate"):
+            await state.finish()
+            await cmd_generate(message, state)
+            return
         if text.startswith("ru"):
             gen_lang = "ru"
         elif text.startswith("en"):
@@ -263,6 +271,10 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(state=GenerateStates.ChoosingProvider)  # type: ignore
     async def choose_provider(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
+        if text.startswith("/generate"):
+            await state.finish()
+            await cmd_generate(message, state)
+            return
         prov_map = {"openai": "openai", "gemini": "gemini", "claude": "claude"}
         prov = prov_map.get(text, None)
         data = await state.get_data()
@@ -307,6 +319,10 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(state=GenerateStates.ChoosingLogs)  # type: ignore
     async def choose_logs(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
+        if text.startswith("/generate"):
+            await state.finish()
+            await cmd_generate(message, state)
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         
@@ -347,6 +363,10 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(state=GenerateStates.ChoosingIncognito)  # type: ignore
     async def choose_incognito(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
+        if text.startswith("/generate"):
+            await state.finish()
+            await cmd_generate(message, state)
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         if text.startswith("включ") or text.startswith("enable"):
@@ -389,6 +409,10 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(state=GenerateStates.ChoosingRefine)  # type: ignore
     async def choose_refine(message: types.Message, state: FSMContext):
         text = (message.text or "").strip().lower()
+        if text.startswith("/generate"):
+            await state.finish()
+            await cmd_generate(message, state)
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         yes = {"y", "yes", "д", "да"}
