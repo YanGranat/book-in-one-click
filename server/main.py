@@ -502,20 +502,16 @@ async def logs_ui(_: bool = Depends(require_admin)):
     html_rows = []
     for it in items:
         topic = (it.get("topic") or "").replace("<", "&lt;").replace(">", "&gt;")
-        res_id = it.get('result_id')
-        res_cell = (f"<a href='/results-ui/id/{res_id}'>open</a>" if res_id is not None else "-")
         status_txt = (it.get('status') or '')
         html_rows.append(
             f"<tr data-id='{it.get('id')}' data-kind='{it.get('kind','')}' data-topic='{topic.lower()}' data-type='{(it.get('mtype') or '').lower()}' data-status='{(it.get('status') or '').lower()}'>"
             f"<td><input type='checkbox' class='sel' value='{it.get('id')}'></td>"
             f"<td class='t-id'>{it.get('id')}</td>"
-            f"<td class='t-job'>{(it.get('job_id') or '')}</td>"
             f"<td class='t-topic'><a href='/logs-ui/{it.get('id')}'>{topic or '(no topic)'}</a></td>"
             f"<td class='t-created'>{it.get('created_at','')}</td>"
             f"<td class='t-kind'><span class='badge'>{it.get('kind','')}</span></td>"
             f"<td class='t-mtype'>{(it.get('mtype') or '')}</td>"
             f"<td class='t-status'>{status_txt}</td>"
-            f"<td class='t-res'>{res_cell}</td>"
             f"<td class='t-actions'><a class='btn-link' href='/logs/{it.get('id')}'>Raw</a>"
             f" <button class='delBtn' data-id='{it.get('id')}'>Delete</button></td>"
             f"</tr>"
@@ -559,7 +555,7 @@ async def logs_ui(_: bool = Depends(require_admin)):
         "<button id='delSel'>Delete selected</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
-        "<table id='tbl'><thead><tr><th><input id='selAll' type='checkbox'></th><th data-sort='id'>ID</th><th data-sort='job'>Job</th><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Type</th><th>Status</th><th>Result</th><th>Actions</th></tr></thead><tbody>"
+        "<table id='tbl'><thead><tr><th><input id='selAll' type='checkbox'></th><th data-sort='id'>ID</th><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead><tbody>"
         + ("".join(html_rows) or "<tr><td colspan='7' class='muted'>No logs yet</td></tr>")
         + "</tbody></table>"
         "<footer>Tip: Click column headers to sort. Use search and kind filter to narrow down.</footer>"
