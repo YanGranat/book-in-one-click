@@ -372,7 +372,7 @@ async def logs_ui(_: bool = Depends(require_admin)):
                     dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                 else:
                     dt = datetime.fromisoformat(ts_str)
-                it["created_at"] = dt.strftime("%Y-%m-%d %H:%M")
+                it["created_at"] = dt.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             pass
     html_rows = []
@@ -468,7 +468,7 @@ async def log_view_ui(log_id: int, _: bool = Depends(require_admin)):
         "code{background:#0f121a;color:inherit;padding:0 2px;font-size:12px}pre{background:#0f121a;color:inherit;padding:12px;border-radius:8px;white-space:pre-wrap;word-wrap:break-word;font-size:12px}"
         "</style></head><body>"
         f"<header><a href='/logs-ui'>← Logs</a><a href='/results-ui'>Results</a><div class='spacer'></div><div class='toolbar'><button id='copy'>Copy</button><button id='download'>Download .md</button><button id='toggleRaw'>Show raw</button></div></header>"
-        f"<main><div class='meta' id='meta'>Log: {title}</div><div id='content'></div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
+        f"<main><div class='meta' id='meta'>Log: {title}</div><div id='content'>Loading…</div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
         f"<script>const LOG_ID={log_id};"
         "const TAGS=['input','topic','lang','post','critique_json'];"
         "function escapeOutsideCode(md){const lines=md.split('\n');let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join('\n');}"
@@ -478,8 +478,8 @@ async def log_view_ui(log_id: int, _: bool = Depends(require_admin)):
         "try{html=(window.marked?window.marked.parse(escaped):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=escaped.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>'; }"
         "const m=extractMeta(md||'');const metaEl=document.getElementById('meta');if(metaEl){metaEl.textContent=`provider=${m.provider||'?'} | lang=${m.lang||'?'} | topic=${m.topic||'?'} | id=${LOG_ID}`;}"
         "document.getElementById('content').innerHTML = showRaw?('<pre>'+md.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>'):html;}"
-        "render(text);"
-        "async function refresh(){try{const r=await fetch('/logs/'+LOG_ID,{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}}catch(_){}}refresh();"
+        "if(text&&text.length>0){render(text);}"
+        "async function refresh(){try{const r=await fetch('/logs/'+LOG_ID,{cache:'no-store'});const j=await r.json();if(j&&typeof j.content==='string'){text=j.content;render(text);}else{document.getElementById('content').textContent='No content';}}catch(e){document.getElementById('content').textContent='Failed to load';}}refresh();"
         "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
         "document.getElementById('download').onclick=()=>{const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'log')+'.md';a.click();};"
         "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}"
@@ -569,7 +569,7 @@ async def list_results():
 @app.get("/results-ui", response_class=HTMLResponse)
 async def results_ui():
     items = await _list_result_files()
-    rows = []
+        rows = []
     for it in items:
         if "id" in it and isinstance(it.get("id"), int):
             link = f"/results-ui/id/{it['id']}"
@@ -577,9 +577,9 @@ async def results_ui():
             rows.append(
                 f"<tr data-id='{it.get('id')}' data-topic='{topic.lower()}' data-prov='{(it.get('provider','') or '').lower()}' data-lang='{(it.get('lang','') or '').lower()}'>"
                 f"<td class='t-name'><a href='{link}'>{it.get('name','result.md')}</a></td>"
-                f"<td class='t-created'>{it.get('created_at','')}</td><td class='t-kind'>{it.get('kind','')}</td>"
-                f"<td class='t-prov'>{it.get('provider','')}</td><td class='t-lang'>{it.get('lang','')}</td><td class='t-topic'>{topic}</td>"
-                f"<td class='t-actions'><a class='btn-link' href='{link}'>Open</a> <button class='dlBtn' data-id='{it.get('id')}'>Download</button></td>"
+                    f"<td class='t-created'>{it.get('created_at','')}</td><td class='t-kind'>{it.get('kind','')}</td>"
+                    f"<td class='t-prov'>{it.get('provider','')}</td><td class='t-lang'>{it.get('lang','')}</td><td class='t-topic'>{topic}</td>"
+                    f"<td class='t-actions'><button class='dlBtn' data-id='{it.get('id')}'>Download</button></td>"
                 f"</tr>"
             )
     html = (
@@ -618,7 +618,7 @@ async def results_ui():
         "function applyFilter(){const term=(q.value||'').toLowerCase();const p=(prov.value||'').toLowerCase();const l=(lang.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const tt=(tr.getAttribute('data-topic')||'');const tp=(tr.getAttribute('data-prov')||'');const tl=(tr.getAttribute('data-lang')||'');const ok=tt.includes(term)&&(!p||tp===p)&&(!l||tl===l);tr.style.display=ok?'':'none';}}"
         "q.oninput=applyFilter;prov.onchange=applyFilter;lang.onchange=applyFilter;"
         "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();const B=(b.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();return (asc?1:-1)*A.localeCompare(B);});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
-        "document.addEventListener('click',async(e)=>{if(e.target.matches('.dlBtn')){const id=e.target.getAttribute('data-id');try{const r=await fetch('/results/'+id,{cache:'no-store'});const j=await r.json();if(j&&j.content){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([j.content],{type:'text/markdown'}));a.download=(j.path?j.path.split('/').pop():'result.md');a.click();}}catch(_){}}});"
+        "document.addEventListener('click',async(e)=>{if(e.target.matches('.dlBtn')){const id=e.target.getAttribute('data-id');try{const r=await fetch('/results/'+id,{cache:'no-store'});const j=await r.json();if(j&&j.content){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([j.content],{type:'text/markdown'}));let nm=(j.path?j.path.split('/').pop():'result.md');nm=nm.replace(/:\d+\.\d+$/,'');a.download=nm;a.click();}}catch(_){}}});"
         "$$('#refresh').onclick=()=>location.reload();"
         "</script>"
         "</body></html>"

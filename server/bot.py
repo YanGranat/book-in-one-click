@@ -276,8 +276,7 @@ def create_dispatcher() -> Dispatcher:
                 "- Каждый результат — Markdown‑файл, который можно скачать и править.\n\n"
                 "<b>Кредиты:</b>\n"
                 "- 1 генерация = 1 кредит. Посмотреть баланс: /balance. Пополнить: /buy.\n\n"
-                "<b>Важно:</b>\n"
-                "- /generate не задаёт вопросы: берёт ваши дефолтные значения из настроек.\n\n"
+                ""
                 "<b>Текущие настройки:</b>\n"
                 f"- Провайдер: {_prov_name(prov)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
@@ -302,8 +301,7 @@ def create_dispatcher() -> Dispatcher:
                 "- Each result is a Markdown file you can download and edit.\n\n"
                 "<b>Credits:</b>\n"
                 "- 1 generation = 1 credit. Check balance: /balance. Buy: /buy.\n\n"
-                "<b>Note:</b>\n"
-                "- /generate asks for topic only and uses your saved defaults.\n\n"
+                ""
                 "<b>Current settings:</b>\n"
                 f"- Provider: {_prov_name(prov)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
@@ -596,7 +594,7 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_factcheck(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        prompt = "Факт-чекинг: включить или отключить?" if _is_ru(ui_lang) else "Fact-check: Enable or Disable?"
+        prompt = "Факт-чекинг?" if _is_ru(ui_lang) else "Fact-check?"
         await message.answer(prompt, reply_markup=build_enable_disable_inline("fc_cmd", ui_lang))
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc_cmd:"))  # type: ignore
