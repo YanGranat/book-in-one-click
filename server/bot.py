@@ -1937,18 +1937,26 @@ def create_dispatcher() -> Dispatcher:
         # Show unified history from DB Results (not only posts)
         items = []
         try:
-            if SessionLocal is not None:
+            if SessionLocal is not None and message.from_user:
                 from sqlalchemy import select as _select
+                from sqlalchemy import join as _join
                 async with SessionLocal() as _s:
-                    from .db import ResultDoc
-                    res = await _s.execute(_select(ResultDoc).order_by(ResultDoc.created_at.desc()).limit(20))
-                    rows = res.scalars().all()
-                    for r in rows:
+                    from .db import ResultDoc, Job
+                    jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
+                    res = await _s.execute(
+                        _select(ResultDoc, Job.user_id)
+                        .select_from(jn)
+                        .where(Job.user_id == int(message.from_user.id))
+                        .order_by(ResultDoc.created_at.desc())
+                        .limit(20)
+                    )
+                    rows = res.fetchall()
+                    for rdoc, _uid in rows:
                         items.append({
-                            "id": int(r.id),
-                            "kind": getattr(r, "kind", "") or "",
-                            "topic": getattr(r, "topic", "") or "",
-                            "hidden": int(getattr(r, "hidden", 0) or 0),
+                            "id": int(rdoc.id),
+                            "kind": getattr(rdoc, "kind", "") or "",
+                            "topic": getattr(rdoc, "topic", "") or "",
+                            "hidden": int(getattr(rdoc, "hidden", 0) or 0),
                         })
         except Exception:
             items = []
