@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Dict, Set, Optional
 from datetime import datetime
 
@@ -100,6 +101,9 @@ class GenerateStates(StatesGroup):
     ChoosingFactcheck = State()
     ChoosingDepth = State()
     ChoosingRefine = State()
+    ChoosingGenType = State()
+    ChoosingSeriesPreset = State()
+    ChoosingSeriesCount = State()
 
 
 def _is_ru(ui_lang: str) -> bool:
@@ -514,8 +518,155 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             fc_depth = 2
         await state.update_data(factcheck=bool(fc_enabled), research_iterations=(int(fc_depth) if fc_enabled else None), fc_ready=True)
-        prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
+        # Ask Post or Series first
+        ru = _is_ru(ui_lang)
+        kb = InlineKeyboardMarkup()
+        kb.add(
+            InlineKeyboardButton(text=("Пост" if ru else "Post"), callback_data="set:gentype:post"),
+            InlineKeyboardButton(text=("Серия" if ru else "Series"), callback_data="set:gentype:series"),
+        )
+        await message.answer(("Что генерировать?" if ru else "What to generate?"), reply_markup=kb)
+        await GenerateStates.ChoosingGenType.set()
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:gentype:"), state=GenerateStates.ChoosingGenType)  # type: ignore
+    async def cb_gen_type(query: types.CallbackQuery, state: FSMContext):
+        kind = (query.data or "").split(":")[-1]
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ru = _is_ru(ui_lang)
+        await query.answer()
+        if kind == "post":
+            await state.update_data(series_mode=None, series_count=None)
+            prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+            await GenerateStates.WaitingTopic.set()
+            return
+        # Series branch: ask preset 2/5/auto/custom
+        kb = InlineKeyboardMarkup()
+        kb.add(
+            InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
+            InlineKeyboardButton(text="5", callback_data="set:series_preset:5"),
+        )
+        kb.add(
+            InlineKeyboardButton(text=("Авто" if ru else "Auto"), callback_data="set:series_preset:auto"),
+            InlineKeyboardButton(text=("Кастом" if ru else "Custom"), callback_data="set:series_preset:custom"),
+        )
+        await state.update_data(series_mode=None, series_count=None)
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Сколько постов?" if ru else "How many posts?"), reply_markup=kb)
+        await GenerateStates.ChoosingSeriesPreset.set()
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:series_preset:"), state=GenerateStates.ChoosingSeriesPreset)  # type: ignore
+    async def cb_series_preset(query: types.CallbackQuery, state: FSMContext):
+        val = (query.data or "").split(":")[-1]
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ru = _is_ru(ui_lang)
+        await query.answer()
+        if val == "auto":
+            await state.update_data(series_mode="auto", series_count=None)
+            prompt = ("Отправьте тему для серии (авто)." if ru else "Send a topic for the series (auto).")
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
+            await GenerateStates.WaitingTopic.set()
+            return
+        if val in {"2","5"}:
+            await state.update_data(series_mode="fixed", series_count=int(val))
+            prompt = (f"Отправьте тему для серии (ровно {val})." if ru else f"Send a topic for the series (exactly {val}).")
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
+            await GenerateStates.WaitingTopic.set()
+            return
+        # custom
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Введите число постов:" if ru else "Enter number of posts:"))
+        await GenerateStates.ChoosingSeriesCount.set()
+
+    @dp.message_handler(state=GenerateStates.ChoosingSeriesCount, content_types=types.ContentTypes.TEXT)  # type: ignore
+    async def series_custom_count(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ru = _is_ru(ui_lang)
+        txt = (message.text or "").strip()
+        try:
+            n = int(txt)
+        except Exception:
+            await message.answer(("Введите целое число > 0:" if ru else "Enter integer > 0:"))
+            return
+        if n <= 0:
+            await message.answer(("Введите целое число > 0:" if ru else "Enter integer > 0:"))
+            return
+        await state.update_data(series_mode="fixed", series_count=int(n))
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        if is_admin:
+            await message.answer(("Ок. Отправьте тему для серии." if ru else "OK. Send a topic for the series."))
+            await GenerateStates.WaitingTopic.set()
+            return
+        # Compute unit cost based on prefs
+        try:
+            refine_pref = await get_refine_enabled(message.from_user.id) if message.from_user else False
+        except Exception:
+            refine_pref = False
+        try:
+            fc_enabled_pref = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
+        except Exception:
+            fc_enabled_pref = False
+        try:
+            fc_depth_pref = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
+        except Exception:
+            fc_depth_pref = 2
+        fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
+        unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+        total = unit_cost * int(n)
+        kb = InlineKeyboardMarkup()
+        kb.add(
+            InlineKeyboardButton(text=("Подтвердить" if ru else "Confirm"), callback_data="confirm:series_custom:yes"),
+            InlineKeyboardButton(text=("Отмена" if ru else "Cancel"), callback_data="confirm:series_custom:no"),
+        )
+        await state.update_data(pending_series_count=int(n), pending_series_cost=int(total))
+        await message.answer((f"Будет списано {total} кредит(ов). Начать?" if ru else f"It will cost {total} credits. Start?"), reply_markup=kb)
+
+    @dp.callback_query_handler(lambda c: c.data in {"confirm:series_custom:yes","confirm:series_custom:no"}, state=GenerateStates.ChoosingSeriesCount)  # type: ignore
+    async def cb_series_custom_confirm(query: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ru = _is_ru(ui_lang)
+        if query.data.endswith(":no"):
+            await query.answer()
+            await query.message.edit_reply_markup() if query.message else None
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Отменено." if ru else "Cancelled."))
+            await state.finish()
+            return
+        # Precharge now
+        total = int(data.get("pending_series_cost") or 0)
+        count = int(data.get("pending_series_count") or 0)
+        if total <= 0 or count <= 0:
+            await query.answer()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Ошибка параметров." if ru else "Invalid parameters."))
+            await state.finish()
+            return
+        from sqlalchemy.exc import SQLAlchemyError
+        try:
+            charged = False
+            if SessionLocal is not None and query.from_user:
+                async with SessionLocal() as session:
+                    user = await ensure_user_with_credits(session, query.from_user.id)
+                    ok, remaining = await charge_credits(session, user, int(total), reason="post_series_fixed_prepay")
+                    if ok:
+                        await session.commit()
+                        charged = True
+            if not charged and query.from_user:
+                ok, remaining = await charge_credits_kv(query.from_user.id, int(total))
+                if not ok:
+                    await query.answer()
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Недостаточно кредитов" if ru else "Insufficient credits"))
+                    await state.finish()
+                    return
+        except SQLAlchemyError:
+            await query.answer()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Временная ошибка БД. Попробуйте позже." if ru else "Temporary DB error. Try later."))
+            await state.finish()
+            return
+        # Mark precharged and ask for topic
+        await state.update_data(series_mode="fixed", series_count=int(count), series_precharged_amount=int(total))
+        await query.answer()
+        await query.message.edit_reply_markup() if query.message else None
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Ок. Отправьте тему для серии." if ru else "OK. Send a topic for the series."))
         await GenerateStates.WaitingTopic.set()
 
     # ---- Series command ----
@@ -1095,11 +1246,36 @@ def create_dispatcher() -> Dispatcher:
                 # Try compute number of posts generated for refund calculation
                 n_generated = 0
                 try:
+                    import re as _re
                     text = Path(aggregate_path).read_text(encoding="utf-8")
-                    # Count section headers introduced per post
-                    n_generated = sum(1 for line in text.splitlines() if line.strip().startswith("## "))
+                    # Prefer strict pattern for post sections like: '## t01. Title'
+                    m = _re.findall(r"(?m)^##\s+[tT]\d+\.", text)
+                    n_generated = len(m)
+                    if n_generated == 0:
+                        # Fallback: count generic '## ' and subtract header '## Список тем' if present
+                        n_generic = sum(1 for line in text.splitlines() if line.strip().startswith("## "))
+                        n_generated = max(0, n_generic - 1)
                 except Exception:
                     n_generated = int(target_count or 0)
+
+                # Send series log if user enabled logs
+                try:
+                    if message.from_user:
+                        logs_enabled = await get_logs_enabled(message.from_user.id)
+                        if logs_enabled:
+                            try:
+                                from utils.slug import safe_filename_base as _sfb
+                            except Exception:
+                                _sfb = lambda s: (s or "topic").lower().replace(" ", "_")
+                            base = _sfb(topic)
+                            log_files = list(Path(aggregate_path).parent.glob(f"{base}_series_log_*.md"))
+                            if log_files:
+                                lp = log_files[0]
+                                with open(lp, "rb") as log_f:
+                                    log_cap = f"Лог серии: {lp.name}" if _is_ru(ui_lang) else f"Series log: {lp.name}"
+                                    await message.answer_document(log_f, caption=log_cap)
+                except Exception:
+                    pass
 
                 # Refund unused credits
                 if not is_admin and precharged > 0:

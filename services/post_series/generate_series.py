@@ -354,10 +354,8 @@ def generate_series(
         log("✍️ Writer · Topic", f"{idea.id}: {idea.title}")
         # series writer prompt override
         p_writer = _load_prompt("writer.md")
-        series_topics_min = [
-            {"id": it.id, "title": it.title, "angle": it.angle, "tags": it.tags}
-            for it in selected
-        ]
+        # Pass full list of topics as JSON (all fields of PostIdea)
+        series_topics_full = [it.model_dump() for it in selected]
         # Choose behavior based on output mode
         if (output_mode or "single").strip().lower() == "single":
             content = generate_single_post(
@@ -370,7 +368,7 @@ def generate_series(
                 job_meta=job_meta,
                 use_refine=refine,
                 instructions_override=p_writer,
-                series_topics=series_topics_min,
+                series_topics=series_topics_full,
                 series_current_id=idea.id,
                 series_done_ids=done_ids,
                 disable_db_record=True,
@@ -390,7 +388,7 @@ def generate_series(
                 job_meta=job_meta,
                 use_refine=refine,
                 instructions_override=p_writer,
-                series_topics=series_topics_min,
+                series_topics=series_topics_full,
                 series_current_id=idea.id,
                 series_done_ids=done_ids,
                 disable_db_record=True,

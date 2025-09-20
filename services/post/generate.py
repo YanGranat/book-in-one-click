@@ -399,18 +399,9 @@ def generate_post(
     series_block = ""
     if series_topics is not None:
         try:
-            # Minimize payload
-            topics_min = []
-            for it in series_topics or []:
-                topics_min.append({
-                    "id": it.get("id"),
-                    "title": it.get("title"),
-                    "angle": it.get("angle"),
-                    "tags": it.get("tags", []),
-                })
             series_block = (
                 "\n<series>\n"
-                f"<topics_json>{_json.dumps(topics_min, ensure_ascii=False)}</topics_json>\n"
+                f"<topics_json>{_json.dumps(series_topics, ensure_ascii=False)}</topics_json>\n"
                 f"<current_id>{series_current_id or ''}</current_id>\n"
                 f"<done_ids>{','.join(series_done_ids or [])}</done_ids>\n"
                 "</series>\n"
