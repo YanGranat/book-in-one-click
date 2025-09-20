@@ -1962,7 +1962,7 @@ def create_dispatcher() -> Dispatcher:
                     res = await _s.execute(
                         _select(ResultDoc, Job.user_id)
                         .select_from(jn)
-                        .where(cond)
+                        .where(cond, (ResultDoc.hidden == 0))
                         .order_by(ResultDoc.created_at.desc())
                         .limit(50)
                     )
@@ -1995,8 +1995,10 @@ def create_dispatcher() -> Dispatcher:
             else:
                 lines.append(f"• [{tag}] {topic}")
         prefix = "История генераций (последние):\n" if _is_ru(ui_lang) else "Your recent generations:\n"
-        lines.append("\n" + ("Очистить: /history_clear" if _is_ru(ui_lang) else "Clear: /history_clear"))
-        await message.answer(prefix + "\n".join(lines), parse_mode=types.ParseMode.HTML, disable_web_page_preview=True)
+        # Inline clear button for clarity
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(text=("Очистить историю" if _is_ru(ui_lang) else "Clear history"), callback_data="history:clear"))
+        await message.answer(prefix + "\n".join(lines), parse_mode=types.ParseMode.HTML, disable_web_page_preview=True, reply_markup=kb)
 
     @dp.message_handler(commands=["history_clear"])  # type: ignore
     async def cmd_history_clear(message: types.Message, state: FSMContext):
@@ -2007,6 +2009,24 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await message.answer("История очищена." if _is_ru(ui_lang) else "History cleared.")
+
+    @dp.callback_query_handler(lambda c: c.data == "history:clear")  # type: ignore
+    async def cb_history_clear(query: types.CallbackQuery, state: FSMContext):
+        try:
+            await clear_history(query.from_user.id)
+        except Exception:
+            pass
+        try:
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+        except Exception:
+            ui_lang = "ru"
+        await query.answer("Очищено" if _is_ru(ui_lang) else "Cleared", show_alert=False)
+        await dp.bot.edit_message_text(
+            chat_id=query.message.chat.id,
+            message_id=query.message.message_id,
+            text=("История очищена." if _is_ru(ui_lang) else "History cleared."),
+        )
 
     # Legacy state handler removed: fact-check choices are inline-only now
 
