@@ -699,6 +699,12 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(prompt, reply_markup=build_depth_inline())
 
 
+    # Helper for results link
+    RESULTS_ORIGIN = os.getenv("RESULTS_UI_ORIGIN", "https://bio1c-bot.onrender.com").rstrip("/")
+
+    def _result_url(res_id: int) -> str:
+        return f"{RESULTS_ORIGIN}/results-ui/id/{int(res_id)}"
+
     @dp.message_handler(state=GenerateStates.WaitingTopic, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def topic_received(message: types.Message, state: FSMContext):
         text_raw = (message.text or "").strip()
@@ -797,8 +803,25 @@ def create_dispatcher() -> Dispatcher:
             RUNNING_CHATS.discard(chat_id)
             return
 
-        working = "Генерирую. Это может занять несколько минут..." if _is_ru(ui_lang) else "Working on it. This may take a few minutes..."
-        await message.answer(working, reply_markup=ReplyKeyboardRemove())
+        # Light progress notes before long run
+        try:
+            notes = [
+                "Формирую план…" if _is_ru(ui_lang) else "Planning…",
+                "Пишу черновик…" if _is_ru(ui_lang) else "Drafting…",
+            ]
+            # If FC/refine are expected, inform once up-front
+            try:
+                ref_pref = await get_refine_enabled(message.from_user.id) if message.from_user else False
+            except Exception:
+                ref_pref = False
+            if bool(data.get("factcheck")):
+                notes.append("Проведу факт‑чекинг…" if _is_ru(ui_lang) else "Will run fact‑check…")
+            if ref_pref:
+                notes.append("Применю финальную редактуру…" if _is_ru(ui_lang) else "Will apply final refine…")
+            await message.answer("\n".join(notes), reply_markup=ReplyKeyboardRemove())
+        except Exception:
+            working = "Генерирую. Это может занять несколько минут..." if _is_ru(ui_lang) else "Working on it. This may take a few minutes..."
+            await message.answer(working, reply_markup=ReplyKeyboardRemove())
 
         # Run generation
         import asyncio
@@ -907,10 +930,23 @@ def create_dispatcher() -> Dispatcher:
                                 await message.answer_document(log_f, caption=log_cap)
             except Exception:
                 pass
-            # Record history (KV)
+            # Record history (KV) + try to attach result_id for clickable link
             try:
+                res_id: int | None = None
+                if SessionLocal is not None:
+                    from sqlalchemy import select
+                    async with SessionLocal() as session:
+                        from .db import ResultDoc
+                        res = await session.execute(select(ResultDoc).where(ResultDoc.path == str(path)).order_by(ResultDoc.created_at.desc()))
+                        row = res.scalars().first()
+                        if row is not None:
+                            res_id = int(row.id)
+                payload = {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat()}
+                if res_id is not None:
+                    payload["result_id"] = int(res_id)
+                    payload["url"] = _result_url(int(res_id))
                 if message.from_user:
-                    await push_history(message.from_user.id, {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat()})
+                    await push_history(message.from_user.id, payload)
             except Exception:
                 pass
         except Exception as e:
@@ -1086,22 +1122,20 @@ def create_dispatcher() -> Dispatcher:
         if not hist:
             await message.answer("История пуста." if _is_ru(ui_lang) else "No history yet.")
             return
-        # Build clickable list with link to results when path resembles results mapping (id extraction best-effort)
+        # Build clickable list with link to results if result_id/url present
         lines = []
         for it in hist:
             topic = str(it.get("topic") or "(no topic)")
             path = str(it.get("path") or "")
-            link = ""
-            try:
-                name = path.split("/")[-1]
-                # heuristic: if DB stored, there will be ResultDoc id; we don't have it here, so omit link
-                # If you want strict links, extend push_history with result_id and use it here
-            except Exception:
-                pass
-            lines.append(f"• {topic}")
+            url = it.get("url") or ( _result_url(int(it.get("result_id"))) if it.get("result_id") else "" )
+            if url:
+                # Telegram: кликабельная ссылка в тексте
+                lines.append(f"• <a href='{url}'>{topic}</a>")
+            else:
+                lines.append(f"• {topic}")
         prefix = "История генераций (последние):\n" if _is_ru(ui_lang) else "Your recent generations:\n"
         lines.append("\n" + ("Очистить: /history clear" if _is_ru(ui_lang) else "Clear: /history clear"))
-        await message.answer(prefix + "\n".join(lines))
+        await message.answer(prefix + "\n".join(lines), parse_mode=types.ParseMode.HTML, disable_web_page_preview=True)
 
     # Legacy state handler removed: fact-check choices are inline-only now
 
