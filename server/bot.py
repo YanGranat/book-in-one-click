@@ -1932,7 +1932,9 @@ def create_dispatcher() -> Dispatcher:
         if len(parts) > 1 and parts[1].lower() == "clear":
             # Backward compatibility: /history clear
             try:
+                from .kv import set_history_cleared_at
                 await clear_history(message.from_user.id)
+                await set_history_cleared_at(message.from_user.id)
             except Exception:
                 pass
             await message.answer("История очищена." if _is_ru(ui_lang) else "History cleared.")
@@ -1967,7 +1969,22 @@ def create_dispatcher() -> Dispatcher:
                         .limit(50)
                     )
                     rows = res.fetchall()
+                    # Filter by last clear ts if exists
+                    cleared_ts = None
+                    try:
+                        from .kv import get_history_cleared_at
+                        cleared_ts = await get_history_cleared_at(message.from_user.id)
+                    except Exception:
+                        cleared_ts = None
                     for rdoc, _uid in rows:
+                        try:
+                            if cleared_ts is not None:
+                                # Skip results created before clear mark
+                                if getattr(rdoc, "created_at", None) is not None and float(cleared_ts) > 0:
+                                    if rdoc.created_at.timestamp() < float(cleared_ts):
+                                        continue
+                        except Exception:
+                            pass
                         items.append({
                             "id": int(rdoc.id),
                             "kind": getattr(rdoc, "kind", "") or "",
@@ -2013,7 +2030,9 @@ def create_dispatcher() -> Dispatcher:
     @dp.callback_query_handler(lambda c: c.data == "history:clear")  # type: ignore
     async def cb_history_clear(query: types.CallbackQuery, state: FSMContext):
         try:
+            from .kv import set_history_cleared_at
             await clear_history(query.from_user.id)
+            await set_history_cleared_at(query.from_user.id)
         except Exception:
             pass
         try:

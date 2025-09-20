@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from typing import Optional, List, Dict, Any
+import time
 import json
 
 try:
@@ -71,6 +72,34 @@ async def clear_history(telegram_id: int) -> None:
         await r.delete(key)
     except Exception:
         pass
+
+
+async def set_history_cleared_at(telegram_id: int, ts: Optional[float] = None) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:history_cleared_at:{telegram_id}"
+    try:
+        val = int(ts) if ts is not None else int(time.time())
+        await r.set(key, str(val))
+        # Keep marker for up to a year
+        await r.expire(key, 60 * 60 * 24 * 365)
+    except Exception:
+        pass
+
+
+async def get_history_cleared_at(telegram_id: int) -> Optional[float]:
+    r = get_redis()
+    key = f"{kv_prefix()}:history_cleared_at:{telegram_id}"
+    try:
+        val = await r.get(key)
+        if val is None:
+            return None
+        try:
+            sval = val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val)
+        except Exception:
+            sval = str(val)
+        return float(sval)
+    except Exception:
+        return None
 
 
 # ---- Simple rate limiting via Redis counters ----
