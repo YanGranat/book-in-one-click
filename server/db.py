@@ -37,6 +37,11 @@ class User(Base):
     telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     credits: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Optional simple rate limiting fields
+    # counters are soft and can be reset daily/hourly by app logic
+    # Keeping here for future use; not critical for current release
+    # daily_count: Mapped[int] = mapped_column(Integer, default=0)
+    # daily_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Job(Base):

@@ -127,6 +127,50 @@ def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
+def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: bool, logs_enabled: bool, incognito: bool, fc_enabled: bool, fc_depth: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    ru = _is_ru(ui_lang)
+    # Provider row
+    kb.add(
+        InlineKeyboardButton(text=("OpenAI" + (" ✓" if provider == "openai" else "")), callback_data="set:provider:openai"),
+        InlineKeyboardButton(text=("Gemini" + (" ✓" if provider == "gemini" else "")), callback_data="set:provider:gemini"),
+        InlineKeyboardButton(text=("Claude" + (" ✓" if provider == "claude" else "")), callback_data="set:provider:claude"),
+    )
+    # Generation language row
+    kb.add(
+        InlineKeyboardButton(text=("RU" + (" ✓" if gen_lang == "ru" else "")), callback_data="set:gen_lang:ru"),
+        InlineKeyboardButton(text=("EN" + (" ✓" if gen_lang == "en" else "")), callback_data="set:gen_lang:en"),
+        InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if gen_lang == "auto" else "")), callback_data="set:gen_lang:auto"),
+    )
+    # Refine row
+    kb.add(
+        InlineKeyboardButton(text=(("Редактура: вкл" if ru else "Refine: on") + (" ✓" if refine else "")), callback_data="set:refine:yes"),
+        InlineKeyboardButton(text=(("Редактура: выкл" if ru else "Refine: off") + (" ✓" if not refine else "")), callback_data="set:refine:no"),
+    )
+    # Logs row
+    kb.add(
+        InlineKeyboardButton(text=(("Логи: вкл" if ru else "Logs: on") + (" ✓" if logs_enabled else "")), callback_data="set:logs:enable"),
+        InlineKeyboardButton(text=(("Логи: выкл" if ru else "Logs: off") + (" ✓" if not logs_enabled else "")), callback_data="set:logs:disable"),
+    )
+    # Incognito row
+    kb.add(
+        InlineKeyboardButton(text=(("Инкогнито: вкл" if ru else "Incognito: on") + (" ✓" if incognito else "")), callback_data="set:incog:enable"),
+        InlineKeyboardButton(text=(("Инкогнито: выкл" if ru else "Incognito: off") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
+    )
+    # Fact-check row
+    kb.add(
+        InlineKeyboardButton(text=(("Факт-чекинг: вкл" if ru else "Fact-check: on") + (" ✓" if fc_enabled else "")), callback_data="set:fc_cmd:enable"),
+        InlineKeyboardButton(text=(("Факт-чекинг: выкл" if ru else "Fact-check: off") + (" ✓" if not fc_enabled else "")), callback_data="set:fc_cmd:disable"),
+    )
+    # Depth row
+    kb.add(
+        InlineKeyboardButton(text=("D=1" + (" ✓" if fc_depth == 1 else "")), callback_data="set:depth:1"),
+        InlineKeyboardButton(text=("D=2" + (" ✓" if fc_depth == 2 else "")), callback_data="set:depth:2"),
+        InlineKeyboardButton(text=("D=3" + (" ✓" if fc_depth == 3 else "")), callback_data="set:depth:3"),
+    )
+    return kb
+
+
 def build_genlang_inline(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     if _is_ru(ui_lang):
@@ -433,6 +477,33 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
 
+    # ---- Settings quick panel ----
+    @dp.message_handler(commands=["settings"])  # type: ignore
+    async def cmd_settings(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prov = (data.get("provider") or "openai").strip().lower()
+        gen_lang = (data.get("gen_lang") or "auto").strip().lower()
+        try:
+            if message.from_user:
+                prov = await get_provider(message.from_user.id)
+                gen_lang = await get_gen_lang(message.from_user.id)
+                refine = await get_refine_enabled(message.from_user.id)
+                logs_enabled = await get_logs_enabled(message.from_user.id)
+                incognito = await get_incognito(message.from_user.id)
+                fc_enabled = await get_factcheck_enabled(message.from_user.id)
+                fc_depth = await get_factcheck_depth(message.from_user.id)
+            else:
+                refine = False; logs_enabled = False; incognito = False; fc_enabled = False; fc_depth = 2
+        except Exception:
+            refine = False; logs_enabled = False; incognito = False; fc_enabled = False; fc_depth = 2
+        title = (
+            "Быстрые настройки (всё — через кнопки, без диалогов):"
+            if _is_ru(ui_lang) else
+            "Quick settings (all toggles via buttons):"
+        )
+        await message.answer(title, reply_markup=build_settings_keyboard(ui_lang, prov, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth)))
+
     @dp.message_handler(commands=["logs"])  # type: ignore
     async def cmd_logs(message: types.Message, state: FSMContext):
         data = await state.get_data()
@@ -657,6 +728,26 @@ def create_dispatcher() -> Dispatcher:
             return
         RUNNING_CHATS.add(chat_id)
 
+        # Optional confirmation with price (skip for admins)
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        if not is_admin:
+            try:
+                ui_lang_local = (data.get("ui_lang") or "ru").strip()
+                confirm_txt = (
+                    "Будет списано 1 кредит. Подтвердить?"
+                    if _is_ru(ui_lang_local) else
+                    "It will cost 1 credit. Proceed?"
+                )
+                kb = InlineKeyboardMarkup()
+                kb.add(InlineKeyboardButton(text=("Подтвердить" if _is_ru(ui_lang_local) else "Confirm"), callback_data="confirm:charge:yes"))
+                kb.add(InlineKeyboardButton(text=("Отмена" if _is_ru(ui_lang_local) else "Cancel"), callback_data="confirm:charge:no"))
+                await message.answer(confirm_txt, reply_markup=kb)
+                # Save pending topic and wait for callback
+                await state.update_data(pending_topic=topic)
+                return
+            except Exception:
+                pass
+
         # Charge 1 credit before starting (DB if configured, else Redis KV)
         from sqlalchemy.exc import SQLAlchemyError
         try:
@@ -810,6 +901,134 @@ def create_dispatcher() -> Dispatcher:
         await state.finish()
         RUNNING_CHATS.discard(chat_id)
 
+    @dp.callback_query_handler(lambda c: c.data in {"confirm:charge:yes","confirm:charge:no"})  # type: ignore
+    async def cb_confirm_charge(query: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        if query.data.endswith(":no"):
+            await query.answer()
+            await query.message.edit_reply_markup() if query.message else None
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, "Отменено." if _is_ru(ui_lang) else "Cancelled.")
+            await state.finish()
+            return
+        # proceed and charge then run generation using saved topic
+        topic = (data.get("pending_topic") or "").strip()
+        if not topic:
+            await query.answer()
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, "Тема не найдена, отправьте заново /generate" if _is_ru(ui_lang) else "Topic missing, send /generate again")
+            await state.finish()
+            return
+        chat_id = query.message.chat.id if query.message else query.from_user.id
+        if chat_id in RUNNING_CHATS:
+            await query.answer()
+            return
+        RUNNING_CHATS.add(chat_id)
+        # Charge
+        from sqlalchemy.exc import SQLAlchemyError
+        try:
+            charged = False
+            if SessionLocal is not None and query.from_user:
+                async with SessionLocal() as session:
+                    user = await ensure_user_with_credits(session, query.from_user.id)
+                    ok, remaining = await charge_credits(session, user, 1, reason="post")
+                    if ok:
+                        await session.commit()
+                        charged = True
+            if not charged and query.from_user:
+                ok, remaining = await charge_credits_kv(query.from_user.id, 1)
+                if not ok:
+                    warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
+                    await dp.bot.send_message(chat_id, warn)
+                    RUNNING_CHATS.discard(chat_id)
+                    await state.finish()
+                    await query.answer()
+                    return
+        except SQLAlchemyError:
+            warn = "Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later."
+            await dp.bot.send_message(chat_id, warn)
+            RUNNING_CHATS.discard(chat_id)
+            await state.finish()
+            await query.answer()
+            return
+
+        await query.answer()
+        await query.message.edit_reply_markup() if query.message else None
+        # Reuse generation code path by simulating message with topic — call inner function via helper
+        # To avoid duplication, inline the core after charging:
+        # Resolve provider/lang/refine/fc and run generate_post (same as in topic_received)
+        import asyncio
+        loop = asyncio.get_running_loop()
+        try:
+            prov = (data.get("provider") or "").strip().lower()
+            if not prov and query.from_user:
+                try:
+                    prov = await get_provider(query.from_user.id)
+                except Exception:
+                    prov = "openai"
+            persisted_gen_lang = None
+            try:
+                if query.from_user:
+                    persisted_gen_lang = await get_gen_lang(query.from_user.id)
+            except Exception:
+                persisted_gen_lang = None
+            gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+            eff_lang = gen_lang
+            if (gen_lang or "auto").strip().lower() == "auto":
+                try:
+                    det = (detect_lang_from_text(topic) or "").lower()
+                    eff_lang = "en" if det.startswith("en") else "ru"
+                except Exception:
+                    eff_lang = "ru"
+            refine_enabled = False
+            try:
+                if query.from_user:
+                    refine_enabled = await get_refine_enabled(query.from_user.id)
+            except Exception:
+                refine_enabled = False
+            fc_enabled_state = data.get("factcheck")
+            if fc_enabled_state is None and query.from_user:
+                try:
+                    fc_enabled_state = await get_factcheck_enabled(query.from_user.id)
+                except Exception:
+                    fc_enabled_state = False
+            fc_enabled_state = bool(fc_enabled_state)
+            depth = data.get("research_iterations")
+            if fc_enabled_state and depth is None and query.from_user:
+                try:
+                    depth = await get_factcheck_depth(query.from_user.id)
+                except Exception:
+                    depth = 2
+            if not fc_enabled_state:
+                depth = None
+            job_meta = {
+                "user_id": query.from_user.id if query.from_user else 0,
+                "chat_id": chat_id,
+                "topic": topic,
+                "provider": prov or "openai",
+                "lang": eff_lang,
+                "incognito": (await get_incognito(query.from_user.id)) if query.from_user else False,
+                "refine": refine_enabled,
+            }
+            await dp.bot.send_message(chat_id, "Генерирую…" if _is_ru(ui_lang) else "Working…")
+            if fc_enabled_state:
+                path = await loop.run_in_executor(
+                    None,
+                    lambda: generate_post(topic, lang=eff_lang, provider=(prov or "openai"), factcheck=True, research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
+                )
+            else:
+                path = await loop.run_in_executor(
+                    None,
+                    lambda: generate_post(topic, lang=eff_lang, provider=(prov or "openai"), factcheck=False, job_meta=job_meta, use_refine=refine_enabled),
+                )
+            with open(path, "rb") as f:
+                cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"
+                await dp.bot.send_message(chat_id, cap)
+                await dp.bot.send_document(chat_id, f)
+        except Exception as e:
+            await dp.bot.send_message(chat_id, f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}")
+        await state.finish()
+        RUNNING_CHATS.discard(chat_id)
+
     # Legacy state handler removed: fact-check choices are inline-only now
 
     # Legacy depth state handler removed: depth is inline-only now
@@ -847,6 +1066,19 @@ def create_dispatcher() -> Dispatcher:
             )
         else:
             await message.answer("Покупка через ⭐ недоступна." if _is_ru(ui_lang) else "Buying with ⭐ is unavailable.")
+
+    @dp.message_handler(commands=["pricing"])  # type: ignore
+    async def cmd_pricing(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        if _is_ru(ui_lang):
+            await message.answer(
+                "Цены:\n- Пост: 1 кредит\n- Статья: 3 кредита\n- Серия: 1×N кредитов\n- Книга: по главам\nОплата: Telegram Stars (если включено)."
+            )
+        else:
+            await message.answer(
+                "Pricing:\n- Post: 1 credit\n- Article: 3 credits\n- Series: 1×N credits\n- Book: per chapter\nPayments: Telegram Stars (if enabled)."
+            )
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
     async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
