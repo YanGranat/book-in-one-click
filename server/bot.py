@@ -111,15 +111,19 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPri
 
 def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
-    # Packs: 1, 3, 5 credits at 200 stars per credit
+    # Packs: 1, 3, 5, 10, 50 credits at 200 stars per credit
     if _is_ru(ui_lang):
         kb.add(InlineKeyboardButton(text="Купить 1 кредит — 200⭐", callback_data="buy:stars:1"))
         kb.add(InlineKeyboardButton(text="Купить 3 кредита — 600⭐", callback_data="buy:stars:3"))
         kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 1000⭐", callback_data="buy:stars:5"))
+        kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 2000⭐", callback_data="buy:stars:10"))
+        kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 10000⭐", callback_data="buy:stars:50"))
     else:
         kb.add(InlineKeyboardButton(text="Buy 1 credit — 200⭐", callback_data="buy:stars:1"))
         kb.add(InlineKeyboardButton(text="Buy 3 credits — 600⭐", callback_data="buy:stars:3"))
         kb.add(InlineKeyboardButton(text="Buy 5 credits — 1000⭐", callback_data="buy:stars:5"))
+        kb.add(InlineKeyboardButton(text="Buy 10 credits — 2000⭐", callback_data="buy:stars:10"))
+        kb.add(InlineKeyboardButton(text="Buy 50 credits — 10000⭐", callback_data="buy:stars:50"))
     return kb
 
 
@@ -846,7 +850,7 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
     async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
-        credits_map = {"1": 1, "3": 3, "5": 5}
+        credits_map = {"1": 1, "3": 3, "5": 5, "10": 10, "50": 50}
         parts = (query.data or "").split(":")
         pack = credits_map.get(parts[-1], 1)
         user_id = query.from_user.id

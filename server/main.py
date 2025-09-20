@@ -123,13 +123,17 @@ async def list_logs():
         try:
             async with SessionLocal() as s:
                 from sqlalchemy import select, outerjoin
-                # join Job to fetch material type (post, article, ...)
+                # join Job to fetch material type and status; join ResultDoc to fetch result id
                 jn = outerjoin(JobLog, Job, Job.id == JobLog.job_id)
+                jn2 = outerjoin(jn, ResultDoc, ResultDoc.job_id == Job.id)
                 res = await s.execute(
-                    select(JobLog, Job.type).select_from(jn).order_by(JobLog.created_at.desc(), JobLog.id.desc()).limit(200)
+                    select(JobLog, Job.type, Job.status, ResultDoc.id)
+                    .select_from(jn2)
+                    .order_by(JobLog.created_at.desc(), JobLog.id.desc())
+                    .limit(200)
                 )
                 rows = res.all()
-                for jl, jtype in rows:
+                for jl, jtype, jstatus, resid in rows:
                     # Extract topic from stored content if available
                     topic = ""
                     try:
@@ -162,6 +166,8 @@ async def list_logs():
                         "created_at": str(jl.created_at),
                         "topic": topic,
                         "mtype": mtype,
+                        "status": (jstatus or ""),
+                        "result_id": (int(resid) if resid is not None else None),
                     })
         except Exception as e:
             print(f"[ERROR] DB read failed: {e}")
@@ -217,6 +223,8 @@ async def list_logs():
                             "created_at": str(rts) if rts is not None else "",
                             "topic": topic,
                             "mtype": mtype,
+                            "status": "",
+                            "result_id": None,
                         })
                 try:
                     eng.dispose()
@@ -403,14 +411,19 @@ async def logs_ui(_: bool = Depends(require_admin)):
     html_rows = []
     for it in items:
         topic = (it.get("topic") or "").replace("<", "&lt;").replace(">", "&gt;")
+        res_id = it.get('result_id')
+        res_cell = (f"<a href='/results-ui/id/{res_id}'>open</a>" if res_id is not None else "-")
+        status_txt = (it.get('status') or '')
         html_rows.append(
-            f"<tr data-id='{it.get('id')}' data-kind='{it.get('kind','')}' data-topic='{topic.lower()}'>"
+            f"<tr data-id='{it.get('id')}' data-kind='{it.get('kind','')}' data-topic='{topic.lower()}' data-type='{(it.get('mtype') or '').lower()}' data-status='{(it.get('status') or '').lower()}'>"
             f"<td><input type='checkbox' class='sel' value='{it.get('id')}'></td>"
             f"<td class='t-id'>{it.get('id')}</td>"
             f"<td class='t-topic'><a href='/logs-ui/{it.get('id')}'>{topic or '(no topic)'}</a></td>"
             f"<td class='t-created'>{it.get('created_at','')}</td>"
             f"<td class='t-kind'><span class='badge'>{it.get('kind','')}</span></td>"
             f"<td class='t-mtype'>{(it.get('mtype') or '')}</td>"
+            f"<td class='t-status'>{status_txt}</td>"
+            f"<td class='t-res'>{res_cell}</td>"
             f"<td class='t-actions'><a class='btn-link' href='/logs/{it.get('id')}'>Raw</a>"
             f" <button class='delBtn' data-id='{it.get('id')}'>Delete</button></td>"
             f"</tr>"
@@ -448,25 +461,27 @@ async def logs_ui(_: bool = Depends(require_admin)):
         "<div class='spacer'></div>"
         "<input id='q' type='text' placeholder='Search topic...'>"
         "<select id='k'><option value=''>All kinds</option><option>md</option><option>json</option><option>txt</option></select>"
+        "<select id='type'><option value=''>All types</option><option value='post'>post</option><option value='article'>article</option><option value='summary'>summary</option></select>"
         "<select id='theme'><option value='dark' selected>Dark</option><option value='light'>Light</option></select>"
         "<button id='refresh'>Refresh</button>"
         "<button id='delSel'>Delete selected</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
-        "<table id='tbl'><thead><tr><th><input id='selAll' type='checkbox'></th><th data-sort='id'>ID</th><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Type</th><th>Actions</th></tr></thead><tbody>"
+        "<table id='tbl'><thead><tr><th><input id='selAll' type='checkbox'></th><th data-sort='id'>ID</th><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Type</th><th>Status</th><th>Result</th><th>Actions</th></tr></thead><tbody>"
         + ("".join(html_rows) or "<tr><td colspan='7' class='muted'>No logs yet</td></tr>")
         + "</tbody></table>"
         "<footer>Tip: Click column headers to sort. Use search and kind filter to narrow down.</footer>"
         "<script>"
         "const $$=(s,el=document)=>el.querySelector(s);const $$$=(s,el=document)=>[...el.querySelectorAll(s)];"
-        "const q=$$('#q'),k=$$('#k'),selAll=$$('#selAll'),tbody=$$('#tbl tbody');"
-        "function applyFilter(){const term=(q.value||'').toLowerCase();const kind=(k.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const t=tr.getAttribute('data-topic')||'';const kd=(tr.getAttribute('data-kind')||'').toLowerCase();const ok=(t.includes(term)) && (!kind||kd===kind);tr.style.display=ok?'':'none';}}"
-        "q.oninput=applyFilter;k.onchange=applyFilter;"
+        "const q=$$('#q'),k=$$('#k'),selAll=$$('#selAll'),tbody=$$('#tbl tbody'),typeSel=$$('#type');"
+        "function applyFilter(){const term=(q.value||'').toLowerCase();const kind=(k.value||'').toLowerCase();const tp=(typeSel.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const t=tr.getAttribute('data-topic')||'';const kd=(tr.getAttribute('data-kind')||'').toLowerCase();const ty=(tr.getAttribute('data-type')||'').toLowerCase();const ok=(t.includes(term)) && (!kind||kd===kind) && (!tp||ty===tp);tr.style.display=ok?'':'none';}}"
+        "q.oninput=applyFilter;k.onchange=applyFilter;typeSel.onchange=applyFilter;"
         "selAll.onchange=()=>{$$$('input.sel',tbody).forEach(x=>{if(x.closest('tr').style.display!=='none')x.checked=selAll.checked;});};"
         "document.addEventListener('click',async(e)=>{if(e.target.matches('.delBtn')){const id=e.target.getAttribute('data-id');if(confirm('Delete log '+id+'?')){const r=await fetch('/logs/'+id,{method:'DELETE'});const j=await r.json();if(j&&j.ok){location.reload();}}}});"
         "$$('#delSel').onclick=async()=>{const ids=$$$('input.sel:checked',tbody).map(x=>parseInt(x.value));if(!ids.length)return;if(!confirm('Delete '+ids.length+' logs?'))return;const r=await fetch('/logs/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const j=await r.json();if(j&&j.ok){location.reload();}};"
         "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim();const B=(b.querySelector('.t-'+key)?.textContent||'').trim();if(key==='id')return (asc?1:-1)*(parseInt(A)-parseInt(B));return (asc?1:-1)*(A.localeCompare(B));});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
-        "function applyTheme(){const v=$$('#theme').value;if(v==='light'){document.documentElement.setAttribute('data-theme','light');}else{document.documentElement.removeAttribute('data-theme');}}$$('#theme').onchange=applyTheme;applyTheme();"
+        "function applyTheme(){const v=$$('#theme').value;if(v==='light'){document.documentElement.setAttribute('data-theme','light');localStorage.setItem('ui_theme','light');}else{document.documentElement.removeAttribute('data-theme');localStorage.setItem('ui_theme','dark');}}$$('#theme').onchange=applyTheme;"
+        "(function(){const t=localStorage.getItem('ui_theme');if(t==='light'){$$('#theme').value='light';document.documentElement.setAttribute('data-theme','light');}else{document.documentElement.removeAttribute('data-theme');}})();"
         "$$('#refresh').onclick=()=>location.reload();"
         "</script>"
         "</body></html>"
@@ -505,6 +520,7 @@ async def log_view_ui(log_id: int, _: bool = Depends(require_admin)):
         f"<main><div class='meta' id='meta'>Log: {title}</div><div id='content'>Loading…</div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
         f"<script>const LOG_ID={log_id};"
         "const TAGS=['input','topic','lang','post','critique_json'];const NL='\\n';"
+        "(function(){const t=localStorage.getItem('ui_theme');if(t==='light'){document.documentElement.setAttribute('data-theme','light');}})();"
         "function escapeOutsideCode(md){const lines=md.split(NL);let inCode=false;for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(t.startsWith('```')){inCode=!inCode;continue;}if(!inCode){let s=lines[i];for(const tag of TAGS){s=s.replace(new RegExp('<'+tag+'>','g'),'&lt;'+tag+'&gt;').replace(new RegExp('</'+tag+'>','g'),'&lt;/'+tag+'&gt;');}lines[i]=s;}}return lines.join(NL);}"
         "function extractMeta(md){const out={};const lines=md.split(NL);for(let i=0;i<Math.min(lines.length,200);i++){const line=lines[i].trim();if(line.startsWith('- provider:')){out.provider=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- lang:')){out.lang=line.split(':').slice(1).join(':').trim();}else if(line.startsWith('- topic:')){out.topic=line.split(':').slice(1).join(':').trim();}}return out;}"
         "let text=(document.getElementById('raw')?document.getElementById('raw').value:'');let showRaw=false;"
@@ -606,11 +622,10 @@ async def results_ui():
             link = f"/results-ui/id/{it['id']}"
             topic = (it.get('topic','') or '').replace('<','&lt;').replace('>','&gt;')
             rows.append(
-                f"<tr data-id='{it.get('id')}' data-topic='{topic.lower()}' data-prov='{(it.get('provider','') or '').lower()}' data-lang='{(it.get('lang','') or '').lower()}'>"
+                f"<tr data-id='{it.get('id')}' data-topic='{topic.lower()}' data-prov='{(it.get('provider','') or '').lower()}' data-lang='{(it.get('lang','') or '').lower()}' data-kind='{(it.get('kind','') or '').lower()}'>"
                 f"<td class='t-topic'><a href='{link}'>{topic or '(no topic)'}</a></td>"
                 f"<td class='t-created'>{it.get('created_at','')}</td><td class='t-kind'>{it.get('kind','')}</td>"
                 f"<td class='t-prov'>{it.get('provider','')}</td><td class='t-lang'>{it.get('lang','')}</td>"
-                f"<td class='t-actions'><button class='dlBtn' data-id='{it.get('id')}'>Download</button></td>"
                 f"</tr>"
             )
     html = (
@@ -639,23 +654,23 @@ async def results_ui():
         "<div class='spacer'></div>"
         "<input id='q' type='text' placeholder='Search topic...'>"
         "<select id='lang'><option value=''>All languages</option><option>ru</option><option>en</option></select>"
+        "<select id='kind'><option value=''>All types</option><option>post</option><option>article</option><option>summary</option></select>"
         "<select id='theme'><option value='dark' selected>Dark</option><option value='light'>Light</option></select>"
         "<button id='refresh'>Refresh</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
-        "<table id='tbl'><thead><tr><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Type</th><th>Provider</th><th data-sort='lang'>Lang</th><th>Actions</th></tr></thead><tbody>"
+        "<table id='tbl'><thead><tr><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Type</th><th>Provider</th><th data-sort='lang'>Lang</th></tr></thead><tbody>"
         + ("".join(rows) or "<tr><td colspan='7' class='muted'>No results yet</td></tr>")
         + "</tbody></table>"
         "<footer>Tip: Filter by lang and search by topic. Click headers to sort. Use the theme switcher for light/dark.</footer>"
         "<script>"
         "const $$=(s,el=document)=>el.querySelector(s);const $$$=(s,el=document)=>[...el.querySelectorAll(s)];"
-        "const q=$$('#q'),lang=$$('#lang'),tbody=$$('#tbl tbody'),themeSel=$$('#theme');"
-        "function applyFilter(){const term=(q.value||'').toLowerCase();const l=(lang.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const tt=(tr.getAttribute('data-topic')||'');const tl=(tr.getAttribute('data-lang')||'');const ok=tt.includes(term)&&(!l||tl===l);tr.style.display=ok?'':'none';}}"
-        "q.oninput=applyFilter;lang.onchange=applyFilter;"
+        "const q=$$('#q'),lang=$$('#lang'),tbody=$$('#tbl tbody'),themeSel=$$('#theme'),kindSel=$$('#kind');"
+        "function applyFilter(){const term=(q.value||'').toLowerCase();const l=(lang.value||'').toLowerCase();const k=(kindSel.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const tt=(tr.getAttribute('data-topic')||'');const tl=(tr.getAttribute('data-lang')||'');const tk=(tr.getAttribute('data-kind')||'');const ok=tt.includes(term)&&(!l||tl===l)&&(!k||tk===k);tr.style.display=ok?'':'none';}}"
+        "q.oninput=applyFilter;lang.onchange=applyFilter;kindSel.onchange=applyFilter;"
         "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();const B=(b.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();return (asc?1:-1)*A.localeCompare(B);});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
-        "function applyTheme(){const v=themeSel.value;document.documentElement.setAttribute('data-theme',v);}themeSel.onchange=applyTheme;"
-        "applyTheme();"
-        "document.addEventListener('click',async(e)=>{if(e.target.matches('.dlBtn')){const id=e.target.getAttribute('data-id');try{const r=await fetch('/results/'+id,{cache:'no-store'});const j=await r.json();if(j&&j.content){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([j.content],{type:'text/markdown'}));let nm=(j.path?j.path.split('/').pop():'result.md');nm=nm.replace(/:\d+\.\d+$/,'');a.download=nm;a.click();}}catch(_){}}});"
+        "function applyTheme(){const v=themeSel.value;document.documentElement.setAttribute('data-theme',v);localStorage.setItem('ui_theme',v);}themeSel.onchange=applyTheme;"
+        "(function(){const t=localStorage.getItem('ui_theme');if(t){themeSel.value=t;document.documentElement.setAttribute('data-theme',t);}else{document.documentElement.setAttribute('data-theme','dark');}})();"
         "$$('#refresh').onclick=()=>location.reload();"
         "</script>"
         "</body></html>"
