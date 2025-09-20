@@ -146,6 +146,14 @@ async def list_logs():
                         import re
                         stem = re.sub(r"_log(_\d{8}_\d{6})?$", "", stem)
                         topic = stem
+                    # Material type: prefer Job.type, else infer from path (e.g., output/post/... -> post)
+                    mtype = (jtype or "")
+                    try:
+                        if not mtype and getattr(jl, "path", None):
+                            p = Path(jl.path)
+                            mtype = p.parent.name or ""
+                    except Exception:
+                        pass
                     items.append({
                         "id": jl.id,
                         "job_id": jl.job_id,
@@ -153,7 +161,7 @@ async def list_logs():
                         "path": jl.path,
                         "created_at": str(jl.created_at),
                         "topic": topic,
-                        "mtype": (jtype or ""),
+                        "mtype": mtype,
                     })
         except Exception as e:
             print(f"[ERROR] DB read failed: {e}")
@@ -194,6 +202,13 @@ async def list_logs():
                             import re as _re
                             stem = _re.sub(r"_log(_\d{8}_\d{6})?$", "", stem)
                             topic = stem
+                        # Material type fallback from path
+                        mtype = rmtype or ""
+                        try:
+                            if not mtype and rpath:
+                                mtype = Path(rpath).parent.name or ""
+                        except Exception:
+                            pass
                         items.append({
                             "id": rid,
                             "job_id": rjob,
@@ -201,7 +216,7 @@ async def list_logs():
                             "path": rpath,
                             "created_at": str(rts) if rts is not None else "",
                             "topic": topic,
-                            "mtype": rmtype or "",
+                            "mtype": mtype,
                         })
                 try:
                     eng.dispose()
@@ -608,9 +623,13 @@ async def results_ui():
         "input[type=text],select{background:#0f121a;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;min-width:200px}"
         "button,.btn{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}"
         "button:hover,.btn:hover{border-color:#2f3a4f}a.btn-link{padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#131824;color:var(--text)}"
+        "[data-theme='light'] input[type=text],[data-theme='light'] select{background:#ffffff;border:1px solid #d0d7e2;color:var(--text)}"
+        "[data-theme='light'] button,[data-theme='light'] .btn,[data-theme='light'] a.btn-link{background:#f7f9fc;border:1px solid #d0d7e2;color:var(--text)}"
         "table{border-collapse:separate;border-spacing:0;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}"
         "th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}"
         "thead th{position:sticky;top:0;background:#0f1218;color:#cbd5e1;font-weight:600}tbody tr:hover{background:#121722}"
+        "[data-theme='light'] thead th{background:#f3f4f6;color:#0f172a}"
+        "[data-theme='light'] tbody tr:hover{background:#f5f7fb}"
         "footer{margin-top:18px;color:var(--muted)}"
         "</style></head><body>"
         "<div class='topbar'>"
@@ -622,7 +641,7 @@ async def results_ui():
         "<button id='refresh'>Refresh</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
-        "<table id='tbl'><thead><tr><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Provider</th><th data-sort='lang'>Lang</th><th>Actions</th></tr></thead><tbody>"
+        "<table id='tbl'><thead><tr><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Type</th><th>Provider</th><th data-sort='lang'>Lang</th><th>Actions</th></tr></thead><tbody>"
         + ("".join(rows) or "<tr><td colspan='7' class='muted'>No results yet</td></tr>")
         + "</tbody></table>"
         "<footer>Tip: Filter by lang and search by topic. Click headers to sort. Use the theme switcher for light/dark.</footer>"
@@ -714,9 +733,11 @@ async def result_view_ui_id(res_id: int):
         "[data-theme='light']{--bg:#f7f9fc;--panel:#ffffff;--muted:#5f6b7a;--text:#0f172a;--brand:#0a84ff;--line:#e5e9f0}"
         "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;}"
         "header{background:#0f1218;border-bottom:1px solid var(--line);color:#e6e9ef;padding:10px 14px;display:flex;gap:12px;align-items:center}"
+        "[data-theme='light'] header{background:#ffffff;color:#0f172a;border-bottom:1px solid #e5e9f0}"
         "header a{color:var(--brand)}.spacer{flex:1}.toolbar button{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer;margin-left:8px}"
         "main{padding:14px}#content{max-width:1000px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}a{color:var(--brand)}"
         ".meta{opacity:.8;font-size:12px;margin:0 0 8px}pre{white-space:pre-wrap;word-wrap:break-word;background:#0f121a;border-radius:8px;padding:12px;border:1px solid var(--line)}"
+        "[data-theme='light'] pre{background:#f5f7fb;border:1px solid #e5e9f0;color:#0f172a}"
         "</style></head><body>"
         f"<header><a href='/results-ui'>← Results</a><a href='/logs-ui'>Logs</a><div class='spacer'></div><div class='toolbar'><button id='copy'>Copy</button><button id='download'>Download .md</button><button id='toggleRaw'>Show raw</button></div></header>"
         f"<main><div class='meta' id='meta'>Result: {title}</div><div id='content'></div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
