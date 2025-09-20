@@ -1405,14 +1405,26 @@ def create_dispatcher() -> Dispatcher:
         if not hist:
             await message.answer("История пуста." if _is_ru(ui_lang) else "No history yet.")
             return
-        # Build clickable list with link to results if result_id/url present
+        # Build clickable list: only link when explicitly public
         lines = []
         for it in hist:
             topic = str(it.get("topic") or "(no topic)")
             path = str(it.get("path") or "")
-            url = it.get("url") or ( _result_url(int(it.get("result_id"))) if it.get("result_id") else "" )
+            url = it.get("url") or ""
+            if not url and it.get("result_id"):
+                # Fallback only if DB confirms not hidden
+                try:
+                    if SessionLocal is not None:
+                        from sqlalchemy import select as _select
+                        from .db import ResultDoc as _RD
+                        async with SessionLocal() as _s:
+                            r = await _s.execute(_select(_RD.hidden).where(_RD.id == int(it.get("result_id"))))
+                            hidden_val = r.scalar_one_or_none()
+                            if hidden_val is not None and int(hidden_val or 0) == 0:
+                                url = _result_url(int(it.get("result_id")))
+                except Exception:
+                    url = ""
             if url:
-                # Telegram: кликабельная ссылка в тексте
                 lines.append(f"• <a href='{url}'>{topic}</a>")
             else:
                 lines.append(f"• {topic}")
