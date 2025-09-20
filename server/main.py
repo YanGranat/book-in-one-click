@@ -122,34 +122,38 @@ async def list_logs():
     if SessionLocal is not None:
         try:
             async with SessionLocal() as s:
-                from sqlalchemy import select
-                # Order by created_at if available; otherwise id desc
-                res = await s.execute(select(JobLog).order_by(JobLog.created_at.desc(), JobLog.id.desc()).limit(200))
-                rows = res.scalars().all()
-                for r in rows:
+                from sqlalchemy import select, outerjoin
+                # join Job to fetch material type (post, article, ...)
+                jn = outerjoin(JobLog, Job, Job.id == JobLog.job_id)
+                res = await s.execute(
+                    select(JobLog, Job.type).select_from(jn).order_by(JobLog.created_at.desc(), JobLog.id.desc()).limit(200)
+                )
+                rows = res.all()
+                for jl, jtype in rows:
                     # Extract topic from stored content if available
                     topic = ""
                     try:
-                        if getattr(r, "content", None):
-                            meta = _extract_meta_from_text((r.content or "")[:2000])
+                        if getattr(jl, "content", None):
+                            meta = _extract_meta_from_text((jl.content or "")[:2000])
                             topic = meta.get("topic", "")
                     except Exception:
                         pass
                     if not topic:
                         # Fallback to filename-based topic
-                        stem = Path(getattr(r, "path", "")).name
+                        stem = Path(getattr(jl, "path", "")).name
                         if stem.endswith(".md"):
                             stem = stem[:-3]
                         import re
                         stem = re.sub(r"_log(_\d{8}_\d{6})?$", "", stem)
                         topic = stem
                     items.append({
-                        "id": r.id,
-                        "job_id": r.job_id,
-                        "kind": r.kind,
-                        "path": r.path,
-                        "created_at": str(r.created_at),
+                        "id": jl.id,
+                        "job_id": jl.job_id,
+                        "kind": jl.kind,
+                        "path": jl.path,
+                        "created_at": str(jl.created_at),
                         "topic": topic,
+                        "mtype": (jtype or ""),
                     })
         except Exception as e:
             print(f"[ERROR] DB read failed: {e}")
@@ -167,10 +171,15 @@ async def list_logs():
                 cargs = {"sslmode": "require"} if not any(k.lower()=="sslmode" for k in qs.keys()) else {}
                 eng = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True)
                 table = JobLog.__tablename__
+                jtable = Job.__tablename__
                 with eng.connect() as conn:
-                    res = conn.execute(_sqtext(f"SELECT id, job_id, kind, path, content, created_at FROM {table} ORDER BY created_at DESC NULLS LAST, id DESC LIMIT :lim"), {"lim": 200})
+                    res = conn.execute(_sqtext(
+                        f"SELECT jl.id, jl.job_id, jl.kind, jl.path, jl.content, jl.created_at, j.type as mtype "
+                        f"FROM {table} jl LEFT JOIN {jtable} j ON j.id = jl.job_id "
+                        f"ORDER BY jl.created_at DESC NULLS LAST, jl.id DESC LIMIT :lim"
+                    ), {"lim": 200})
                     for r in res.fetchall():
-                        rid, rjob, rkind, rpath, rcont, rts = r
+                        rid, rjob, rkind, rpath, rcont, rts, rmtype = r
                         topic = ""
                         try:
                             if rcont:
@@ -192,6 +201,7 @@ async def list_logs():
                             "path": rpath,
                             "created_at": str(rts) if rts is not None else "",
                             "topic": topic,
+                            "mtype": rmtype or "",
                         })
                 try:
                     eng.dispose()
@@ -385,6 +395,7 @@ async def logs_ui(_: bool = Depends(require_admin)):
             f"<td class='t-topic'><a href='/logs-ui/{it.get('id')}'>{topic or '(no topic)'}</a></td>"
             f"<td class='t-created'>{it.get('created_at','')}</td>"
             f"<td class='t-kind'><span class='badge'>{it.get('kind','')}</span></td>"
+            f"<td class='t-mtype'>{(it.get('mtype') or '')}</td>"
             f"<td class='t-actions'><a class='btn-link' href='/logs/{it.get('id')}'>Raw</a>"
             f" <button class='delBtn' data-id='{it.get('id')}'>Delete</button></td>"
             f"</tr>"
@@ -422,8 +433,8 @@ async def logs_ui(_: bool = Depends(require_admin)):
         "<button id='delSel'>Delete selected</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
-        "<table id='tbl'><thead><tr><th><input id='selAll' type='checkbox'></th><th data-sort='id'>ID</th><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Actions</th></tr></thead><tbody>"
-        + ("".join(html_rows) or "<tr><td colspan='6' class='muted'>No logs yet</td></tr>")
+        "<table id='tbl'><thead><tr><th><input id='selAll' type='checkbox'></th><th data-sort='id'>ID</th><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Kind</th><th>Type</th><th>Actions</th></tr></thead><tbody>"
+        + ("".join(html_rows) or "<tr><td colspan='7' class='muted'>No logs yet</td></tr>")
         + "</tbody></table>"
         "<footer>Tip: Click column headers to sort. Use search and kind filter to narrow down.</footer>"
         "<script>"
@@ -604,7 +615,6 @@ async def results_ui():
         "</style></head><body>"
         "<div class='topbar'>"
         "<h1>Generated Results</h1>"
-        "<a class='btn' href='/logs-ui'>Logs</a>"
         "<div class='spacer'></div>"
         "<input id='q' type='text' placeholder='Search topic...'>"
         "<select id='lang'><option value=''>All languages</option><option>ru</option><option>en</option></select>"
