@@ -11,7 +11,7 @@ Key guarantees:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional, Type
+from typing import Callable, Optional, Type, Any
 import os
 import asyncio
 import time
@@ -48,6 +48,16 @@ def generate_post(
     job_meta: Optional[dict] = None,
     return_log_path: bool = False,
     use_refine: bool = True,
+    # Series / overrides
+    instructions_override: Optional[str] = None,
+    series_topics: Optional[list[dict[str, Any]]] = None,
+    series_current_id: Optional[str] = None,
+    series_done_ids: Optional[list[str]] = None,
+    # Side effects control (for series orchestrator)
+    disable_db_record: bool = False,
+    disable_file_save: bool = False,
+    disable_sidecar_log: bool = False,
+    return_content: bool = False,
 ) -> Path:
     """
     Generate a popular science post and save it to output/<output_subdir>/.
@@ -98,7 +108,7 @@ def generate_post(
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
     log("🧭 Config", f"provider={_prov}\nlang={lang}")
 
-    instructions = build_post_instructions(topic, lang)
+    instructions = instructions_override or build_post_instructions(topic, lang)
     # Defaults for variables referenced by nested functions in non-OpenAI factcheck path
     pref: list[str] = []
     p_iter: Optional[str] = None
@@ -385,10 +395,34 @@ def generate_post(
                 return run_json_with_provider(system, user_inp, cls, speed="heavy")
             raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
 
+    import json as _json
+    series_block = ""
+    if series_topics is not None:
+        try:
+            # Minimize payload
+            topics_min = []
+            for it in series_topics or []:
+                topics_min.append({
+                    "id": it.get("id"),
+                    "title": it.get("title"),
+                    "angle": it.get("angle"),
+                    "tags": it.get("tags", []),
+                })
+            series_block = (
+                "\n<series>\n"
+                f"<topics_json>{_json.dumps(topics_min, ensure_ascii=False)}</topics_json>\n"
+                f"<current_id>{series_current_id or ''}</current_id>\n"
+                f"<done_ids>{','.join(series_done_ids or [])}</done_ids>\n"
+                "</series>\n"
+            )
+        except Exception:
+            # Fallback: omit series context on failure
+            series_block = ""
     user_message_local_writer = (
         f"<input>\n"
         f"<topic>{topic}</topic>\n"
         f"<lang>{(lang or 'auto').strip()}</lang>\n"
+        f"{series_block}"
         f"</input>"
     )
     # Log writer input for transparency (plain text; UI preserves newlines)
@@ -793,19 +827,21 @@ def generate_post(
     else:
         log("✨ Refine · Skipped", "Refine step disabled by configuration")
 
-    # Save final
+    # Save final (optional)
     _emit("save:init")
-    output_dir = ensure_output_dir(output_subdir)
-    base = f"{safe_filename_base(topic)}_post"
-    filepath = next_available_filepath(output_dir, base, ".md")
-    save_markdown(
-        filepath,
-        title=topic,
-        generator=("OpenAI Agents SDK" if _prov == "openai" else _prov),
-        pipeline="PopularSciencePost",
-        content=final_content,
-    )
-    # Save log sidecar .md and register in DB if available
+    filepath = None
+    if not disable_file_save:
+        output_dir = ensure_output_dir(output_subdir)
+        base = f"{safe_filename_base(topic)}_post"
+        filepath = next_available_filepath(output_dir, base, ".md")
+        save_markdown(
+            filepath,
+            title=topic,
+            generator=("OpenAI Agents SDK" if _prov == "openai" else _prov),
+            pipeline="PopularSciencePost",
+            content=final_content,
+        )
+    # Save log sidecar .md (optional) and register in DB if available
     log_dir = ensure_output_dir(output_subdir)
     log_path = log_dir / f"{safe_filename_base(topic)}_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
     finished_at = datetime.utcnow()
@@ -824,12 +860,13 @@ def generate_post(
         f"- refine: {bool(use_refine)}\n"
     )
     full_log_content = header + "\n".join(log_lines)
-    save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=full_log_content)
+    if not disable_sidecar_log:
+        save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="Log", content=full_log_content)
     # Record log and result in DB if available
     try:
         from server.db import JobLog, ResultDoc
         # Gate by DB_URL presence, not by async SessionLocal state
-        if os.getenv("DB_URL", "").strip():
+        if os.getenv("DB_URL", "").strip() and not disable_db_record:
             # Use sync approach to avoid event loop conflicts in thread executor
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
@@ -877,41 +914,42 @@ def generate_post(
                         s.rollback()
                         print(f"[ERROR] JobLog commit failed: {_e}")
                     # 2) Persist final ResultDoc independently (even if JobLog failed)
-                    try:
-                        rel_doc = str(filepath.relative_to(Path.cwd())) if filepath.is_absolute() else str(filepath)
-                    except ValueError:
-                        rel_doc = str(filepath)
-                    rd = ResultDoc(
-                        job_id=result_job_id,
-                        kind=output_subdir,
-                        path=rel_doc,
-                        topic=topic,
-                        provider=_prov,
-                        lang=lang,
-                        content=final_content,
-                        hidden=1 if ((job_meta or {}).get("incognito") is True) else 0,
-                    )
-                    try:
-                        s.add(rd)
-                        s.flush()
-                        s.commit()
-                    except Exception as _e:
-                        s.rollback()
-                        print(f"[ERROR] ResultDoc commit failed: {_e}")
-                        # Attempt to create table on-the-fly if missing, then retry once
+                    if filepath is not None:
                         try:
-                            from server.db import ResultDoc as _RD
-                            try:
-                                _RD.__table__.create(bind=sync_engine, checkfirst=True)
-                            except Exception:
-                                pass
+                            rel_doc = str(filepath.relative_to(Path.cwd())) if filepath.is_absolute() else str(filepath)
+                        except ValueError:
+                            rel_doc = str(filepath)
+                        rd = ResultDoc(
+                            job_id=result_job_id,
+                            kind=output_subdir,
+                            path=rel_doc,
+                            topic=topic,
+                            provider=_prov,
+                            lang=lang,
+                            content=final_content,
+                            hidden=1 if ((job_meta or {}).get("incognito") is True) else 0,
+                        )
+                        try:
                             s.add(rd)
                             s.flush()
                             s.commit()
-                            print("[INFO] ResultDoc table created on-the-fly and record inserted")
-                        except Exception as _e2:
+                        except Exception as _e:
                             s.rollback()
-                            print(f"[ERROR] ResultDoc create+retry failed: {_e2}")
+                            print(f"[ERROR] ResultDoc commit failed: {_e}")
+                            # Attempt to create table on-the-fly if missing, then retry once
+                            try:
+                                from server.db import ResultDoc as _RD
+                                try:
+                                    _RD.__table__.create(bind=sync_engine, checkfirst=True)
+                                except Exception:
+                                    pass
+                                s.add(rd)
+                                s.flush()
+                                s.commit()
+                                print("[INFO] ResultDoc table created on-the-fly and record inserted")
+                            except Exception as _e2:
+                                s.rollback()
+                                print(f"[ERROR] ResultDoc create+retry failed: {_e2}")
                     try:
                         print(f"[INFO] Log recorded in DB: id={getattr(jl,'id',None)}, path={log_path}, content_size={len(full_log_content)}; result_job_id={result_job_id}")
                     except Exception:
@@ -929,8 +967,11 @@ def generate_post(
         print(f"[INFO] Log available on filesystem: {log_path}")
         # Continue execution - log file is still created even if DB fails
     _emit("done")
+    if return_content:
+        # Return the content string instead of path
+        return final_content  # type: ignore[return-value]
     if return_log_path:
         return log_path
-    return filepath
+    return filepath if filepath is not None else log_path
 
 

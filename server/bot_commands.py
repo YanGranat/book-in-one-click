@@ -19,6 +19,11 @@ if _env:
         if tok.isdigit():
             ADMIN_IDS.append(int(tok))
 
+# Series-related defaults and limits (used by bot)
+SERIES_AUTO_MAX_DEFAULT = 30  # max posts in auto mode for non-admin
+SERIES_MAX_ITERATIONS_DEFAULT = 1
+SERIES_SUFF_HEAVY_AFTER = 3
+
 
 def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker):
     @dp.message_handler(commands=["balance"])  # type: ignore

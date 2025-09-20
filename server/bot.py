@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
@@ -15,10 +15,11 @@ from utils.env import load_env_from_root
 # i18n and language detection
 from utils.lang import detect_lang_from_text
 from services.post.generate import generate_post
+from services.post_series.generate_series import generate_series
 from utils.slug import safe_filename_base
 from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
-from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only
+from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only, refund_credits, refund_credits_kv
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 from .kv import set_gen_lang, get_gen_lang
 from .kv import set_refine_enabled, get_refine_enabled
@@ -517,6 +518,39 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
 
+    # ---- Series command ----
+    @dp.message_handler(commands=["series"])  # type: ignore
+    async def cmd_series(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        txt = (
+            "Отправьте тему для серии постов (авторежим, максимум 30 кредитов).\n"
+            "Используйте /series_fixed N — чтобы задать точное число постов."
+            if _is_ru(ui_lang) else
+            "Send a topic for a series (auto mode, up to 30 credits).\nUse /series_fixed N to request exact number of posts."
+        )
+        await message.answer(txt)
+        await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(series_mode="auto")
+        await GenerateStates.WaitingTopic.set()
+
+    @dp.message_handler(commands=["series_fixed"])  # type: ignore
+    async def cmd_series_fixed(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        parts = (message.text or "").split()
+        n = 0
+        if len(parts) >= 2:
+            try:
+                n = int(parts[1])
+            except Exception:
+                n = 0
+        if n <= 0:
+            await message.answer("Укажите число постов: /series_fixed 8" if _is_ru(ui_lang) else "Specify posts count: /series_fixed 8")
+            return
+        await message.answer((f"Отправьте тему для серии (ровно {n} постов)." if _is_ru(ui_lang) else f"Send a topic (exactly {n} posts)."))
+        await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(series_mode="fixed", series_count=n)
+        await GenerateStates.WaitingTopic.set()
+
     # ---- Settings quick panel ----
     @dp.message_handler(commands=["settings"])  # type: ignore
     async def cmd_settings(message: types.Message, state: FSMContext):
@@ -840,6 +874,268 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(msg)
             return
         await state.update_data(topic=topic)
+
+        # If series mode is active, branch into series generation flow
+        series_mode = (data.get("series_mode") or "").strip().lower()
+        if series_mode in {"auto", "fixed"}:
+            chat_id = message.chat.id
+            if chat_id in RUNNING_CHATS:
+                return
+            RUNNING_CHATS.add(chat_id)
+            try:
+                # Resolve provider and language
+                prov = (data.get("provider") or "").strip().lower()
+                if not prov and message.from_user:
+                    try:
+                        prov = await get_provider(message.from_user.id)  # type: ignore
+                    except Exception:
+                        prov = "openai"
+                persisted_gen_lang = None
+                try:
+                    if message.from_user:
+                        persisted_gen_lang = await get_gen_lang(message.from_user.id)
+                except Exception:
+                    persisted_gen_lang = None
+                gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+                eff_lang = gen_lang
+                if (gen_lang or "auto").strip().lower() == "auto":
+                    try:
+                        det = (detect_lang_from_text(topic) or "").lower()
+                        eff_lang = "en" if det.startswith("en") else "ru"
+                    except Exception:
+                        eff_lang = "ru"
+
+                # Preferences
+                try:
+                    refine_pref = await get_refine_enabled(message.from_user.id) if message.from_user else False
+                except Exception:
+                    refine_pref = False
+                try:
+                    fc_enabled_pref = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
+                except Exception:
+                    fc_enabled_pref = False
+                try:
+                    fc_depth_pref = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
+                except Exception:
+                    fc_depth_pref = 2
+                # Pricing
+                fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
+                unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+
+                is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+
+                # Precharge logic
+                precharged = 0
+                target_count = 0
+                if series_mode == "fixed":
+                    series_count = int(data.get("series_count") or 0)
+                    if series_count <= 0:
+                        await message.answer("Некорректное число постов." if _is_ru(ui_lang) else "Invalid posts count.")
+                        await state.finish()
+                        RUNNING_CHATS.discard(chat_id)
+                        return
+                    target_count = series_count
+                    total_cost = 0 if is_admin else series_count * unit_cost
+                    if not is_admin:
+                        # Charge exact cost
+                        from sqlalchemy.exc import SQLAlchemyError
+                        try:
+                            if SessionLocal is not None and message.from_user:
+                                async with SessionLocal() as session:
+                                    user = await ensure_user_with_credits(session, message.from_user.id)
+                                    ok, remaining = await charge_credits(session, user, int(total_cost), reason="post_series_fixed_prepay")
+                                    if not ok:
+                                        await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                        await state.finish()
+                                        RUNNING_CHATS.discard(chat_id)
+                                        return
+                                    await session.commit()
+                                    precharged = int(total_cost)
+                            else:
+                                ok, remaining = await charge_credits_kv(message.from_user.id, int(total_cost))  # type: ignore
+                                if not ok:
+                                    await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                    await state.finish()
+                                    RUNNING_CHATS.discard(chat_id)
+                                    return
+                                precharged = int(total_cost)
+                        except SQLAlchemyError:
+                            await message.answer("Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later.")
+                            await state.finish()
+                            RUNNING_CHATS.discard(chat_id)
+                            return
+                else:  # auto
+                    if is_admin:
+                        target_count = 0  # unlimited for admin
+                    else:
+                        # Determine prepay budget = min(30, balance)
+                        balance = 0
+                        if SessionLocal is not None and message.from_user:
+                            try:
+                                async with SessionLocal() as session:
+                                    from .db import get_or_create_user
+                                    user = await get_or_create_user(session, message.from_user.id)
+                                    balance = int(user.credits)
+                            except Exception:
+                                balance = 0
+                        if balance <= 0 and message.from_user:
+                            try:
+                                balance = int(await get_balance_kv_only(message.from_user.id))
+                            except Exception:
+                                balance = 0
+                        prepay_budget = min(30, balance)
+                        if prepay_budget <= 0:
+                            await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                            await state.finish()
+                            RUNNING_CHATS.discard(chat_id)
+                            return
+                        # Compute max posts affordable with current options
+                        if unit_cost <= 0:
+                            unit_cost = 1
+                        target_count = prepay_budget // unit_cost
+                        if target_count <= 0:
+                            await message.answer(
+                                ("Недостаточно кредитов для текущих настроек (стоимость поста слишком высока). Отключите факт‑чек/редактуру или пополните баланс."
+                                 if _is_ru(ui_lang) else
+                                 "Insufficient credits for current settings (post cost too high). Disable fact‑check/refine or top up.")
+                            )
+                            await state.finish()
+                            RUNNING_CHATS.discard(chat_id)
+                            return
+                        # Precharge full budget (30 or balance)
+                        from sqlalchemy.exc import SQLAlchemyError
+                        try:
+                            if SessionLocal is not None and message.from_user:
+                                async with SessionLocal() as session:
+                                    from .db import get_or_create_user
+                                    user = await get_or_create_user(session, message.from_user.id)
+                                    ok, remaining = await charge_credits(session, user, int(prepay_budget), reason="post_series_auto_prepay")
+                                    if not ok:
+                                        await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                        await state.finish()
+                                        RUNNING_CHATS.discard(chat_id)
+                                        return
+                                    await session.commit()
+                                    precharged = int(prepay_budget)
+                            else:
+                                ok, remaining = await charge_credits_kv(message.from_user.id, int(prepay_budget))  # type: ignore
+                                if not ok:
+                                    await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                    await state.finish()
+                                    RUNNING_CHATS.discard(chat_id)
+                                    return
+                                precharged = int(prepay_budget)
+                        except SQLAlchemyError:
+                            await message.answer("Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later.")
+                            await state.finish()
+                            RUNNING_CHATS.discard(chat_id)
+                            return
+
+                # Create Job row (series)
+                job_id = 0
+                try:
+                    if SessionLocal is not None and message.from_user:
+                        async with SessionLocal() as session:
+                            from .db import Job
+                            import json as _json
+                            params = {
+                                "topic": topic,
+                                "lang": eff_lang,
+                                "provider": prov or "openai",
+                                "mode": series_mode,
+                                "count": int(target_count or 0),
+                                "factcheck": bool(fc_enabled_pref),
+                                "depth": int(fc_depth_pref or 0) if fc_enabled_pref else 0,
+                                "refine": bool(refine_pref),
+                            }
+                            j = Job(user_id=message.from_user.id, type="post_series", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=int(precharged))
+                            session.add(j)
+                            await session.flush()
+                            job_id = int(j.id)
+                            await session.commit()
+                except Exception:
+                    job_id = 0
+
+                # Run series generation (sequential)
+                import asyncio as _asyncio
+                loop = _asyncio.get_running_loop()
+                await message.answer("Генерирую серию…" if _is_ru(ui_lang) else "Generating series…")
+                from services.post_series.generate_series import generate_series as _gen_series
+                timeout_s = int(os.getenv("GEN_TIMEOUT_S", "1800"))
+                mode_param = ("auto" if is_admin and series_mode == "auto" else ("fixed" if target_count else series_mode))
+                count_param = (0 if mode_param == "auto" else int(target_count or 0))
+                fut = loop.run_in_executor(
+                    None,
+                    lambda: _gen_series(
+                        topic,
+                        lang=eff_lang,
+                        provider=(prov or "openai"),
+                        mode=mode_param,
+                        count=count_param,
+                        max_iterations=int(os.getenv("SERIES_MAX_ITER", "1")),
+                        sufficiency_heavy_after=3,
+                        output_mode="single",
+                        output_subdir="post_series",
+                        factcheck=bool(fc_enabled_pref),
+                        research_iterations=int(fc_depth_pref or 2),
+                        refine=bool(refine_pref),
+                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id},
+                    ),
+                )
+                aggregate_path = await _asyncio.wait_for(fut, timeout=timeout_s)
+
+                # Send aggregate result
+                try:
+                    with open(aggregate_path, "rb") as f:
+                        cap = ("Готово (серия): " + Path(aggregate_path).name) if _is_ru(ui_lang) else ("Done (series): " + Path(aggregate_path).name)
+                        await message.answer_document(f, caption=cap)
+                except Exception:
+                    pass
+
+                # Try compute number of posts generated for refund calculation
+                n_generated = 0
+                try:
+                    text = Path(aggregate_path).read_text(encoding="utf-8")
+                    # Count section headers introduced per post
+                    n_generated = sum(1 for line in text.splitlines() if line.strip().startswith("## "))
+                except Exception:
+                    n_generated = int(target_count or 0)
+
+                # Refund unused credits
+                if not is_admin and precharged > 0:
+                    used = int((n_generated or 0) * unit_cost)
+                    refund = max(0, int(precharged) - used)
+                    if refund > 0 and message.from_user:
+                        try:
+                            if SessionLocal is not None:
+                                async with SessionLocal() as session:
+                                    from .db import get_or_create_user
+                                    user = await get_or_create_user(session, message.from_user.id)
+                                    await refund_credits(session, user, refund, reason="post_series_refund")
+                                    await session.commit()
+                            else:
+                                await refund_credits_kv(message.from_user.id, refund)  # type: ignore
+                        except Exception:
+                            pass
+
+                # Mark job done
+                try:
+                    if job_id and SessionLocal is not None:
+                        from sqlalchemy import update as _upd
+                        from datetime import datetime as _dt
+                        async with SessionLocal() as session:
+                            from .db import Job
+                            await session.execute(_upd(Job).where(Job.id == job_id).values(status="done", finished_at=_dt.utcnow(), file_path=str(aggregate_path)))
+                            await session.commit()
+                except Exception:
+                    pass
+
+            except Exception as e:
+                await message.answer((f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"))
+            finally:
+                await state.finish()
+                RUNNING_CHATS.discard(chat_id)
+            return
         # Decide whether to ask fact-check during onboarding only; otherwise use defaults and start
         onboarding = bool(data.get("onboarding"))
         fc_ready = bool(data.get("fc_ready"))
@@ -881,10 +1177,25 @@ def create_dispatcher() -> Dispatcher:
         if not is_admin:
             try:
                 ui_lang_local = (data.get("ui_lang") or "ru").strip()
+                # Compute dynamic price for single post
+                try:
+                    refine_pref = await get_refine_enabled(message.from_user.id) if message.from_user else False
+                except Exception:
+                    refine_pref = False
+                try:
+                    fc_enabled_pref = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
+                except Exception:
+                    fc_enabled_pref = False
+                try:
+                    fc_depth_pref = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
+                except Exception:
+                    fc_depth_pref = 2
+                fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
+                unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
                 confirm_txt = (
-                    "Будет списано 1 кредит. Подтвердить?"
+                    f"Будет списано {unit_cost} кредит(ов). Подтвердить?"
                     if _is_ru(ui_lang_local) else
-                    "It will cost 1 credit. Proceed?"
+                    f"It will cost {unit_cost} credit(s). Proceed?"
                 )
                 kb = InlineKeyboardMarkup()
                 kb.add(InlineKeyboardButton(text=("Подтвердить" if _is_ru(ui_lang_local) else "Confirm"), callback_data="confirm:charge:yes"))
@@ -896,22 +1207,37 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 pass
 
-        # Charge 1 credit before starting (DB if configured, else Redis KV)
+        # Charge dynamic price before starting (DB if configured, else Redis KV)
         from sqlalchemy.exc import SQLAlchemyError
         try:
             charged = False
             # Admins generate for free
             if message.from_user and message.from_user.id in ADMIN_IDS:
                 charged = True
+            # Compute price based on current preferences
+            try:
+                refine_pref = await get_refine_enabled(message.from_user.id) if message.from_user else False
+            except Exception:
+                refine_pref = False
+            try:
+                fc_enabled_pref = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
+            except Exception:
+                fc_enabled_pref = False
+            try:
+                fc_depth_pref = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
+            except Exception:
+                fc_depth_pref = 2
+            fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
+            unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
             if SessionLocal is not None and message.from_user:
                 async with SessionLocal() as session:
                     user = await ensure_user_with_credits(session, message.from_user.id)
-                    ok, remaining = await charge_credits(session, user, 1, reason="post")
+                    ok, remaining = await charge_credits(session, user, unit_cost, reason="post")
                     if ok:
                         await session.commit()
                         charged = True
             if not charged and message.from_user:
-                ok, remaining = await charge_credits_kv(message.from_user.id, 1)
+                ok, remaining = await charge_credits_kv(message.from_user.id, unit_cost)
                 if not ok:
                     warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
                     await message.answer(warn, reply_markup=ReplyKeyboardRemove())
@@ -1213,12 +1539,42 @@ def create_dispatcher() -> Dispatcher:
             if SessionLocal is not None and query.from_user:
                 async with SessionLocal() as session:
                     user = await ensure_user_with_credits(session, query.from_user.id)
-                    ok, remaining = await charge_credits(session, user, 1, reason="post")
+                    # Compute unit price again
+                    try:
+                        refine_pref = await get_refine_enabled(query.from_user.id)
+                    except Exception:
+                        refine_pref = False
+                    try:
+                        fc_enabled_pref = await get_factcheck_enabled(query.from_user.id)
+                    except Exception:
+                        fc_enabled_pref = False
+                    try:
+                        fc_depth_pref = await get_factcheck_depth(query.from_user.id)
+                    except Exception:
+                        fc_depth_pref = 2
+                    fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
+                    unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                    ok, remaining = await charge_credits(session, user, unit_cost, reason="post")
                     if ok:
                         await session.commit()
                         charged = True
             if not charged and query.from_user:
-                ok, remaining = await charge_credits_kv(query.from_user.id, 1)
+                # KV fallback
+                try:
+                    refine_pref = await get_refine_enabled(query.from_user.id)
+                except Exception:
+                    refine_pref = False
+                try:
+                    fc_enabled_pref = await get_factcheck_enabled(query.from_user.id)
+                except Exception:
+                    fc_enabled_pref = False
+                try:
+                    fc_depth_pref = await get_factcheck_depth(query.from_user.id)
+                except Exception:
+                    fc_depth_pref = 2
+                fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
+                unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                ok, remaining = await charge_credits_kv(query.from_user.id, unit_cost)
                 if not ok:
                     warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
                     await dp.bot.send_message(chat_id, warn)
@@ -1486,11 +1842,19 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         if _is_ru(ui_lang):
             await message.answer(
-                "Цены:\n- Пост: 1 кредит\n- Статья: 3 кредита\n- Серия: 1×N кредитов\n- Книга: по главам\nОплата: Telegram Stars (если включено)."
+                "Цены:\n"
+                "- Пост: 1 кредит (+1 легкий факт‑чек, +3 глубокий; +1 редактура)\n"
+                "- Серия: 1×N кредитов (каждый пост по формуле выше)\n"
+                "- Статья: 3 кредита\n- Книга: по главам\n"
+                "Оплата: Telegram Stars (если включено)."
             )
         else:
             await message.answer(
-                "Pricing:\n- Post: 1 credit\n- Article: 3 credits\n- Series: 1×N credits\n- Book: per chapter\nPayments: Telegram Stars (if enabled)."
+                "Pricing:\n"
+                "- Post: 1 credit (+1 light fact‑check, +3 deep; +1 refine)\n"
+                "- Series: 1×N credits (per post as above)\n"
+                "- Article: 3 credits\n- Book: per chapter\n"
+                "Payments: Telegram Stars (if enabled)."
             )
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
