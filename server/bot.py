@@ -1203,7 +1203,10 @@ def create_dispatcher() -> Dispatcher:
                                 "depth": int(fc_depth_pref or 0) if fc_enabled_pref else 0,
                                 "refine": bool(refine_pref),
                             }
-                            j = Job(user_id=message.from_user.id, type="post_series", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=int(precharged))
+                            # Normalize to internal User.id for consistency with single-post flow
+                            from .db import get_or_create_user as _get_or_create_user
+                            db_user = await _get_or_create_user(session, message.from_user.id)
+                            j = Job(user_id=db_user.id, type="post_series", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=int(precharged))
                             session.add(j)
                             await session.flush()
                             job_id = int(j.id)
@@ -1941,14 +1944,27 @@ def create_dispatcher() -> Dispatcher:
                 from sqlalchemy import select as _select
                 from sqlalchemy import join as _join
                 async with SessionLocal() as _s:
-                    from .db import ResultDoc, Job
+                    from sqlalchemy import or_ as _or
+                    from .db import ResultDoc, Job, User
+                    # Resolve both legacy (Job.user_id == telegram_id) and normalized (Job.user_id == User.id)
+                    db_uid = None
+                    try:
+                        uq = await _s.execute(_select(User).where(User.telegram_id == int(message.from_user.id)))
+                        urow = uq.scalars().first()
+                        if urow is not None:
+                            db_uid = int(urow.id)
+                    except Exception:
+                        db_uid = None
                     jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
+                    cond = Job.user_id == int(message.from_user.id)
+                    if db_uid is not None:
+                        cond = _or(cond, Job.user_id == db_uid)
                     res = await _s.execute(
                         _select(ResultDoc, Job.user_id)
                         .select_from(jn)
-                        .where(Job.user_id == int(message.from_user.id))
+                        .where(cond)
                         .order_by(ResultDoc.created_at.desc())
-                        .limit(20)
+                        .limit(50)
                     )
                     rows = res.fetchall()
                     for rdoc, _uid in rows:
