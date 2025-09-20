@@ -2016,7 +2016,7 @@ def create_dispatcher() -> Dispatcher:
                         urow = uq.scalars().first()
                         if urow is not None:
                             db_uid = int(urow.id)
-        except Exception:
+                    except Exception:
                         db_uid = None
                     jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
                     cond = Job.user_id == int(message.from_user.id)
