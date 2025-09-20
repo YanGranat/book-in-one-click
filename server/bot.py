@@ -908,7 +908,11 @@ def create_dispatcher() -> Dispatcher:
             )
         except Exception:
             pass
-        await state.finish()
+        # Reset to neutral state and prompt minimal hint so next command works
+        try:
+            await state.reset_state(with_data=False)
+        except Exception:
+            await state.finish()
         await message.answer(done, reply_markup=ReplyKeyboardRemove())
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"))  # type: ignore
