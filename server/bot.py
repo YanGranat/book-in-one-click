@@ -886,31 +886,53 @@ def create_dispatcher() -> Dispatcher:
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                     "refine": refine_enabled,
                 }
-                if fc_enabled_state:
-                    path = await loop.run_in_executor(
-                        None,
-                        lambda: generate_post(
-                            topic,
-                            lang=eff_lang,
-                            provider=(prov or "openai"),
-                            factcheck=True,
-                            research_iterations=int(depth or 2),
-                            job_meta=job_meta,
-                            use_refine=refine_enabled,
-                        ),
-                    )
-                else:
-                    path = await loop.run_in_executor(
-                        None,
-                        lambda: generate_post(
-                            topic,
-                            lang=eff_lang,
-                            provider=(prov or "openai"),
-                            factcheck=False,
-                            job_meta=job_meta,
-                            use_refine=refine_enabled,
-                        ),
-                    )
+            stages = []
+            def _on_progress(stage: str) -> None:
+                stages.append(stage)
+                try:
+                    # Send lightweight hints on main milestones only
+                    if stage in {"start:post","factcheck:init","rewrite:init","refine:init","save:init","done"}:
+                        txt = {
+                            "start:post": "Начинаю…" if _is_ru(ui_lang) else "Starting…",
+                            "factcheck:init": "Факт‑чекинг…" if _is_ru(ui_lang) else "Fact‑checking…",
+                            "rewrite:init": "Переписываю проблемные места…" if _is_ru(ui_lang) else "Rewriting issues…",
+                            "refine:init": "Финальная редактура…" if _is_ru(ui_lang) else "Final refine…",
+                            "save:init": "Сохраняю результат…" if _is_ru(ui_lang) else "Saving…",
+                            "done": "Готово." if _is_ru(ui_lang) else "Done.",
+                        }.get(stage)
+                        if txt:
+                            # Fire-and-forget
+                            asyncio.create_task(message.answer(txt))
+                except Exception:
+                    pass
+
+            if fc_enabled_state:
+                path = await loop.run_in_executor(
+                    None,
+                    lambda: generate_post(
+                        topic,
+                        lang=eff_lang,
+                        provider=(prov or "openai"),
+                        factcheck=True,
+                        research_iterations=int(depth or 2),
+                        job_meta=job_meta,
+                        on_progress=_on_progress,
+                        use_refine=refine_enabled,
+                    ),
+                )
+            else:
+                path = await loop.run_in_executor(
+                    None,
+                    lambda: generate_post(
+                        topic,
+                        lang=eff_lang,
+                        provider=(prov or "openai"),
+                        factcheck=False,
+                        job_meta=job_meta,
+                        on_progress=_on_progress,
+                        use_refine=refine_enabled,
+                    ),
+                )
             # Send main result
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"

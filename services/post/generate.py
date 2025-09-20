@@ -777,6 +777,7 @@ def generate_post(
 
     from pathlib import Path
     if use_refine:
+        _emit("refine:init")
         p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
         refine_input = (
             "<input>\n"
@@ -793,6 +794,7 @@ def generate_post(
         log("✨ Refine · Skipped", "Refine step disabled by configuration")
 
     # Save final
+    _emit("save:init")
     output_dir = ensure_output_dir(output_subdir)
     base = f"{safe_filename_base(topic)}_post"
     filepath = next_available_filepath(output_dir, base, ".md")
@@ -871,12 +873,6 @@ def generate_post(
                         s.add(jl)
                         s.flush()
                         s.commit()
-                        try:
-                            # Prefer linking ResultDoc to the saved JobLog id for cascade delete
-                            if getattr(jl, "id", None):
-                                result_job_id = int(jl.id)
-                        except Exception:
-                            pass
                     except Exception as _e:
                         s.rollback()
                         print(f"[ERROR] JobLog commit failed: {_e}")
@@ -932,6 +928,7 @@ def generate_post(
         print(f"[ERROR] Failed to record log in DB: {e}")
         print(f"[INFO] Log available on filesystem: {log_path}")
         # Continue execution - log file is still created even if DB fails
+    _emit("done")
     if return_log_path:
         return log_path
     return filepath
