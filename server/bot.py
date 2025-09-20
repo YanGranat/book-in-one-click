@@ -258,8 +258,14 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["start"])  # type: ignore
     async def cmd_start(message: types.Message):
-        # Mark onboarding flow active
-        await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(onboarding=True)
+        # Mark onboarding flow active and reset settings panel state
+        await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(
+            onboarding=True,
+            in_settings=False,
+            fc_ready=False,
+            series_mode=None,
+            series_count=None,
+        )
         await message.answer(
             "Выберите язык интерфейса / Choose interface language:",
             reply_markup=build_ui_lang_inline(),
@@ -432,7 +438,7 @@ def create_dispatcher() -> Dispatcher:
             kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang_cur, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            # Old behavior
+            # Onboarding continues: after generation language → provider
             msg = {
                 "ru": {
                     "ru": "Язык генерации: русский.",
@@ -449,8 +455,9 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
-                prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
+                # After refine in onboarding → ask fact-check
+                prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
@@ -491,7 +498,7 @@ def create_dispatcher() -> Dispatcher:
             kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            # Old behavior (outside settings panel)
+            # Onboarding continues: after provider → logs toggle
             await query.message.edit_reply_markup() if query.message else None
             ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ok)
@@ -770,7 +777,7 @@ def create_dispatcher() -> Dispatcher:
             kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            # Old behavior
+            # Onboarding continues: after logs → incognito toggle
             msg = "Логи включены." if (enabled and ui_lang=="ru") else ("Logs enabled." if enabled else ("Логи отключены." if ui_lang=="ru" else "Logs disabled."))
             await query.message.edit_reply_markup() if query.message else None
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
@@ -827,16 +834,12 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding_flag = bool((await state.get_data()).get("onboarding"))
             if onboarding_flag:
-                # After incognito, ask fact-check preference before topic
-                prompt = (
-                    "Включить факт-чекинг?"
-                    if _is_ru(ui_lang)
-                    else "Enable fact-checking?"
-                )
+                # After incognito, ask refine then fact-check
+                prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
                 await dp.bot.send_message(
                     query.message.chat.id if query.message else query.from_user.id,
                     prompt,
-                    reply_markup=build_yesno_inline("fc", ui_lang),
+                    reply_markup=build_yesno_inline("refine", ui_lang),
                 )
 
     @dp.message_handler(commands=["refine"])  # type: ignore
@@ -912,9 +915,13 @@ def create_dispatcher() -> Dispatcher:
             # Mark FC decision as done in onboarding to avoid asking again on topic
             await state.update_data(factcheck=False, research_iterations=None, fc_ready=True)
             if onboarding:
-                prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
-                await GenerateStates.WaitingTopic.set()
+                # After disabling FC in onboarding → ask what to generate
+                kb = InlineKeyboardMarkup()
+                kb.add(
+                    InlineKeyboardButton(text=("Пост" if _is_ru(ui_lang) else "Post"), callback_data="set:gentype:post"),
+                    InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
+                )
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
@@ -951,9 +958,13 @@ def create_dispatcher() -> Dispatcher:
         else:
             onboarding = bool(data.get("onboarding"))
             if onboarding:
-                prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
-                await GenerateStates.WaitingTopic.set()
+                # After setting depth in onboarding → ask what to generate
+                kb = InlineKeyboardMarkup()
+                kb.add(
+                    InlineKeyboardButton(text=("Пост" if _is_ru(ui_lang) else "Post"), callback_data="set:gentype:post"),
+                    InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
+                )
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
             else:
                 # Standalone /factcheck flow: confirm and stay
                 msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
