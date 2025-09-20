@@ -53,3 +53,17 @@ async def get_balance_kv_only(telegram_id: int) -> int:
     return await get_balance_kv(telegram_id)
 
 
+async def refund_credits(session: AsyncSession | None, user: User | None, amount: int, reason: str = "refund_failed") -> None:
+    if session is None or user is None:
+        return
+    user.credits += amount
+    tx = Tx(user_id=user.id, delta=amount, reason=reason)
+    session.add(tx)
+    await session.flush()
+
+
+async def refund_credits_kv(telegram_id: int, amount: int) -> None:
+    # Same as topup in KV model
+    await topup_kv(telegram_id, amount)
+
+

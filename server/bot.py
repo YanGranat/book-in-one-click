@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from typing import Dict, Set
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -21,6 +22,7 @@ from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 from .kv import set_gen_lang, get_gen_lang
 from .kv import set_refine_enabled, get_refine_enabled
+from .kv import push_history, get_history, clear_history, rate_allow
 # Fact-check settings (KV). Use robust import with fallbacks for older deployments
 try:
     from .kv import (
@@ -721,6 +723,17 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(prompt, reply_markup=build_yesno_inline("fc", ui_lang))
             return
 
+        # Rate limiting (admins bypass)
+        if not (message.from_user and message.from_user.id in ADMIN_IDS):
+            allowed = True
+            try:
+                allowed = await rate_allow(message.from_user.id, scope="gen", per_hour=int(os.getenv("RATE_HOURLY", "20")), per_day=int(os.getenv("RATE_DAILY", "100")))
+            except Exception:
+                allowed = True
+            if not allowed:
+                await message.answer("Превышен лимит запросов. Попробуйте позже." if _is_ru(ui_lang) else "Rate limit exceeded. Try later.")
+                return
+
         # Use current state (or KV defaults) to start generation immediately
         # Resolve provider, language, refine, incognito
         chat_id = message.chat.id
@@ -894,9 +907,28 @@ def create_dispatcher() -> Dispatcher:
                                 await message.answer_document(log_f, caption=log_cap)
             except Exception:
                 pass
+            # Record history (KV)
+            try:
+                if message.from_user:
+                    await push_history(message.from_user.id, {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat()})
+            except Exception:
+                pass
         except Exception as e:
             err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
             await message.answer(err)
+            # Refund credit on failure
+            try:
+                if SessionLocal is not None and message.from_user:
+                    async with SessionLocal() as session:
+                        user = await ensure_user_with_credits(session, message.from_user.id)
+                        from .credits import refund_credits
+                        await refund_credits(session, user, 1)
+                        await session.commit()
+                elif message.from_user:
+                    from .credits import refund_credits_kv
+                    await refund_credits_kv(message.from_user.id, 1)
+            except Exception:
+                pass
 
         await state.finish()
         RUNNING_CHATS.discard(chat_id)
@@ -1024,10 +1056,52 @@ def create_dispatcher() -> Dispatcher:
                 cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"
                 await dp.bot.send_message(chat_id, cap)
                 await dp.bot.send_document(chat_id, f)
+            try:
+                if query.from_user:
+                    await push_history(query.from_user.id, {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat()})
+            except Exception:
+                pass
         except Exception as e:
             await dp.bot.send_message(chat_id, f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}")
         await state.finish()
         RUNNING_CHATS.discard(chat_id)
+
+    # ---- History command ----
+    @dp.message_handler(commands=["history"])  # type: ignore
+    async def cmd_history(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        parts = (message.text or "").split()
+        if len(parts) > 1 and parts[1].lower() == "clear":
+            try:
+                await clear_history(message.from_user.id)
+            except Exception:
+                pass
+            await message.answer("История очищена." if _is_ru(ui_lang) else "History cleared.")
+            return
+        try:
+            hist = await get_history(message.from_user.id, limit=20)
+        except Exception:
+            hist = []
+        if not hist:
+            await message.answer("История пуста." if _is_ru(ui_lang) else "No history yet.")
+            return
+        # Build clickable list with link to results when path resembles results mapping (id extraction best-effort)
+        lines = []
+        for it in hist:
+            topic = str(it.get("topic") or "(no topic)")
+            path = str(it.get("path") or "")
+            link = ""
+            try:
+                name = path.split("/")[-1]
+                # heuristic: if DB stored, there will be ResultDoc id; we don't have it here, so omit link
+                # If you want strict links, extend push_history with result_id and use it here
+            except Exception:
+                pass
+            lines.append(f"• {topic}")
+        prefix = "История генераций (последние):\n" if _is_ru(ui_lang) else "Your recent generations:\n"
+        lines.append("\n" + ("Очистить: /history clear" if _is_ru(ui_lang) else "Clear: /history clear"))
+        await message.answer(prefix + "\n".join(lines))
 
     # Legacy state handler removed: fact-check choices are inline-only now
 

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, List, Dict, Any
+import json
 
 try:
     from redis import asyncio as redis  # type: ignore
@@ -31,6 +32,65 @@ def get_redis() -> "redis.Redis":
         raise RuntimeError("redis package not installed; add 'redis' to requirements.txt")
     _redis_client = redis.from_url(url)
     return _redis_client
+# ---- Simple history storage (KV fallback) ----
+
+async def push_history(telegram_id: int, item: Dict[str, Any]) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:history:{telegram_id}"
+    try:
+        await r.lpush(key, json.dumps(item, ensure_ascii=False))
+        await r.ltrim(key, 0, 49)
+        await r.expire(key, 60 * 60 * 24 * 60)  # keep 60 days
+    except Exception:
+        pass
+
+
+async def get_history(telegram_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+    r = get_redis()
+    key = f"{kv_prefix()}:history:{telegram_id}"
+    try:
+        vals = await r.lrange(key, 0, max(0, int(limit) - 1))
+        out: List[Dict[str, Any]] = []
+        for v in vals:
+            try:
+                s = v.decode("utf-8") if isinstance(v, (bytes, bytearray)) else str(v)
+                obj = json.loads(s)
+                if isinstance(obj, dict):
+                    out.append(obj)
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return []
+
+
+async def clear_history(telegram_id: int) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:history:{telegram_id}"
+    try:
+        await r.delete(key)
+    except Exception:
+        pass
+
+
+# ---- Simple rate limiting via Redis counters ----
+
+async def rate_allow(telegram_id: int, scope: str = "gen", per_hour: int = 10, per_day: int = 50) -> bool:
+    r = get_redis()
+    scope = (scope or "gen").strip().lower()
+    hkey = f"{kv_prefix()}:rate:{scope}:h:{telegram_id}"
+    dkey = f"{kv_prefix()}:rate:{scope}:d:{telegram_id}"
+    try:
+        h = await r.incr(hkey)
+        if int(h) == 1:
+            await r.expire(hkey, 3600)
+        d = await r.incr(dkey)
+        if int(d) == 1:
+            await r.expire(dkey, 86400)
+        return (int(h) <= int(per_hour)) and (int(d) <= int(per_day))
+    except Exception:
+        # On Redis issues, allow to avoid false negatives
+        return True
 
 
 async def get_balance_kv(telegram_id: int) -> int:
@@ -180,4 +240,45 @@ async def get_refine_enabled(telegram_id: int) -> bool:
     except Exception:
         return False
 
+
+# ---- Fact-check preference ----
+
+async def set_factcheck_enabled(telegram_id: int, enabled: bool) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:fc_enabled:{telegram_id}"
+    await r.set(key, "1" if enabled else "0")
+
+
+async def get_factcheck_enabled(telegram_id: int) -> bool:
+    r = get_redis()
+    key = f"{kv_prefix()}:fc_enabled:{telegram_id}"
+    val = await r.get(key)
+    try:
+        return (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "0")).strip() == "1"
+    except Exception:
+        return False
+
+
+async def set_factcheck_depth(telegram_id: int, depth: int) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:fc_depth:{telegram_id}"
+    try:
+        d = int(depth)
+    except Exception:
+        d = 1
+    if d not in (1, 2, 3):
+        d = 1
+    await r.set(key, str(d))
+
+
+async def get_factcheck_depth(telegram_id: int) -> int:
+    r = get_redis()
+    key = f"{kv_prefix()}:fc_depth:{telegram_id}"
+    val = await r.get(key)
+    try:
+        s = (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "2")).strip()
+        d = int(s)
+    except Exception:
+        d = 2
+    return 2 if d not in (1, 2, 3) else d
 

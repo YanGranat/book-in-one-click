@@ -16,6 +16,7 @@ from utils.env import load_env_from_root
 # Load .env BEFORE importing DB module to ensure DB_URL/DB_TABLE_PREFIX are visible
 load_env_from_root(__file__)
 from .bot import create_dispatcher
+from .kv import get_redis, kv_prefix
 from .bot_commands import register_admin_commands, ensure_db_ready
 from .db import SessionLocal, JobLog, Job, ResultDoc
 
@@ -379,14 +380,56 @@ def _extract_meta_from_text(md: str) -> dict:
 # ----- Admin UI auth (HTTP Basic) -----
 _basic = HTTPBasic()
 
-def require_admin(creds: HTTPBasicCredentials = Depends(_basic)) -> bool:
+def require_admin(request: Request, creds: HTTPBasicCredentials = Depends(_basic)) -> bool:
     user = os.getenv("ADMIN_UI_USER", "admin")
     pwd = os.getenv("ADMIN_UI_PASSWORD", "")
     if not pwd:
         # Explicitly deny when password is not configured
         raise HTTPException(status_code=503, detail="ADMIN_UI_PASSWORD not configured")
+    # Brute-force lock: IP-based attempt counter via Redis
+    client_ip = None
+    try:
+        client_ip = request.client.host if request and request.client else None
+    except Exception:
+        client_ip = None
+    lock_key = None
+    r = None
+    try:
+        r = get_redis()
+        if client_ip:
+            lock_key = f"{kv_prefix()}:adminui:fail:{client_ip}"
+            val = None
+            try:
+                val = r.get(lock_key)
+            except Exception:
+                val = None
+            # If locked (value like 'LOCK'), block
+            if val and (isinstance(val, (bytes, bytearray)) and val.decode("utf-8").startswith("LOCK")):
+                raise HTTPException(status_code=429, detail="Too many attempts")
+    except Exception:
+        r = None
+
     if secrets.compare_digest(creds.username, user) and secrets.compare_digest(creds.password, pwd):
+        # On success, clear fail counter
+        try:
+            if r and lock_key:
+                r.delete(lock_key)
+        except Exception:
+            pass
         return True
+
+    # On failure, increment counter
+    try:
+        if r and client_ip and lock_key:
+            cnt = await r.incr(lock_key)  # type: ignore
+            # first failure => set TTL 15 minutes
+            await r.expire(lock_key, 15 * 60)  # type: ignore
+            if int(cnt) >= 10:
+                await r.set(lock_key, "LOCK", ex=15 * 60)  # type: ignore
+                raise HTTPException(status_code=429, detail="Too many attempts")
+    except Exception:
+        pass
+
     raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
 
