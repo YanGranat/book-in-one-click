@@ -640,7 +640,7 @@ def create_dispatcher() -> Dispatcher:
         if query.data.endswith(":no"):
             await query.answer()
             await query.message.edit_reply_markup() if query.message else None
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Отменено." if ru else "Cancelled."))
+            # Silent cancel: no extra messages
             await state.finish()
             return
         # Precharge now
@@ -891,7 +891,7 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_cancel(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        done = "Отменено." if ui_lang == "ru" else "Cancelled."
+        # Silent cancel: no message text
         try:
             # Ensure any running job gates are released for this chat
             RUNNING_CHATS.discard(message.chat.id)
@@ -913,11 +913,9 @@ def create_dispatcher() -> Dispatcher:
         try:
             await state.reset_state(with_data=False)
         except Exception:
-            await state.finish()
-        await message.answer(done, reply_markup=ReplyKeyboardRemove())
-        # Optional gentle hint to avoid user confusion
+        await state.finish()
         try:
-            await message.answer(("Окей. Можете отправить новую команду (например, /generate)." if _is_ru(ui_lang) else "Okay. You can send a new command (e.g., /generate)."))
+            await message.edit_reply_markup()  # best-effort remove keyboard if applicable
         except Exception:
             pass
 
@@ -1061,7 +1059,6 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = data.get("ui_lang", "ru")
         if text_raw.lower() in {"/cancel"}:
-            done = "Отменено." if ui_lang == "ru" else "Cancelled."
             try:
                 RUNNING_CHATS.discard(message.chat.id)
             except Exception:
@@ -1070,7 +1067,10 @@ def create_dispatcher() -> Dispatcher:
                 await state.update_data(pending_topic=None)
             except Exception:
                 pass
-            await message.answer(done, reply_markup=ReplyKeyboardRemove())
+            try:
+                await message.edit_reply_markup()
+            except Exception:
+                pass
             await state.finish()
             return
         topic = text_raw
@@ -1759,7 +1759,6 @@ def create_dispatcher() -> Dispatcher:
                 await state.update_data(pending_topic=None)
             except Exception:
                 pass
-            await dp.bot.send_message(chat_id, "Отменено." if _is_ru(ui_lang) else "Cancelled.")
             await state.finish()
             return
         # proceed and charge then run generation using saved topic
@@ -2014,7 +2013,7 @@ def create_dispatcher() -> Dispatcher:
                         urow = uq.scalars().first()
                         if urow is not None:
                             db_uid = int(urow.id)
-                    except Exception:
+        except Exception:
                         db_uid = None
                     jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
                     cond = Job.user_id == int(message.from_user.id)
@@ -2063,8 +2062,8 @@ def create_dispatcher() -> Dispatcher:
             try:
                 if it.get("hidden") == 0 and it.get("id"):
                     url = _result_url(int(it.get("id")))
-            except Exception:
-                url = ""
+                except Exception:
+                    url = ""
             tag = {"post":"post","post_series":"series","article":"article","summary":"summary"}.get(kind, kind or "result")
             if url:
                 lines.append(f"• [{tag}] <a href='{url}'>{topic}</a>")
