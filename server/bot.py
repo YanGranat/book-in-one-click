@@ -455,9 +455,9 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
-                # After refine in onboarding → ask fact-check
-                prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+                # After generation language → ask provider
+                prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if _is_ru(ui_lang) else "Choose provider (OpenAI/Gemini/Claude):"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
