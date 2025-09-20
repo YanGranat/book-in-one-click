@@ -890,6 +890,16 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         done = "Отменено." if ui_lang == "ru" else "Cancelled."
+        try:
+            # Ensure any running job gates are released for this chat
+            RUNNING_CHATS.discard(message.chat.id)
+        except Exception:
+            pass
+        # Reset transient flags
+        try:
+            await state.update_data(onboarding=False, in_settings=False, fc_ready=False, series_mode=None, series_count=None)
+        except Exception:
+            pass
         await state.finish()
         await message.answer(done, reply_markup=ReplyKeyboardRemove())
 
