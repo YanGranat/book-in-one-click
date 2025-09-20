@@ -741,6 +741,16 @@ def create_dispatcher() -> Dispatcher:
             if not allowed:
                 await message.answer("Превышен лимит запросов. Попробуйте позже." if _is_ru(ui_lang) else "Rate limit exceeded. Try later.")
                 return
+            # Provider-specific limits
+            try:
+                prov_scope = f"prov:{(data.get('provider') or '').strip().lower() or 'openai'}"
+                ph = int(os.getenv(f"RATE_HOURLY_{prov_scope.split(':')[-1].upper()}", os.getenv("RATE_HOURLY_PROVIDER", "30")))
+                pd = int(os.getenv(f"RATE_DAILY_{prov_scope.split(':')[-1].upper()}", os.getenv("RATE_DAILY_PROVIDER", "200")))
+                if not await rate_allow(message.from_user.id, scope=prov_scope, per_hour=ph, per_day=pd):
+                    await message.answer("Провайдер: превышен лимит. Попробуйте позже." if _is_ru(ui_lang) else "Provider rate limit exceeded. Try later.")
+                    return
+            except Exception:
+                pass
 
         # Use current state (or KV defaults) to start generation immediately
         # Resolve provider, language, refine, incognito
@@ -960,15 +970,36 @@ def create_dispatcher() -> Dispatcher:
                 if SessionLocal is not None:
                     from sqlalchemy import select
                     async with SessionLocal() as session:
-                        from .db import ResultDoc
+                        from .db import ResultDoc, Job
                         res = await session.execute(select(ResultDoc).where(ResultDoc.path == str(path)).order_by(ResultDoc.created_at.desc()))
                         row = res.scalars().first()
                         if row is not None:
                             res_id = int(row.id)
+                            # mark job done if we have job_id
+                            try:
+                                jid = int(job_meta.get("job_id", 0)) if isinstance(job_meta, dict) else 0
+                            except Exception:
+                                jid = 0
+                            if jid:
+                                from sqlalchemy import update as _upd
+                                from datetime import datetime as _dt
+                                await session.execute(_upd(Job).where(Job.id == jid).values(status="done", finished_at=_dt.utcnow(), file_path=str(path)))
+                                await session.commit()
                 payload = {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat()}
                 if res_id is not None:
+                    # fetch hidden flag to decide link visibility
+                    if SessionLocal is not None:
+                        async with SessionLocal() as session:
+                            from sqlalchemy import select
+                            from .db import ResultDoc
+                            r2 = await session.execute(select(ResultDoc).where(ResultDoc.id == int(res_id)))
+                            rr = r2.scalar_one_or_none()
+                            hidden = int(getattr(rr, "hidden", 0) or 0) if rr is not None else 0
+                    else:
+                        hidden = 0
                     payload["result_id"] = int(res_id)
-                    payload["url"] = _result_url(int(res_id))
+                    if hidden == 0:
+                        payload["url"] = _result_url(int(res_id))
                 if message.from_user:
                     await push_history(message.from_user.id, payload)
             except Exception:
@@ -987,6 +1018,21 @@ def create_dispatcher() -> Dispatcher:
                 elif message.from_user:
                     from .credits import refund_credits_kv
                     await refund_credits_kv(message.from_user.id, 1)
+            except Exception:
+                pass
+            # Mark job error
+            try:
+                if SessionLocal is not None:
+                    from sqlalchemy import update as _upd
+                    async with SessionLocal() as session:
+                        from .db import Job
+                        try:
+                            jid = int((job_meta or {}).get("job_id", 0))
+                        except Exception:
+                            jid = 0
+                        if jid:
+                            await session.execute(_upd(Job).where(Job.id == jid).values(status="error"))
+                            await session.commit()
             except Exception:
                 pass
 
