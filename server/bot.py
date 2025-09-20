@@ -882,8 +882,9 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
-                prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if _is_ru(ui_lang) else "Choose provider (OpenAI/Gemini/Claude):"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
+                # After refine in onboarding → ask fact-check
+                prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
 
     @dp.message_handler(commands=["cancel"])  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
@@ -977,6 +978,7 @@ def create_dispatcher() -> Dispatcher:
                     InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
                 )
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
+                await GenerateStates.ChoosingGenType.set()
             else:
                 # Standalone /factcheck flow: confirm and stay
                 msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
