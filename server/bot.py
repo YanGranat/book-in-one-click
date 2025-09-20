@@ -913,7 +913,10 @@ def create_dispatcher() -> Dispatcher:
         try:
             await state.reset_state(with_data=False)
         except Exception:
-        await state.finish()
+            try:
+                await state.finish()
+            except Exception:
+                pass
         try:
             await message.edit_reply_markup()  # best-effort remove keyboard if applicable
         except Exception:
