@@ -418,7 +418,21 @@ def generate_post(
     )
     # Log writer input for transparency (plain text; UI preserves newlines)
     log("⬇️ Writer · Input", user_message_local_writer)
-    content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
+    # Use explicit agent builder for OpenAI; fallback to provider-specific runner otherwise
+    if _prov == "openai":
+        try:
+            from llm_agents.post.module_01_writing.writer import build_post_writer_agent
+            agent = build_post_writer_agent(
+                model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                instructions_override=instructions,
+            )
+            res_local = Runner.run_sync(agent, user_message_local_writer)
+            content = getattr(res_local, "final_output", "")
+        except Exception:
+            # Fallback to generic runner if builder path fails
+            content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
+    else:
+        content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("✍️ Writer · Output", content)
     if not content:
         raise RuntimeError("Empty result from writer agent")
