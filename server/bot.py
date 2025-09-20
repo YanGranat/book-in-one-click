@@ -898,7 +898,14 @@ def create_dispatcher() -> Dispatcher:
             pass
         # Reset transient flags
         try:
-            await state.update_data(onboarding=False, in_settings=False, fc_ready=False, series_mode=None, series_count=None)
+            await state.update_data(
+                onboarding=False,
+                in_settings=False,
+                fc_ready=False,
+                series_mode=None,
+                series_count=None,
+                pending_topic=None,
+            )
         except Exception:
             pass
         await state.finish()
@@ -1045,6 +1052,14 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = data.get("ui_lang", "ru")
         if text_raw.lower() in {"/cancel"}:
             done = "Отменено." if ui_lang == "ru" else "Cancelled."
+            try:
+                RUNNING_CHATS.discard(message.chat.id)
+            except Exception:
+                pass
+            try:
+                await state.update_data(pending_topic=None)
+            except Exception:
+                pass
             await message.answer(done, reply_markup=ReplyKeyboardRemove())
             await state.finish()
             return
@@ -1725,7 +1740,16 @@ def create_dispatcher() -> Dispatcher:
         if query.data.endswith(":no"):
             await query.answer()
             await query.message.edit_reply_markup() if query.message else None
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, "Отменено." if _is_ru(ui_lang) else "Cancelled.")
+            chat_id = query.message.chat.id if query.message else (query.from_user.id if query.from_user else 0)
+            try:
+                RUNNING_CHATS.discard(chat_id)
+            except Exception:
+                pass
+            try:
+                await state.update_data(pending_topic=None)
+            except Exception:
+                pass
+            await dp.bot.send_message(chat_id, "Отменено." if _is_ru(ui_lang) else "Cancelled.")
             await state.finish()
             return
         # proceed and charge then run generation using saved topic
