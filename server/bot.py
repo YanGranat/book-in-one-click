@@ -815,6 +815,31 @@ def create_dispatcher() -> Dispatcher:
             RUNNING_CHATS.discard(chat_id)
             return
 
+        # Create Job row (running)
+        job_id = 0
+        try:
+            if SessionLocal is not None and message.from_user:
+                async with SessionLocal() as session:
+                    from .db import Job
+                    from .db import get_or_create_user as _get_or_create_user
+                    import json as _json
+                    db_user = await _get_or_create_user(session, message.from_user.id)
+                    params = {
+                        "topic": topic,
+                        "lang": (data.get("gen_lang") or "auto"),
+                        "provider": (data.get("provider") or "openai"),
+                        "factcheck": bool(data.get("factcheck")),
+                        "depth": int(data.get("research_iterations") or 0) if bool(data.get("factcheck")) else 0,
+                        "refine": bool(await get_refine_enabled(message.from_user.id) if message.from_user else False),
+                    }
+                    j = Job(user_id=db_user.id, type="post", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=1)
+                    session.add(j)
+                    await session.flush()
+                    job_id = int(j.id)
+                    await session.commit()
+        except Exception:
+            job_id = 0
+
         # Light progress notes before long run
         try:
             notes = [
@@ -898,6 +923,8 @@ def create_dispatcher() -> Dispatcher:
                     "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                     "refine": refine_enabled,
                 }
+                if job_id:
+                    job_meta["job_id"] = job_id
             stages = []
             def _on_progress(stage: str) -> None:
                 stages.append(stage)
@@ -949,6 +976,17 @@ def create_dispatcher() -> Dispatcher:
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"
                 await message.answer_document(f, caption=cap)
+            # Mark job done
+            try:
+                if job_id and SessionLocal is not None:
+                    from sqlalchemy import update as _upd
+                    from datetime import datetime as _dt
+                    async with SessionLocal() as session:
+                        from .db import Job
+                        await session.execute(_upd(Job).where(Job.id == job_id).values(status="done", finished_at=_dt.utcnow(), file_path=str(path)))
+                        await session.commit()
+            except Exception:
+                pass
 
             # Send logs if enabled
             try:
