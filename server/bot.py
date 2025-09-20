@@ -1962,7 +1962,7 @@ def create_dispatcher() -> Dispatcher:
                     res = await _s.execute(
                         _select(ResultDoc, Job.user_id)
                         .select_from(jn)
-                        .where(cond, (ResultDoc.hidden == 0))
+                        .where(cond)
                         .order_by(ResultDoc.created_at.desc())
                         .limit(50)
                     )
