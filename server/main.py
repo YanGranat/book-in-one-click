@@ -869,7 +869,7 @@ async def result_view_ui_id(res_id: int):
         "[data-theme='light'] code{background:#f5f7fb;color:inherit}"
         "[data-theme='light'] pre{background:#f5f7fb;border:1px solid #e5e9f0;color:#0f172a}"
         "</style></head><body>"
-        f"<header><a href='/results-ui'>← Results</a><a href='/logs-ui'>Logs</a><div class='spacer'></div><div class='toolbar'><button id='copy'>Copy</button><button id='download'>Download .md</button><button id='toggleRaw'>Show raw</button></div></header>"
+        f"<header><a href='/results-ui'>← Results</a><div class='spacer'></div><div class='toolbar'><button id='copy'>Copy</button><button id='download'>Download .md</button><button id='toggleRaw'>Show raw</button></div></header>"
         f"<main><div class='meta' id='meta'>Result: {title}</div><div id='content'></div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
         "<script>(function(){const t=localStorage.getItem('ui_theme');if(t==='light'){document.documentElement.setAttribute('data-theme','light');}else{document.documentElement.removeAttribute('data-theme');}})();"
         f"const RES_ID={res_id};"

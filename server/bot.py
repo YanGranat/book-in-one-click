@@ -1391,6 +1391,7 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         parts = (message.text or "").split()
         if len(parts) > 1 and parts[1].lower() == "clear":
+            # Backward compatibility: /history clear
             try:
                 await clear_history(message.from_user.id)
             except Exception:
@@ -1416,8 +1417,18 @@ def create_dispatcher() -> Dispatcher:
             else:
                 lines.append(f"• {topic}")
         prefix = "История генераций (последние):\n" if _is_ru(ui_lang) else "Your recent generations:\n"
-        lines.append("\n" + ("Очистить: /history clear" if _is_ru(ui_lang) else "Clear: /history clear"))
+        lines.append("\n" + ("Очистить: /history_clear" if _is_ru(ui_lang) else "Clear: /history_clear"))
         await message.answer(prefix + "\n".join(lines), parse_mode=types.ParseMode.HTML, disable_web_page_preview=True)
+
+    @dp.message_handler(commands=["history_clear"])  # type: ignore
+    async def cmd_history_clear(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        try:
+            await clear_history(message.from_user.id)
+        except Exception:
+            pass
+        await message.answer("История очищена." if _is_ru(ui_lang) else "History cleared.")
 
     # Legacy state handler removed: fact-check choices are inline-only now
 
