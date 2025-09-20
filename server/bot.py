@@ -945,8 +945,9 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     pass
 
+            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "900"))
             if fc_enabled_state:
-                path = await loop.run_in_executor(
+                fut = loop.run_in_executor(
                     None,
                     lambda: generate_post(
                         topic,
@@ -959,8 +960,9 @@ def create_dispatcher() -> Dispatcher:
                         use_refine=refine_enabled,
                     ),
                 )
+                path = await asyncio.wait_for(fut, timeout=timeout_s)
             else:
-                path = await loop.run_in_executor(
+                fut = loop.run_in_executor(
                     None,
                     lambda: generate_post(
                         topic,
@@ -972,6 +974,7 @@ def create_dispatcher() -> Dispatcher:
                         use_refine=refine_enabled,
                     ),
                 )
+                path = await asyncio.wait_for(fut, timeout=timeout_s)
             # Send main result
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"
@@ -1045,19 +1048,6 @@ def create_dispatcher() -> Dispatcher:
         except Exception as e:
             err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
             await message.answer(err)
-            # Refund credit on failure
-            try:
-                if SessionLocal is not None and message.from_user:
-                    async with SessionLocal() as session:
-                        user = await ensure_user_with_credits(session, message.from_user.id)
-                        from .credits import refund_credits
-                        await refund_credits(session, user, 1)
-                        await session.commit()
-                elif message.from_user:
-                    from .credits import refund_credits_kv
-                    await refund_credits_kv(message.from_user.id, 1)
-            except Exception:
-                pass
             # Mark job error
             try:
                 if SessionLocal is not None:
@@ -1176,6 +1166,31 @@ def create_dispatcher() -> Dispatcher:
                     depth = 2
             if not fc_enabled_state:
                 depth = None
+            # Create Job (running)
+            job_id = 0
+            try:
+                if SessionLocal is not None and query.from_user:
+                    async with SessionLocal() as session:
+                        from .db import Job
+                        from .db import get_or_create_user as _get_or_create_user
+                        import json as _json
+                        db_user = await _get_or_create_user(session, query.from_user.id)
+                        params = {
+                            "topic": topic,
+                            "lang": eff_lang,
+                            "provider": prov or "openai",
+                            "factcheck": bool(fc_enabled_state),
+                            "depth": int(depth or 0) if fc_enabled_state else 0,
+                            "refine": bool(refine_enabled),
+                        }
+                        j = Job(user_id=db_user.id, type="post", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=1)
+                        session.add(j)
+                        await session.flush()
+                        job_id = int(j.id)
+                        await session.commit()
+            except Exception:
+                job_id = 0
+
             job_meta = {
                 "user_id": query.from_user.id if query.from_user else 0,
                 "chat_id": chat_id,
@@ -1185,28 +1200,70 @@ def create_dispatcher() -> Dispatcher:
                 "incognito": (await get_incognito(query.from_user.id)) if query.from_user else False,
                 "refine": refine_enabled,
             }
+            if job_id:
+                job_meta["job_id"] = job_id
             await dp.bot.send_message(chat_id, "Генерирую…" if _is_ru(ui_lang) else "Working…")
+            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "900"))
             if fc_enabled_state:
-                path = await loop.run_in_executor(
+                fut = loop.run_in_executor(
                     None,
                     lambda: generate_post(topic, lang=eff_lang, provider=(prov or "openai"), factcheck=True, research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
                 )
+                path = await asyncio.wait_for(fut, timeout=timeout_s)
             else:
-                path = await loop.run_in_executor(
+                fut = loop.run_in_executor(
                     None,
                     lambda: generate_post(topic, lang=eff_lang, provider=(prov or "openai"), factcheck=False, job_meta=job_meta, use_refine=refine_enabled),
                 )
+                path = await asyncio.wait_for(fut, timeout=timeout_s)
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"
                 await dp.bot.send_message(chat_id, cap)
                 await dp.bot.send_document(chat_id, f)
+            # Mark job done
+            try:
+                if job_id and SessionLocal is not None:
+                    from sqlalchemy import update as _upd
+                    from datetime import datetime as _dt
+                    async with SessionLocal() as session:
+                        from .db import Job
+                        await session.execute(_upd(Job).where(Job.id == job_id).values(status="done", finished_at=_dt.utcnow(), file_path=str(path)))
+                        await session.commit()
+            except Exception:
+                pass
             try:
                 if query.from_user:
-                    await push_history(query.from_user.id, {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat()})
+                    # Resolve public link if not hidden
+                    res_id = None
+                    if SessionLocal is not None:
+                        from sqlalchemy import select
+                        async with SessionLocal() as session:
+                            from .db import ResultDoc
+                            rs = await session.execute(select(ResultDoc).where(ResultDoc.path == str(path)).order_by(ResultDoc.created_at.desc()))
+                            rrow = rs.scalars().first()
+                            if rrow is not None:
+                                res_id = int(rrow.id)
+                                hidden = int(getattr(rrow, "hidden", 0) or 0)
+                                payload = {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat(), "result_id": res_id}
+                                if hidden == 0:
+                                    payload["url"] = _result_url(res_id)
+                                await push_history(query.from_user.id, payload)
+                    else:
+                        await push_history(query.from_user.id, {"topic": topic, "path": str(path), "created_at": datetime.utcnow().isoformat()})
             except Exception:
                 pass
         except Exception as e:
             await dp.bot.send_message(chat_id, f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}")
+            # Mark job error
+            try:
+                if job_id and SessionLocal is not None:
+                    from sqlalchemy import update as _upd
+                    async with SessionLocal() as session:
+                        from .db import Job
+                        await session.execute(_upd(Job).where(Job.id == job_id).values(status="error"))
+                        await session.commit()
+            except Exception:
+                pass
         await state.finish()
         RUNNING_CHATS.discard(chat_id)
 
