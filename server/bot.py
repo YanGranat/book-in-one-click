@@ -921,6 +921,12 @@ def create_dispatcher() -> Dispatcher:
             await message.edit_reply_markup()  # best-effort remove keyboard if applicable
         except Exception:
             pass
+        # Single cancel message
+        try:
+            done = "Отменено." if _is_ru(ui_lang) else "Cancelled."
+            await message.answer(done, reply_markup=ReplyKeyboardRemove())
+        except Exception:
+            pass
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"))  # type: ignore
     async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
@@ -1072,6 +1078,12 @@ def create_dispatcher() -> Dispatcher:
                 pass
             try:
                 await message.edit_reply_markup()
+            except Exception:
+                pass
+            # Single cancel message
+            try:
+                done = "Отменено." if _is_ru(ui_lang) else "Cancelled."
+                await message.answer(done, reply_markup=ReplyKeyboardRemove())
             except Exception:
                 pass
             await state.finish()
@@ -1760,6 +1772,11 @@ def create_dispatcher() -> Dispatcher:
                 pass
             try:
                 await state.update_data(pending_topic=None)
+            except Exception:
+                pass
+            # Single cancel message
+            try:
+                await dp.bot.send_message(chat_id, ("Отменено." if _is_ru(ui_lang) else "Cancelled."))
             except Exception:
                 pass
             await state.finish()
