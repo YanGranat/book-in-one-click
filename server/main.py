@@ -33,6 +33,31 @@ WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 
 app = FastAPI(title="Book in One Click Bot API")
 
+
+async def _rate_allow_download(key_base: str, ip: str, *, per_min: int, per_hour: int, per_day: int) -> bool:
+    if not ip:
+        return True
+    try:
+        r = get_redis()
+    except Exception:
+        return True
+    try:
+        kb = f"{kv_prefix()}:dl:{key_base}:{ip}"
+        m = await r.incr(kb+":m")  # type: ignore
+        if int(m) == 1:
+            await r.expire(kb+":m", 60)  # type: ignore
+        h = await r.incr(kb+":h")  # type: ignore
+        if int(h) == 1:
+            await r.expire(kb+":h", 3600)  # type: ignore
+        d = await r.incr(kb+":d")  # type: ignore
+        if int(d) == 1:
+            await r.expire(kb+":d", 86400)  # type: ignore
+        if (per_min and int(m) > per_min) or (per_hour and int(h) > per_hour) or (per_day and int(d) > per_day):
+            return False
+        return True
+    except Exception:
+        return True
+
 # Create a single dispatcher/bot for webhook handling
 DP = create_dispatcher()
 register_admin_commands(DP, SessionLocal)
@@ -116,6 +141,23 @@ async def _startup():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+@app.get("/ip")
+async def ip_endpoint(request: Request):
+    try:
+        ip = request.client.host if request and request.client else ""
+    except Exception:
+        ip = ""
+    return {"ip": ip or "unknown"}
+
+@app.get("/allow-download")
+async def allow_download(key: str, ip: str):
+    # Limits can be tuned via env; safe defaults
+    per_min = int(os.getenv("DL_PER_MIN", "5"))
+    per_hour = int(os.getenv("DL_PER_HOUR", "60"))
+    per_day = int(os.getenv("DL_PER_DAY", "300"))
+    ok = await _rate_allow_download(key, ip, per_min=per_min, per_hour=per_hour, per_day=per_day)
+    return {"allow": bool(ok)}
 
 
 @app.get("/")
@@ -578,7 +620,7 @@ async def log_view_ui(log_id: int, _: bool = Depends(require_admin)):
         "if(text && text.trim().length>0){render(text);}else{document.getElementById('content').textContent='Loading…';}"
         "async function refresh(){try{const r=await fetch('/logs/'+LOG_ID+'?_ts='+(Date.now()),{cache:'no-store'});const j=await r.json();if(j&&j.content&&(j.content.length>0)){text=j.content;render(text);}else{document.getElementById('content').textContent='No content';}}catch(e){document.getElementById('content').textContent='Failed to load';}}refresh();"
         "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
-        "document.getElementById('download').onclick=()=>{const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'log')+'.md';a.click();};"
+        "document.getElementById('download').onclick=async()=>{try{const ip=(await (await fetch('/ip',{cache:'no-store'})).json()).ip||'unknown';const key='log-'+LOG_ID;const ok=await (await fetch(`/allow-download?key=${key}&ip=${encodeURIComponent(ip)}`,{cache:'no-store'})).json();if(!(ok&&ok.allow)){alert('Rate limit exceeded. Try later.');return;}const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'log')+'.md';a.click();}catch(_){}};"
         "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}" 
         "</script>"
         "</body></html>"
@@ -825,7 +867,7 @@ async def result_view_ui_id(res_id: int):
         "function render(md){let html='';try{html=(window.marked?window.marked.parse(md):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=md.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>';}document.getElementById('content').innerHTML=showRaw?('<pre>'+md.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>'):html;}"
         "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&(j.content||j.path)){if(j.content)text=j.content;const meta=document.getElementById('meta');if(meta){meta.textContent=`provider=${j.provider||'?'} | lang=${j.lang||'?'} | topic=${j.topic||'?'} | id=${RES_ID}`;}render(text);}}catch(_){}}refresh();"
         "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
-        "document.getElementById('download').onclick=()=>{const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'result')+'.md';a.click();};"
+        "document.getElementById('download').onclick=async()=>{try{const ip=(await (await fetch('/ip',{cache:'no-store'})).json()).ip||'unknown';const key='res-'+RES_ID;const ok=await (await fetch(`/allow-download?key=${key}&ip=${encodeURIComponent(ip)}`,{cache:'no-store'})).json();if(!(ok&&ok.allow)){alert('Rate limit exceeded. Try later.');return;}const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'result')+'.md';a.click();}catch(_){}};"
         "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}"
         "</script>"
         "</body></html>"
