@@ -932,6 +932,8 @@ def create_dispatcher() -> Dispatcher:
                     InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
                 )
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
+                # Ensure callback is routed correctly
+                await GenerateStates.ChoosingGenType.set()
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
