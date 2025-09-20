@@ -638,10 +638,12 @@ async def delete_log_api(log_id: int, _: bool = Depends(require_admin)):
         obj = await s.get(JobLog, log_id)
         if obj is None:
             return {"ok": False, "error": "not found"}
-        # Also delete results linked to this log id (ResultDoc.job_id == JobLog.id)
+        # Also delete results linked by the same Job (ResultDoc.job_id == JobLog.job_id)
         try:
             from sqlalchemy import delete as _sqdel
-            await s.execute(_sqdel(ResultDoc).where(ResultDoc.job_id == obj.id))
+            job_id_val = int(getattr(obj, "job_id", 0) or 0)
+            if job_id_val:
+                await s.execute(_sqdel(ResultDoc).where(ResultDoc.job_id == job_id_val))
         except Exception:
             pass
         await s.delete(obj)
@@ -659,9 +661,15 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
     deleted = 0
     async with SessionLocal() as s:
         if ids:
-            from sqlalchemy import delete
-            # ResultDoc.job_id хранит id соответствующего JobLog → можно удалять напрямую по ids
-            await s.execute(delete(ResultDoc).where(ResultDoc.job_id.in_(ids)))
+            from sqlalchemy import delete, select
+            # Map JobLog ids -> Job ids, then delete ResultDoc by those Job ids
+            try:
+                res = await s.execute(select(JobLog.job_id).where(JobLog.id.in_(ids)))
+                job_ids = [int(x[0]) for x in res.fetchall() if x and x[0]]
+            except Exception:
+                job_ids = []
+            if job_ids:
+                await s.execute(delete(ResultDoc).where(ResultDoc.job_id.in_(job_ids)))
             res2 = await s.execute(delete(JobLog).where(JobLog.id.in_(ids)))
             await s.commit()
             deleted = int(res2.rowcount or 0)
