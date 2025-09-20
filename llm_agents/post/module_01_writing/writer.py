@@ -10,7 +10,7 @@ def _load_prompt() -> str:
         / "prompts"
         / "post"
         / "module_01_writing"
-        / "post.md"
+        / "writer.md"
     )
     return prompt_path.read_text(encoding="utf-8")
 

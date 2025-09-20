@@ -162,7 +162,7 @@ venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks"
 ## 📝 Промпты
 
 Файлы промптов целиком являются системной инструкцией агента. Для постов хранятся в `prompts/post/*` (module_* структура):
-- `module_01_writing/post.md`
+- `module_01_writing/writer.md`
 - `module_02_review/*.md` (identify_risky_points.md, iterative_research.md, sufficiency.md, recommendation.md, query_synthesizer.md)
 - `module_03_rewriting/rewrite.md`, `module_03_rewriting/refine.md`
 
