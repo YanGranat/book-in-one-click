@@ -2065,8 +2065,8 @@ def create_dispatcher() -> Dispatcher:
             try:
                 if it.get("hidden") == 0 and it.get("id"):
                     url = _result_url(int(it.get("id")))
-                except Exception:
-                    url = ""
+            except Exception:
+                url = ""
             tag = {"post":"post","post_series":"series","article":"article","summary":"summary"}.get(kind, kind or "result")
             if url:
                 lines.append(f"• [{tag}] <a href='{url}'>{topic}</a>")
