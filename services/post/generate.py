@@ -418,20 +418,17 @@ def generate_post(
     )
     # Log writer input for transparency (plain text; UI preserves newlines)
     log("⬇️ Writer · Input", user_message_local_writer)
-    # Use explicit agent builder for OpenAI; fallback to provider-specific runner otherwise
-    if _prov == "openai":
-        try:
-            from llm_agents.post.module_01_writing.writer import build_post_writer_agent
-            agent = build_post_writer_agent(
-                model=os.getenv("OPENAI_MODEL", "gpt-5"),
-                instructions_override=instructions,
-            )
-            res_local = Runner.run_sync(agent, user_message_local_writer)
-            content = getattr(res_local, "final_output", "")
-        except Exception:
-            # Fallback to generic runner if builder path fails
-            content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
-    else:
+    # Use unified post writer runner so агент/промпт живут под llm_agents/ и prompts/
+    try:
+        from llm_agents.post.module_01_writing.runner import run_post_writer
+        content = run_post_writer(
+            _prov,
+            instructions_override=instructions,
+            user_message=user_message_local_writer,
+            speed="heavy",
+        )
+    except Exception:
+        # Fallback to generic provider runner on any import/runtime failure
         content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("✍️ Writer · Output", content)
     if not content:
