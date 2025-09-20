@@ -405,25 +405,43 @@ def create_dispatcher() -> Dispatcher:
                 await set_gen_lang(query.from_user.id, gen_lang)
         except Exception:
             pass
-        msg = {
-            "ru": {
-                "ru": "Язык генерации: русский.",
-                "en": "Язык генерации: английский.",
-                "auto": "Язык генерации: авто (по теме).",
-            },
-            "en": {
-                "ru": "Generation language: Russian.",
-                "en": "Generation language: English.",
-                "auto": "Generation language: auto (by topic).",
-            },
-        }
-        await query.message.edit_reply_markup() if query.message else None
         await query.answer()
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
-        onboarding = bool((await state.get_data()).get("onboarding"))
-        if onboarding:
-            prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
+        in_settings = bool((await state.get_data()).get("in_settings"))
+        if in_settings and query.message:
+            # Re-render settings panel
+            try:
+                user_id = query.from_user.id
+                prov_cur = await get_provider(user_id)
+                gen_lang_cur = await get_gen_lang(user_id)
+                refine = await get_refine_enabled(user_id)
+                logs_enabled = await get_logs_enabled(user_id)
+                incognito = await get_incognito(user_id)
+                fc_enabled = await get_factcheck_enabled(user_id)
+                fc_depth = await get_factcheck_depth(user_id)
+            except Exception:
+                prov_cur = (data.get("provider") or "openai"); gen_lang_cur = gen_lang; refine=False; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang_cur, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            await query.message.edit_reply_markup(reply_markup=kb)
+        else:
+            # Old behavior
+            msg = {
+                "ru": {
+                    "ru": "Язык генерации: русский.",
+                    "en": "Язык генерации: английский.",
+                    "auto": "Язык генерации: авто (по теме).",
+                },
+                "en": {
+                    "ru": "Generation language: Russian.",
+                    "en": "Generation language: English.",
+                    "auto": "Generation language: auto (by topic).",
+                },
+            }
+            await query.message.edit_reply_markup() if query.message else None
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
+            onboarding = bool((await state.get_data()).get("onboarding"))
+            if onboarding:
+                prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
@@ -446,14 +464,32 @@ def create_dispatcher() -> Dispatcher:
                 await set_provider(query.from_user.id, prov)  # type: ignore
         except Exception:
             pass
-        await query.message.edit_reply_markup() if query.message else None
         await query.answer()
-        ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ok)
-        onboarding = bool((await state.get_data()).get("onboarding"))
-        if onboarding:
-            prompt = "Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("logs", ui_lang))
+        in_settings = bool((await state.get_data()).get("in_settings"))
+        if in_settings and query.message:
+            # Re-render settings panel in-place
+            try:
+                user_id = query.from_user.id
+                prov_cur = await get_provider(user_id)
+                gen_lang = await get_gen_lang(user_id)
+                refine = await get_refine_enabled(user_id)
+                logs_enabled = await get_logs_enabled(user_id)
+                incognito = await get_incognito(user_id)
+                fc_enabled = await get_factcheck_enabled(user_id)
+                fc_depth = await get_factcheck_depth(user_id)
+            except Exception:
+                prov_cur = prov; gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            await query.message.edit_reply_markup(reply_markup=kb)
+        else:
+            # Old behavior (outside settings panel)
+            await query.message.edit_reply_markup() if query.message else None
+            ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ok)
+            onboarding = bool((await state.get_data()).get("onboarding"))
+            if onboarding:
+                prompt = "Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("logs", ui_lang))
 
     @dp.message_handler(commands=["lang"])  # type: ignore
     async def cmd_lang(message: types.Message, state: FSMContext):
@@ -506,6 +542,7 @@ def create_dispatcher() -> Dispatcher:
             if _is_ru(ui_lang) else
             "Quick settings (all toggles via buttons):"
         )
+        await state.update_data(in_settings=True)
         await message.answer(title, reply_markup=build_settings_keyboard(ui_lang, prov, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth)))
 
     @dp.message_handler(commands=["logs"])  # type: ignore
@@ -526,18 +563,36 @@ def create_dispatcher() -> Dispatcher:
                 await set_logs_enabled(query.from_user.id, enabled)
         except Exception:
             pass
-        await query.message.edit_reply_markup() if query.message else None
         await query.answer()
-        msg = "Логи включены." if (enabled and ui_lang=="ru") else ("Logs enabled." if enabled else ("Логи отключены." if ui_lang=="ru" else "Logs disabled."))
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
-        onboarding = bool((await state.get_data()).get("onboarding"))
-        if onboarding:
-            prompt = "Инкогнито режим: включить или отключить?" if _is_ru(ui_lang) else "Incognito: Enable or Disable?"
-            await dp.bot.send_message(
-                query.message.chat.id if query.message else query.from_user.id,
-                prompt,
-                reply_markup=build_enable_disable_inline("incog", ui_lang),
-            )
+        in_settings = bool((await state.get_data()).get("in_settings"))
+        if in_settings and query.message:
+            # Re-render settings panel
+            try:
+                user_id = query.from_user.id
+                prov_cur = await get_provider(user_id)
+                gen_lang = await get_gen_lang(user_id)
+                refine = await get_refine_enabled(user_id)
+                logs_enabled = await get_logs_enabled(user_id)
+                incognito = await get_incognito(user_id)
+                fc_enabled = await get_factcheck_enabled(user_id)
+                fc_depth = await get_factcheck_depth(user_id)
+            except Exception:
+                prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=enabled; incognito=False; fc_enabled=False; fc_depth=2
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            await query.message.edit_reply_markup(reply_markup=kb)
+        else:
+            # Old behavior
+            msg = "Логи включены." if (enabled and ui_lang=="ru") else ("Logs enabled." if enabled else ("Логи отключены." if ui_lang=="ru" else "Logs disabled."))
+            await query.message.edit_reply_markup() if query.message else None
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+            onboarding = bool((await state.get_data()).get("onboarding"))
+            if onboarding:
+                prompt = "Инкогнито режим: включить или отключить?" if _is_ru(ui_lang) else "Incognito: Enable or Disable?"
+                await dp.bot.send_message(
+                    query.message.chat.id if query.message else query.from_user.id,
+                    prompt,
+                    reply_markup=build_enable_disable_inline("incog", ui_lang),
+                )
 
     @dp.message_handler(commands=["incognito"])  # type: ignore
     async def cmd_incognito(message: types.Message, state: FSMContext):
@@ -561,23 +616,39 @@ def create_dispatcher() -> Dispatcher:
                 await set_incognito(query.from_user.id, enabled)
         except Exception:
             pass
-        await query.message.edit_reply_markup() if query.message else None
         await query.answer()
-        msg = "Инкогнито: включён." if (enabled and ui_lang=="ru") else ("Incognito: enabled." if enabled else ("Инкогнито: отключён." if ui_lang=="ru" else "Incognito: disabled."))
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
-        onboarding_flag = bool((await state.get_data()).get("onboarding"))
-        if onboarding_flag:
-            # After incognito, ask fact-check preference before topic
-            prompt = (
-                "Включить факт-чекинг?"
-                if _is_ru(ui_lang)
-                else "Enable fact-checking?"
-            )
-            await dp.bot.send_message(
-                query.message.chat.id if query.message else query.from_user.id,
-                prompt,
-                reply_markup=build_yesno_inline("fc", ui_lang),
-            )
+        in_settings = bool((await state.get_data()).get("in_settings"))
+        if in_settings and query.message:
+            try:
+                user_id = query.from_user.id
+                prov_cur = await get_provider(user_id)
+                gen_lang = await get_gen_lang(user_id)
+                refine = await get_refine_enabled(user_id)
+                logs_enabled = await get_logs_enabled(user_id)
+                incognito = await get_incognito(user_id)
+                fc_enabled = await get_factcheck_enabled(user_id)
+                fc_depth = await get_factcheck_depth(user_id)
+            except Exception:
+                prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=enabled; fc_enabled=False; fc_depth=2
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            await query.message.edit_reply_markup(reply_markup=kb)
+        else:
+            msg = "Инкогнито: включён." if (enabled and ui_lang=="ru") else ("Incognito: enabled." if enabled else ("Инкогнито: отключён." if ui_lang=="ru" else "Incognito: disabled."))
+            await query.message.edit_reply_markup() if query.message else None
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+            onboarding_flag = bool((await state.get_data()).get("onboarding"))
+            if onboarding_flag:
+                # After incognito, ask fact-check preference before topic
+                prompt = (
+                    "Включить факт-чекинг?"
+                    if _is_ru(ui_lang)
+                    else "Enable fact-checking?"
+                )
+                await dp.bot.send_message(
+                    query.message.chat.id if query.message else query.from_user.id,
+                    prompt,
+                    reply_markup=build_yesno_inline("fc", ui_lang),
+                )
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
@@ -597,14 +668,30 @@ def create_dispatcher() -> Dispatcher:
                 await set_refine_enabled(query.from_user.id, enabled)
         except Exception:
             pass
-        await query.message.edit_reply_markup() if query.message else None
         await query.answer()
-        msg = "Финальная редактура: включена." if (enabled and ui_lang=="ru") else ("Final refine: enabled." if enabled else ("Финальная редактура: отключена." if ui_lang=="ru" else "Final refine: disabled."))
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
-        onboarding = bool((await state.get_data()).get("onboarding"))
-        if onboarding:
-            prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if _is_ru(ui_lang) else "Choose provider (OpenAI/Gemini/Claude):"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
+        in_settings = bool((await state.get_data()).get("in_settings"))
+        if in_settings and query.message:
+            try:
+                user_id = query.from_user.id
+                prov_cur = await get_provider(user_id)
+                gen_lang = await get_gen_lang(user_id)
+                refine = await get_refine_enabled(user_id)
+                logs_enabled = await get_logs_enabled(user_id)
+                incognito = await get_incognito(user_id)
+                fc_enabled = await get_factcheck_enabled(user_id)
+                fc_depth = await get_factcheck_depth(user_id)
+            except Exception:
+                prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=enabled; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            await query.message.edit_reply_markup(reply_markup=kb)
+        else:
+            msg = "Финальная редактура: включена." if (enabled and ui_lang=="ru") else ("Final refine: enabled." if enabled else ("Финальная редактура: отключена." if ui_lang=="ru" else "Final refine: disabled."))
+            await query.message.edit_reply_markup() if query.message else None
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+            onboarding = bool((await state.get_data()).get("onboarding"))
+            if onboarding:
+                prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if _is_ru(ui_lang) else "Choose provider (OpenAI/Gemini/Claude):"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
 
     @dp.message_handler(commands=["cancel"])  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
@@ -654,19 +741,34 @@ def create_dispatcher() -> Dispatcher:
                 await set_factcheck_depth(query.from_user.id, depth)
         except Exception:
             pass
-        await query.message.edit_reply_markup() if query.message else None
         await query.answer()
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        onboarding = bool(data.get("onboarding"))
-        if onboarding:
-            prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
-            await GenerateStates.WaitingTopic.set()
+        in_settings = bool((await state.get_data()).get("in_settings"))
+        if in_settings and query.message:
+            try:
+                user_id = query.from_user.id
+                prov_cur = await get_provider(user_id)
+                gen_lang = await get_gen_lang(user_id)
+                refine = await get_refine_enabled(user_id)
+                logs_enabled = await get_logs_enabled(user_id)
+                incognito = await get_incognito(user_id)
+                fc_enabled = await get_factcheck_enabled(user_id)
+                fc_depth = await get_factcheck_depth(user_id)
+            except Exception:
+                prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=True; fc_depth=depth
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            # Standalone /factcheck flow: confirm and stay
-            msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+            onboarding = bool(data.get("onboarding"))
+            if onboarding:
+                prompt = "Отправьте тему для поста:" if _is_ru(ui_lang) else "Send a topic for your post:"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt)
+                await GenerateStates.WaitingTopic.set()
+            else:
+                # Standalone /factcheck flow: confirm and stay
+                msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
 
     # ---- Fact-check settings command ----
     @dp.message_handler(commands=["factcheck"])  # type: ignore
@@ -681,16 +783,31 @@ def create_dispatcher() -> Dispatcher:
         val = (query.data or "").split(":")[-1]
         enabled = (val == "enable")
         await set_factcheck_enabled(query.from_user.id, enabled)
-        await query.message.edit_reply_markup() if query.message else None
         await query.answer()
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        if enabled:
-            prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
+        in_settings = bool((await state.get_data()).get("in_settings"))
+        if in_settings and query.message:
+            try:
+                user_id = query.from_user.id
+                prov_cur = await get_provider(user_id)
+                gen_lang = await get_gen_lang(user_id)
+                refine = await get_refine_enabled(user_id)
+                logs_enabled = await get_logs_enabled(user_id)
+                incognito = await get_incognito(user_id)
+                fc_enabled = await get_factcheck_enabled(user_id)
+                fc_depth = await get_factcheck_depth(user_id)
+            except Exception:
+                prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=enabled; fc_depth=2
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            msg = "Факт-чекинг: отключён." if _is_ru(ui_lang) else "Fact-check: disabled."
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+            if enabled:
+                prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
+            else:
+                msg = "Факт-чекинг: отключён." if _is_ru(ui_lang) else "Fact-check: disabled."
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
 
     # ---- Dedicated depth command ----
     @dp.message_handler(commands=["depth"])  # type: ignore
