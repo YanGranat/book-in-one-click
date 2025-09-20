@@ -286,7 +286,7 @@ def generate_series(
     log("🧭 Config", f"provider={_prov}\nlang={lang}\nmode={mode}\ncount={count}\nmax_iterations={max_iterations}\noutput_mode={output_mode}\nfactcheck={bool(factcheck)}\nrefine={bool(refine)}")
 
     # 1) Build initial ideas
-    p_builder = _load_prompt("builder.md")
+    p_builder = _load_prompt("module_01_planning/builder.md")
     user_builder = f"<input>\n<topic>{topic}</topic>\n<lang>{(lang or 'auto').strip()}</lang>\n</input>"
     plan = pr.run_json(p_builder, user_builder, PostIdeaList, speed="fast")
     ideas: list[PostIdea] = _dedupe(plan.items or [])
@@ -295,7 +295,7 @@ def generate_series(
     # 2) Iterate sufficiency/extend
     iterations = max(0, int(max_iterations))
     for i in range(iterations):
-        p_suff = _load_prompt("sufficiency.md")
+        p_suff = _load_prompt("module_01_planning/sufficiency.md")
         suff_user = f"<input>\n<topic>{topic}</topic>\n<ideas_json>{PostIdeaList(items=ideas).model_dump_json()}</ideas_json>\n</input>"
         speed = "heavy" if i + 1 > int(sufficiency_heavy_after) else "fast"
         suff = pr.run_json(p_suff, suff_user, ListSufficiency, speed=speed)
@@ -303,7 +303,7 @@ def generate_series(
         if suff.done:
             break
         missing = suff.missing_areas or []
-        p_ext = _load_prompt("extend.md")
+        p_ext = _load_prompt("module_01_planning/extend.md")
         needed = 0
         ext_user = (
             "<input>\n"
@@ -328,7 +328,7 @@ def generate_series(
     selected: list[PostIdea] = []
     if (mode or "auto").strip().lower() == "fixed":
         n = max(1, int(count or 0))
-        p_pri = _load_prompt("prioritize.md")
+        p_pri = _load_prompt("module_01_planning/prioritize.md")
         pri_user = (
             "<input>\n"
             f"<topic>{topic}</topic>\n"
@@ -359,7 +359,7 @@ def generate_series(
         _emit(f"write:{idx}")
         log("✍️ Writer · Topic", f"{idea.id}: {idea.title}")
         # series writer prompt override
-        p_writer = _load_prompt("writer.md")
+        p_writer = _load_prompt("module_02_writing/writer.md")
         # Pass full list of topics as JSON (all fields of PostIdea)
         series_topics_full = [it.model_dump() for it in selected]
         # Choose behavior based on output mode
