@@ -380,7 +380,7 @@ def _extract_meta_from_text(md: str) -> dict:
 # ----- Admin UI auth (HTTP Basic) -----
 _basic = HTTPBasic()
 
-def require_admin(request: Request, creds: HTTPBasicCredentials = Depends(_basic)) -> bool:
+async def require_admin(request: Request, creds: HTTPBasicCredentials = Depends(_basic)) -> bool:
     user = os.getenv("ADMIN_UI_USER", "admin")
     pwd = os.getenv("ADMIN_UI_PASSWORD", "")
     if not pwd:
@@ -400,7 +400,7 @@ def require_admin(request: Request, creds: HTTPBasicCredentials = Depends(_basic
             lock_key = f"{kv_prefix()}:adminui:fail:{client_ip}"
             val = None
             try:
-                val = r.get(lock_key)
+                val = await r.get(lock_key)  # type: ignore
             except Exception:
                 val = None
             # If locked (value like 'LOCK'), block
@@ -413,7 +413,7 @@ def require_admin(request: Request, creds: HTTPBasicCredentials = Depends(_basic
         # On success, clear fail counter
         try:
             if r and lock_key:
-                r.delete(lock_key)
+                await r.delete(lock_key)  # type: ignore
         except Exception:
             pass
         return True
