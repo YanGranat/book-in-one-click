@@ -264,20 +264,21 @@ def create_dispatcher() -> Dispatcher:
 
         if ui_lang == "ru":
             text = (
-                "Как пользоваться:\n"
-                "- /generate — отправьте тему, мы используем ваши настройки по умолчанию.\n"
+                "<b>Как пользоваться:</b>\n"
+                "- /generate — отправьте тему, будут использованы ваши настройки по умолчанию.\n"
                 "- /start — пройти настройку заново (язык интерфейса, язык генерации, редактура, провайдер, логи, инкогнито, факт‑чекинг, глубина).\n"
                 "- /factcheck — задать дефолт факт‑чекинга (вкл/выкл и глубину).\n"
+                "- /depth — установить глубину факт‑чекинга по умолчанию.\n"
                 "- /refine — включить/выключить финальную редактуру.\n"
                 "- /lang, /lang_generate, /provider, /logs, /incognito — точечно поменять настройки.\n\n"
-                "Результаты:\n"
+                "<b>Результаты:</b>\n"
                 "- Список всех результатов: https://bio1c-bot.onrender.com/results-ui\n"
                 "- Каждый результат — Markdown‑файл, который можно скачать и править.\n\n"
-                "Кредиты:\n"
-                "- 1 генерация = 1 кредит. Посмотреть баланс: /balance. Пополнить: /buy (если доступно).\n\n"
-                "Важно:\n"
+                "<b>Кредиты:</b>\n"
+                "- 1 генерация = 1 кредит. Посмотреть баланс: /balance. Пополнить: /buy.\n\n"
+                "<b>Важно:</b>\n"
                 "- /generate не задаёт вопросы: берёт ваши дефолтные значения из настроек.\n\n"
-                "Текущие настройки:\n"
+                "<b>Текущие настройки:</b>\n"
                 f"- Провайдер: {_prov_name(prov)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Инкогнито: {'включён' if incognito else 'отключён'}\n"
@@ -289,20 +290,21 @@ def create_dispatcher() -> Dispatcher:
             )
         else:
             text = (
-                "How to use:\n"
-                "- /generate — send a topic; your default settings are used.\n"
+                "<b>How to use:</b>\n"
+                "- /generate — send a topic; your default settings will be used.\n"
                 "- /start — run onboarding (UI lang, gen lang, refine, provider, logs, incognito, fact‑check, depth).\n"
                 "- /factcheck — set default fact‑check (enable/disable and depth).\n"
+                "- /depth — set default fact‑check depth.\n"
                 "- /refine — enable/disable final refine step.\n"
                 "- /lang, /lang_generate, /provider, /logs, /incognito — tweak settings individually.\n\n"
-                "Results:\n"
+                "<b>Results:</b>\n"
                 "- All results page: https://bio1c-bot.onrender.com/results-ui\n"
                 "- Each result is a Markdown file you can download and edit.\n\n"
-                "Credits:\n"
-                "- 1 generation = 1 credit. Check balance: /balance. Buy: /buy (if available).\n\n"
-                "Note:\n"
+                "<b>Credits:</b>\n"
+                "- 1 generation = 1 credit. Check balance: /balance. Buy: /buy.\n\n"
+                "<b>Note:</b>\n"
                 "- /generate asks for topic only and uses your saved defaults.\n\n"
-                "Current settings:\n"
+                "<b>Current settings:</b>\n"
                 f"- Provider: {_prov_name(prov)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Incognito: {'enabled' if incognito else 'disabled'}\n"
@@ -312,7 +314,7 @@ def create_dispatcher() -> Dispatcher:
                 + (f" (depth {fc_depth})" if fc_enabled else "")
                 + "\n\nProject GitHub: https://github.com/YanGranat/book-in-one-click"
             )
-        await message.answer(text)
+        await message.answer(text, disable_web_page_preview=True, parse_mode=types.ParseMode.HTML)
 
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:ui_lang:"))  # type: ignore
@@ -464,7 +466,11 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_incognito(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        prompt = "Инкогнито режим: Включить или Отключить?" if ui_lang == "ru" else "Incognito: Enable or Disable?"
+        prompt = (
+            "Инкогнито режим (ваши результаты не будут отображаться на публичной странице результатов):"
+            if ui_lang == "ru"
+            else "Incognito (your results will not appear on the public results page):"
+        )
         await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog:"))  # type: ignore
@@ -485,7 +491,11 @@ def create_dispatcher() -> Dispatcher:
         onboarding_flag = bool((await state.get_data()).get("onboarding"))
         if onboarding_flag:
             # After incognito, ask fact-check preference before topic
-            prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
+            prompt = (
+                "Включить факт-чекинг?"
+                if _is_ru(ui_lang)
+                else "Enable fact-checking?"
+            )
             await dp.bot.send_message(
                 query.message.chat.id if query.message else query.from_user.id,
                 prompt,
@@ -604,6 +614,14 @@ def create_dispatcher() -> Dispatcher:
         else:
             msg = "Факт-чекинг: отключён." if _is_ru(ui_lang) else "Fact-check: disabled."
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+
+    # ---- Dedicated depth command ----
+    @dp.message_handler(commands=["depth"])  # type: ignore
+    async def cmd_depth(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        prompt = "Глубина факт-чекинга (1–3):" if _is_ru(ui_lang) else "Fact-check depth (1–3):"
+        await message.answer(prompt, reply_markup=build_depth_inline())
 
 
     @dp.message_handler(state=GenerateStates.WaitingTopic, content_types=types.ContentTypes.TEXT)  # type: ignore
