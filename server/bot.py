@@ -320,7 +320,7 @@ def create_dispatcher() -> Dispatcher:
         if ui_lang == "ru":
             text = (
                 "<b>Как пользоваться:</b>\n"
-                "- /generate — отправьте тему, будут использованы ваши настройки по умолчанию.\n"
+                "- /generate — выбрать Пост или Серию; серия: пресеты 2/5/авто/кастом.\n"
                 "- /start — пройти настройку заново (язык интерфейса, язык генерации, редактура, провайдер, логи, инкогнито, факт‑чекинг, глубина).\n"
                 "- /factcheck — задать дефолт факт‑чекинга (вкл/выкл и глубину).\n"
                 "- /depth — установить глубину факт‑чекинга по умолчанию.\n"
@@ -328,9 +328,11 @@ def create_dispatcher() -> Dispatcher:
                 "- /lang, /lang_generate, /provider, /logs, /incognito — точечно поменять настройки.\n\n"
                 "<b>Результаты:</b>\n"
                 "- Список всех результатов: https://bio1c-bot.onrender.com/results-ui\n"
-                "- Каждый результат — Markdown‑файл, который можно скачать и править.\n\n"
+                "- Каждый результат — Markdown‑файл, который можно скачать и править; серия — один агрегатный .md.\n\n"
                 "<b>Кредиты:</b>\n"
-                "- 1 генерация = 1 кредит. Посмотреть баланс: /balance. Пополнить: /buy.\n"
+                "- Пост: 1 кредит; факт‑чек +1 (лёгкий) или +3 (глубокий ≥3); редактура +1.\n"
+                "- Серия: предоплата min(30, баланс) в авто или N×стоимость в fixed; остаток возвращаем.\n"
+                "- Посмотреть баланс: /balance. Пополнить: /buy.\n"
                 "- /pricing — посмотреть цены по типам.\n\n"
                 ""
                 "<b>Текущие настройки:</b>\n"
@@ -346,7 +348,7 @@ def create_dispatcher() -> Dispatcher:
         else:
             text = (
                 "<b>How to use:</b>\n"
-                "- /generate — send a topic; your default settings will be used.\n"
+                "- /generate — choose Post or Series; series: presets 2/5/auto/custom.\n"
                 "- /start — run onboarding (UI lang, gen lang, refine, provider, logs, incognito, fact‑check, depth).\n"
                 "- /factcheck — set default fact‑check (enable/disable and depth).\n"
                 "- /depth — set default fact‑check depth.\n"
@@ -354,9 +356,11 @@ def create_dispatcher() -> Dispatcher:
                 "- /lang, /lang_generate, /provider, /logs, /incognito — tweak settings individually.\n\n"
                 "<b>Results:</b>\n"
                 "- All results page: https://bio1c-bot.onrender.com/results-ui\n"
-                "- Each result is a Markdown file you can download and edit.\n\n"
+                "- Each result is a Markdown file; series arrive as one aggregate .md.\n\n"
                 "<b>Credits:</b>\n"
-                "- 1 generation = 1 credit. Check balance: /balance. Buy: /buy.\n"
+                "- Post: 1 credit; fact‑check +1 (light) or +3 (deep ≥3); refine +1.\n"
+                "- Series: prepay min(30, balance) in auto or N×price in fixed; refund remainder.\n"
+                "- Check balance: /balance. Buy: /buy.\n"
                 "- /pricing — see pricing per type.\n\n"
                 ""
                 "<b>Current settings:</b>\n"
@@ -1930,36 +1934,42 @@ def create_dispatcher() -> Dispatcher:
                 pass
             await message.answer("История очищена." if _is_ru(ui_lang) else "History cleared.")
             return
+        # Show unified history from DB Results (not only posts)
+        items = []
         try:
-            hist = await get_history(message.from_user.id, limit=20)
+            if SessionLocal is not None:
+                from sqlalchemy import select as _select
+                async with SessionLocal() as _s:
+                    from .db import ResultDoc
+                    res = await _s.execute(_select(ResultDoc).order_by(ResultDoc.created_at.desc()).limit(20))
+                    rows = res.scalars().all()
+                    for r in rows:
+                        items.append({
+                            "id": int(r.id),
+                            "kind": getattr(r, "kind", "") or "",
+                            "topic": getattr(r, "topic", "") or "",
+                            "hidden": int(getattr(r, "hidden", 0) or 0),
+                        })
         except Exception:
-            hist = []
-        if not hist:
+            items = []
+        if not items:
             await message.answer("История пуста." if _is_ru(ui_lang) else "No history yet.")
             return
-        # Build clickable list: only link when explicitly public
         lines = []
-        for it in hist:
-            topic = str(it.get("topic") or "(no topic)")
-            path = str(it.get("path") or "")
-            url = it.get("url") or ""
-            if not url and it.get("result_id"):
-                # Fallback only if DB confirms not hidden
-                try:
-                    if SessionLocal is not None:
-                        from sqlalchemy import select as _select
-                        from .db import ResultDoc as _RD
-                        async with SessionLocal() as _s:
-                            r = await _s.execute(_select(_RD.hidden).where(_RD.id == int(it.get("result_id"))))
-                            hidden_val = r.scalar_one_or_none()
-                            if hidden_val is not None and int(hidden_val or 0) == 0:
-                                url = _result_url(int(it.get("result_id")))
-                except Exception:
-                    url = ""
+        for it in items:
+            topic = (it.get("topic") or "(no topic)")
+            kind = (it.get("kind") or "").lower()
+            url = ""
+            try:
+                if it.get("hidden") == 0 and it.get("id"):
+                    url = _result_url(int(it.get("id")))
+            except Exception:
+                url = ""
+            tag = {"post":"post","post_series":"series","article":"article","summary":"summary"}.get(kind, kind or "result")
             if url:
-                lines.append(f"• <a href='{url}'>{topic}</a>")
+                lines.append(f"• [{tag}] <a href='{url}'>{topic}</a>")
             else:
-                lines.append(f"• {topic}")
+                lines.append(f"• [{tag}] {topic}")
         prefix = "История генераций (последние):\n" if _is_ru(ui_lang) else "Your recent generations:\n"
         lines.append("\n" + ("Очистить: /history_clear" if _is_ru(ui_lang) else "Clear: /history_clear"))
         await message.answer(prefix + "\n".join(lines), parse_mode=types.ParseMode.HTML, disable_web_page_preview=True)

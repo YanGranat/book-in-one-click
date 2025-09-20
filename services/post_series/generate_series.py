@@ -345,6 +345,12 @@ def generate_series(
         # Auto: take all planned ideas
         selected = ideas[:]
 
+    # Log final selected topics for transparency
+    try:
+        log("🗂️ Selected · Topics", f"```json\n{PostIdeaList(items=selected).model_dump_json()}\n```")
+    except Exception:
+        pass
+
     # 4) Write posts sequentially
     from services.post.generate import generate_post as generate_single_post
     posts_contents: list[tuple[PostIdea, str, Optional[Path]]] = []
@@ -376,6 +382,11 @@ def generate_series(
                 disable_sidecar_log=True,
                 return_content=True,
             )
+            # Log per-post output into series log for completeness
+            try:
+                log("✍️ Writer · Output", f"## {idea.title}\n\n{content}")
+            except Exception:
+                pass
             posts_contents.append((idea, content, None))
         else:
             path = generate_single_post(
@@ -394,8 +405,12 @@ def generate_series(
                 disable_db_record=True,
                 disable_sidecar_log=True,
             )
-            # Read content back to include inline in aggregate
+            # Read content back to include inline in aggregate and in series log
             content = Path(path).read_text(encoding="utf-8") if isinstance(path, Path) else Path(path).read_text(encoding="utf-8")
+            try:
+                log("✍️ Writer · Output", f"## {idea.title}\n\n{content}")
+            except Exception:
+                pass
             posts_contents.append((idea, content, path if isinstance(path, Path) else Path(path)))
         done_ids.append(idea.id)
 
@@ -408,11 +423,11 @@ def generate_series(
     for it in selected:
         tags_str = (", ".join(it.tags or [])) if it.tags else ""
         angle_str = (f" — {it.angle}" if it.angle else "")
-        header_lines.append(f"- {it.id}. {it.title}{angle_str}{(' ['+tags_str+']') if tags_str else ''}")
+        header_lines.append(f"- {it.title}{angle_str}{(' ['+tags_str+']') if tags_str else ''}")
     header_lines.append("")
     body_lines = []
     for (it, content, pth) in posts_contents:
-        body_lines.append(f"\n\n---\n\n## {it.id}. {it.title}\n\n")
+        body_lines.append(f"\n\n---\n\n## {it.title}\n\n")
         # Extract only markdown content from saved files if they contain metadata wrappers
         body_lines.append(content)
     aggregate_content = "\n".join(header_lines + body_lines)
