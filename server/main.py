@@ -461,7 +461,7 @@ async def logs_ui(_: bool = Depends(require_admin)):
         "document.addEventListener('click',async(e)=>{if(e.target.matches('.delBtn')){const id=e.target.getAttribute('data-id');if(confirm('Delete log '+id+'?')){const r=await fetch('/logs/'+id,{method:'DELETE'});const j=await r.json();if(j&&j.ok){location.reload();}}}});"
         "$$('#delSel').onclick=async()=>{const ids=$$$('input.sel:checked',tbody).map(x=>parseInt(x.value));if(!ids.length)return;if(!confirm('Delete '+ids.length+' logs?'))return;const r=await fetch('/logs/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const j=await r.json();if(j&&j.ok){location.reload();}};"
         "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim();const B=(b.querySelector('.t-'+key)?.textContent||'').trim();if(key==='id')return (asc?1:-1)*(parseInt(A)-parseInt(B));return (asc?1:-1)*(A.localeCompare(B));});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
-        "function applyTheme(){document.documentElement.setAttribute('data-theme',$$('#theme').value);}$$('#theme').onchange=applyTheme;applyTheme();"
+        "function applyTheme(){const v=$$('#theme').value;if(v==='light'){document.documentElement.setAttribute('data-theme','light');}else{document.documentElement.removeAttribute('data-theme');}}$$('#theme').onchange=applyTheme;applyTheme();"
         "$$('#refresh').onclick=()=>location.reload();"
         "</script>"
         "</body></html>"
