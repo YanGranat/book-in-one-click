@@ -394,6 +394,7 @@ async def logs_ui(_: bool = Depends(require_admin)):
         "<title>Logs</title>"
         "<style>"
         ":root{--bg:#0e0f12;--panel:#151821;--muted:#9aa4b2;--text:#e6e9ef;--brand:#6cf;--ok:#4caf50;--warn:#ff9800;--err:#f44336;--line:#242938}"
+        "[data-theme='light']{--bg:#f7f9fc;--panel:#ffffff;--muted:#5f6b7a;--text:#0f172a;--brand:#0a84ff;--ok:#2e7d32;--warn:#ef6c00;--err:#c62828;--line:#e5e9f0}"
         "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;padding:24px}"
         ".topbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px}"
         ".topbar h1{font-size:20px;margin:0 16px 0 0}"
@@ -416,6 +417,7 @@ async def logs_ui(_: bool = Depends(require_admin)):
         "<div class='spacer'></div>"
         "<input id='q' type='text' placeholder='Search topic...'>"
         "<select id='k'><option value=''>All kinds</option><option>md</option><option>json</option><option>txt</option></select>"
+        "<select id='theme'><option value='dark' selected>Dark</option><option value='light'>Light</option></select>"
         "<button id='refresh'>Refresh</button>"
         "<button id='delSel'>Delete selected</button>"
         "</div>"
@@ -433,6 +435,7 @@ async def logs_ui(_: bool = Depends(require_admin)):
         "document.addEventListener('click',async(e)=>{if(e.target.matches('.delBtn')){const id=e.target.getAttribute('data-id');if(confirm('Delete log '+id+'?')){const r=await fetch('/logs/'+id,{method:'DELETE'});const j=await r.json();if(j&&j.ok){location.reload();}}}});"
         "$$('#delSel').onclick=async()=>{const ids=$$$('input.sel:checked',tbody).map(x=>parseInt(x.value));if(!ids.length)return;if(!confirm('Delete '+ids.length+' logs?'))return;const r=await fetch('/logs/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});const j=await r.json();if(j&&j.ok){location.reload();}};"
         "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim();const B=(b.querySelector('.t-'+key)?.textContent||'').trim();if(key==='id')return (asc?1:-1)*(parseInt(A)-parseInt(B));return (asc?1:-1)*(A.localeCompare(B));});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
+        "function applyTheme(){document.documentElement.setAttribute('data-theme',$$('#theme').value);}$$('#theme').onchange=applyTheme;applyTheme();"
         "$$('#refresh').onclick=()=>location.reload();"
         "</script>"
         "</body></html>"
@@ -569,7 +572,7 @@ async def list_results():
 @app.get("/results-ui", response_class=HTMLResponse)
 async def results_ui():
     items = await _list_result_files()
-        rows = []
+    rows = []
     for it in items:
         if "id" in it and isinstance(it.get("id"), int):
             link = f"/results-ui/id/{it['id']}"
