@@ -68,7 +68,10 @@ async def _startup():
         await DP.bot.set_my_commands([
             types.BotCommand(command="start", description="Start / Начать"),
             types.BotCommand(command="generate", description="Generate / Сгенерировать"),
+            types.BotCommand(command="settings", description="Settings / Настройки"),
             types.BotCommand(command="balance", description="Balance / Баланс"),
+            types.BotCommand(command="pricing", description="Pricing / Цены"),
+            types.BotCommand(command="history", description="History / История"),
             types.BotCommand(command="info", description="Info / Инфо"),
             types.BotCommand(command="lang", description="Language / Язык"),
             types.BotCommand(command="lang_generate", description="Gen Language / Язык генерации"),
@@ -85,7 +88,10 @@ async def _startup():
             await DP.bot.set_my_commands([
                 types.BotCommand(command="start", description="Начать"),
                 types.BotCommand(command="generate", description="Сгенерировать"),
+                types.BotCommand(command="settings", description="Настройки"),
                 types.BotCommand(command="balance", description="Баланс"),
+                types.BotCommand(command="pricing", description="Цены"),
+                types.BotCommand(command="history", description="История"),
                 types.BotCommand(command="info", description="Инфо"),
                 types.BotCommand(command="lang", description="Язык интерфейса"),
                 types.BotCommand(command="lang_generate", description="Язык генерации"),
@@ -660,6 +666,19 @@ async def list_results():
 @app.get("/results-ui", response_class=HTMLResponse)
 async def results_ui():
     items = await _list_result_files()
+    # Normalize timestamps to 'YYYY-MM-DD HH:MM:SS'
+    for it in items:
+        try:
+            ts = it.get("created_at")
+            if ts:
+                from datetime import datetime as _dt
+                if "T" in ts:
+                    dt = _dt.fromisoformat(ts.replace("Z","+00:00"))
+                else:
+                    dt = _dt.fromisoformat(ts)
+                it["created_at"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
     rows = []
     for it in items:
         if "id" in it and isinstance(it.get("id"), int):
