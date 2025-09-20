@@ -886,7 +886,8 @@ def create_dispatcher() -> Dispatcher:
                 prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
 
-    @dp.message_handler(commands=["cancel"])  # type: ignore
+    @dp.message_handler(lambda m: (m.text or "").strip().lower() in {"cancel","отмена"}, state="*")  # type: ignore
+    @dp.message_handler(commands=["cancel"], state="*")  # type: ignore
     async def cmd_cancel(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
@@ -914,6 +915,11 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             await state.finish()
         await message.answer(done, reply_markup=ReplyKeyboardRemove())
+        # Optional gentle hint to avoid user confusion
+        try:
+            await message.answer(("Окей. Можете отправить новую команду (например, /generate)." if _is_ru(ui_lang) else "Okay. You can send a new command (e.g., /generate)."))
+        except Exception:
+            pass
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"))  # type: ignore
     async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
@@ -1737,7 +1743,7 @@ def create_dispatcher() -> Dispatcher:
         await state.finish()
         RUNNING_CHATS.discard(chat_id)
 
-    @dp.callback_query_handler(lambda c: c.data in {"confirm:charge:yes","confirm:charge:no"})  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data in {"confirm:charge:yes","confirm:charge:no"}, state="*")  # type: ignore
     async def cb_confirm_charge(query: types.CallbackQuery, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
