@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Interactive generator for a series of popular science posts.
+Interactive generator for a series of popular science posts (post series).
 Saves results to output/post_series/ by default.
 """
 import os
@@ -24,7 +24,7 @@ def ensure_project_root_on_syspath() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate a series of popular science posts")
+    parser = argparse.ArgumentParser(description="Generate a series of popular science posts (series)")
     parser.add_argument("--topic", type=str, default="", help="Topic to generate about")
     parser.add_argument("--lang", type=str, default="auto", help="Language: auto|ru|en")
     parser.add_argument("--provider", type=str, default="openai", help="LLM provider: openai|gemini|claude")
@@ -65,7 +65,7 @@ def main() -> None:
             factcheck=bool(args.factcheck),
             research_iterations=args.research_iterations,
             refine=bool(args.refine),
-            job_meta={"source": "cli", "script": "popular_science_series.py"},
+            job_meta={"source": "cli", "script": "popular_science_series_post.py"},
         )
         print(f"💾 Сохранено: {path}")
         print("✅ Готово.")
@@ -75,5 +75,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 
 
