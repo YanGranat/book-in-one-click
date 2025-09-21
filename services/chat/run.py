@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 from typing import Optional
 
 
@@ -16,6 +17,7 @@ def _try_import_sdk():
 
 
 def _run_openai_with(system: str, user_message: str, model_name: Optional[str] = None) -> str:
+    _ensure_loop()
     Agent, Runner = _try_import_sdk()
     # Try add WebSearchTool for browsing capability
     tools = []
@@ -35,6 +37,7 @@ def _run_openai_with(system: str, user_message: str, model_name: Optional[str] =
 
 
 def _run_gemini_with(system: str, user_message: str, model_name: Optional[str] = None) -> str:
+    _ensure_loop()
     import google.generativeai as genai  # type: ignore
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
@@ -71,6 +74,7 @@ def _run_gemini_with(system: str, user_message: str, model_name: Optional[str] =
 
 
 def _run_claude_with(system: str, user_message: str, model_name: Optional[str] = None) -> str:
+    _ensure_loop()
     import anthropic  # type: ignore
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     preferred = model_name or os.getenv("ANTHROPIC_MODEL", "claude-3-7-sonnet-latest")
@@ -102,6 +106,7 @@ def _run_claude_with(system: str, user_message: str, model_name: Optional[str] =
 
 
 def run_chat_message(provider: str, system: str, user_message: str) -> str:
+    _ensure_loop()
     prov = (provider or "openai").strip().lower()
     if prov == "openai":
         model = os.getenv("OPENAI_MODEL", "gpt-5")
@@ -134,5 +139,18 @@ def build_system_prompt(*, chat_lang: str, kind: str, full_content: str) -> str:
         "=== LAST_GENERATION END ===",
     ]
     return base + "\n" + "\n".join(ctx)
+
+
+def _ensure_loop() -> None:
+    try:
+        # If there's already a running loop in this thread, do nothing
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # Create and set a new event loop for this background thread
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        except Exception:
+            pass
 
 
