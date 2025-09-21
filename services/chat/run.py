@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 import asyncio
 import re
-from typing import Optional
+from typing import Optional, List, Dict, Any, Tuple
+from pathlib import Path
 
 
 def _try_import_sdk():
@@ -17,10 +18,76 @@ def _try_import_sdk():
         ) from e
 
 
-def _run_openai_with(system: str, user_message: str, model_name: Optional[str] = None) -> str:
+def _ensure_sessions_db() -> Path:
+    """Ensure sessions DB path exists and return it."""
+    base = Path(__file__).resolve().parents[2] / "output"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return base / "sessions.db"
+
+
+def _parse_session_id(session_id: Optional[str]) -> Tuple[int, int, str]:
+    """Parse "<chat_id>:<user_id>:<provider>" → tuple; fallback safe defaults."""
+    try:
+        if not session_id:
+            return (0, 0, "openai")
+        parts = str(session_id).split(":", 2)
+        chat_id = int(parts[0]) if len(parts) >= 1 and parts[0].isdigit() else 0
+        user_id = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 0
+        provider = (parts[2] if len(parts) >= 3 else "openai").strip().lower()
+        return (chat_id, user_id, provider or "openai")
+    except Exception:
+        return (0, 0, "openai")
+
+
+def _kv_get_history(telegram_id: int, chat_id: int, provider: str, limit: int = 200) -> List[Dict[str, str]]:
+    try:
+        from server.kv import chat_get  # type: ignore
+    except Exception:
+        return []
+    try:
+        import asyncio as _aio
+        loop = None
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            # We may be on a worker thread without running loop; create one temporarily
+            return _aio.run(chat_get(telegram_id, chat_id, provider, limit=limit))  # type: ignore
+        else:
+            return _aio.run(chat_get(telegram_id, chat_id, provider, limit=limit))  # type: ignore
+    except Exception:
+        return []
+
+
+def _kv_append(telegram_id: int, chat_id: int, provider: str, role: str, content: str) -> None:
+    try:
+        from server.kv import chat_append  # type: ignore
+    except Exception:
+        return
+    try:
+        import asyncio as _aio
+        loop = None
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            # Fire-and-forget on background loop
+            _aio.get_event_loop().create_task(chat_append(telegram_id, chat_id, provider, role, content))  # type: ignore
+        else:
+            _aio.run(chat_append(telegram_id, chat_id, provider, role, content))  # type: ignore
+    except Exception:
+        return
+
+
+def _run_openai_with(system: str, user_message: str, *, model_name: Optional[str] = None, session_id: Optional[str] = None) -> str:
     _ensure_loop()
     Agent, Runner = _try_import_sdk()
-    # Try add WebSearchTool for browsing capability
+    # Optional web search tool (native)
     tools = []
     try:
         from agents import WebSearchTool  # type: ignore
@@ -33,11 +100,20 @@ def _run_openai_with(system: str, user_message: str, model_name: Optional[str] =
         model=(model_name or os.getenv("OPENAI_MODEL", "gpt-5")),
         tools=tools,
     )
-    res = Runner.run_sync(agent, user_message)
+    # Prefer native session memory for OpenAI
+    session = None
+    if session_id:
+        try:
+            from agents import SQLiteSession  # type: ignore
+            sessions_db = _ensure_sessions_db()
+            session = SQLiteSession(str(session_id), str(sessions_db))
+        except Exception:
+            session = None
+    res = Runner.run_sync(agent, user_message, session=session)
     return getattr(res, "final_output", "")
 
 
-def _run_gemini_with(system: str, user_message: str, model_name: Optional[str] = None) -> str:
+def _run_gemini_with(system: str, user_message: str, *, model_name: Optional[str] = None, session_id: Optional[str] = None) -> str:
     _ensure_loop()
     import google.generativeai as genai  # type: ignore
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
@@ -51,17 +127,26 @@ def _run_gemini_with(system: str, user_message: str, model_name: Optional[str] =
     last_err = None
     for mname in fallbacks:
         try:
-            # Enable Google Search grounding if available via 'tools'
+            # Attempt to start a chat session using provider-native chat if possible
+            # Note: Python SDK supports start_chat(history=[...])
             tools = []
-            try:
-                from google.generativeai import types as gen_types  # type: ignore
-                # Some SDKs expose grounding with a special tool; if not, leave empty
-                # Placeholder for future: tools=[gen_types.Tool(google_search=gen_types.GoogleSearch())]
-                tools = []
-            except Exception:
-                tools = []
             model = genai.GenerativeModel(model_name=mname, system_instruction=system, tools=tools)
-            resp = model.generate_content(user_message)
+            chat = None
+            history_msgs: List[Dict[str, str]] = []
+            c_id, u_id, prov = _parse_session_id(session_id)
+            if c_id and u_id:
+                history_msgs = _kv_get_history(u_id, c_id, prov, limit=200)
+            # Convert KV history to Gemini parts
+            ghistory = []
+            for it in history_msgs[-60:]:
+                role = (it.get("role") or "user").lower()
+                text = it.get("content") or ""
+                ghistory.append({"role": ("user" if role == "user" else "model"), "parts": [text]})
+            if ghistory:
+                chat = model.start_chat(history=ghistory)
+                resp = chat.send_message(user_message)
+            else:
+                resp = model.generate_content(user_message)
             txt = (getattr(resp, "text", None) or "").strip()
             if not txt:
                 parts = []
@@ -74,6 +159,12 @@ def _run_gemini_with(system: str, user_message: str, model_name: Optional[str] =
                 except Exception:
                     pass
                 txt = ("\n".join(parts)).strip()
+            # Append to KV fallback history
+            if session_id:
+                c_id, u_id, prov = _parse_session_id(session_id)
+                if c_id and u_id:
+                    _kv_append(u_id, c_id, prov, "user", user_message)
+                    _kv_append(u_id, c_id, prov, "assistant", txt)
             return txt
         except Exception as e:
             last_err = e
@@ -81,7 +172,7 @@ def _run_gemini_with(system: str, user_message: str, model_name: Optional[str] =
     raise RuntimeError(f"Gemini request failed; last error: {last_err}")
 
 
-def _run_claude_with(system: str, user_message: str, model_name: Optional[str] = None) -> str:
+def _run_claude_with(system: str, user_message: str, *, model_name: Optional[str] = None, session_id: Optional[str] = None) -> str:
     _ensure_loop()
     import anthropic  # type: ignore
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -93,38 +184,41 @@ def _run_claude_with(system: str, user_message: str, model_name: Optional[str] =
     last_err = None
     for mname in fallbacks:
         try:
-            # Prepare a minimal tool schema for web_search; the tool execution handled by pre-built context above
-            tools = [
-                {
-                    "name": "web_search",
-                    "description": "Search the web and return brief results for grounding.",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
-                    },
-                }
-            ]
+            # Prefer simple message flow without tools to avoid unhandled tool_use
+            # Build message list using KV fallback history as conversation
+            history: List[Dict[str, Any]] = []
+            c_id, u_id, prov = _parse_session_id(session_id)
+            if c_id and u_id:
+                for it in _kv_get_history(u_id, c_id, prov, limit=200)[-60:]:
+                    role = (it.get("role") or "user").lower()
+                    text = it.get("content") or ""
+                    history.append({"role": ("user" if role == "user" else "assistant"), "content": text})
+            history.append({"role": "user", "content": user_message})
             msg = client.messages.create(
                 model=mname,
                 max_tokens=4096,
                 system=system,
-                messages=[{"role": "user", "content": user_message}],
-                tools=tools,
+                messages=history,
             )
             parts = []
             for blk in getattr(msg, "content", []) or []:
                 txt = getattr(blk, "text", None)
                 if txt:
                     parts.append(txt)
-            return ("\n\n".join(parts)).strip()
+            out = ("\n\n".join(parts)).strip()
+            if session_id:
+                c_id, u_id, prov = _parse_session_id(session_id)
+                if c_id and u_id:
+                    _kv_append(u_id, c_id, prov, "user", user_message)
+                    _kv_append(u_id, c_id, prov, "assistant", out)
+            return out
         except Exception as e:
             last_err = e
             continue
     raise RuntimeError(f"Claude request failed; last error: {last_err}")
 
 
-def run_chat_message(provider: str, system: str, user_message: str) -> str:
+def run_chat_message(provider: str, system: str, user_message: str, *, session_id: str | None = None) -> str:
     _ensure_loop()
     prov = (provider or "openai").strip().lower()
     # Augment with web context for non-OpenAI providers too (and as fallback for all)
@@ -137,14 +231,29 @@ def run_chat_message(provider: str, system: str, user_message: str) -> str:
         pass
     if prov == "openai":
         model = os.getenv("OPENAI_MODEL", "gpt-5")
-        return _run_openai_with(system, user_message, model)
+        # Also push to KV for cross-provider continuity
+        try:
+            c_id, u_id, p = _parse_session_id(session_id)
+            if c_id and u_id:
+                # Append user before call; assistant after
+                _kv_append(u_id, c_id, p, "user", user_message)
+        except Exception:
+            pass
+        reply = _run_openai_with(system, user_message, model_name=model, session_id=session_id)
+        try:
+            c_id, u_id, p = _parse_session_id(session_id)
+            if c_id and u_id:
+                _kv_append(u_id, c_id, p, "assistant", reply)
+        except Exception:
+            pass
+        return reply
     if prov in {"gemini", "google"}:
         # Support both Pro and Flash via ENV
         mname = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        return _run_gemini_with(system, user_message, mname)
+        return _run_gemini_with(system, user_message, model_name=mname, session_id=session_id)
     # default to Claude (Claude 4 by default if configured)
     cname = os.getenv("ANTHROPIC_MODEL", "claude-4-sonnet-latest")
-    return _run_claude_with(system, user_message, cname)
+    return _run_claude_with(system, user_message, model_name=cname, session_id=session_id)
 
 
 def build_system_prompt(*, chat_lang: str, kind: str, full_content: str) -> str:

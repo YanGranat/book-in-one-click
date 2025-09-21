@@ -2502,7 +2502,8 @@ def create_dispatcher() -> Dispatcher:
             system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=full_content)
             import asyncio as _aio
             _loop = _aio.get_running_loop()
-            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, user_payload))
+            sid = f"{message.chat.id}:{message.from_user.id}:{prov}"
+            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, user_payload, session_id=sid))
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
             return
@@ -2663,7 +2664,8 @@ def create_dispatcher() -> Dispatcher:
             system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=(content or ""))
             import asyncio as _aio
             _loop = _aio.get_running_loop()
-            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, txt))
+            sid = f"{message.chat.id}:{message.from_user.id}:{prov}"
+            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, txt, session_id=sid))
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
             return

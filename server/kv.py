@@ -93,6 +93,54 @@ async def get_history_cleared_at(telegram_id: int) -> Optional[float]:
         val = await r.get(key)
         if val is None:
             return None
+
+
+# ---- Chat session history (provider-agnostic) ----
+
+def _chat_key(telegram_id: int, chat_id: int, provider: str) -> str:
+    return f"{kv_prefix()}:chat:{int(telegram_id)}:{int(chat_id)}:{(provider or 'openai').strip().lower()}"
+
+
+async def chat_append(telegram_id: int, chat_id: int, provider: str, role: str, content: str, *, max_items: int = 200) -> None:
+    r = get_redis()
+    key = _chat_key(telegram_id, chat_id, provider)
+    try:
+        item = {"role": (role or "user"), "content": content or ""}
+        import json as _json
+        await r.rpush(key, _json.dumps(item, ensure_ascii=False))
+        await r.ltrim(key, max(-1, -int(max_items)), -1)
+        await r.expire(key, 60 * 60 * 24 * 30)
+    except Exception:
+        pass
+
+
+async def chat_get(telegram_id: int, chat_id: int, provider: str, *, limit: int = 200) -> List[Dict[str, Any]]:
+    r = get_redis()
+    key = _chat_key(telegram_id, chat_id, provider)
+    out: List[Dict[str, Any]] = []
+    try:
+        vals = await r.lrange(key, max(0, -int(limit)), -1)
+        for v in vals or []:
+            try:
+                s = v.decode("utf-8") if isinstance(v, (bytes, bytearray)) else str(v)
+                import json as _json
+                obj = _json.loads(s)
+                if isinstance(obj, dict) and (obj.get("role") and obj.get("content") is not None):
+                    out.append({"role": str(obj.get("role")), "content": str(obj.get("content"))})
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return out
+
+
+async def chat_clear(telegram_id: int, chat_id: int, provider: str) -> None:
+    r = get_redis()
+    key = _chat_key(telegram_id, chat_id, provider)
+    try:
+        await r.delete(key)
+    except Exception:
+        pass
         try:
             sval = val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val)
         except Exception:
