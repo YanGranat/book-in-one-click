@@ -233,15 +233,27 @@ def _run_claude_with(system: str, user_message: str, *, model_name: Optional[str
 
             used_tool = False
             tool_query = None
+            tool_use_id = None
+            tool_input_obj: Dict[str, Any] | None = None
             for blk in getattr(msg, "content", []) or []:
                 if getattr(blk, "type", "") == "tool_use" and getattr(blk, "name", "") == "web_search":
                     used_tool = True
-                    # Capture query if available
                     try:
-                        tool_query = getattr(blk, "input", {}).get("query")  # type: ignore
+                        tool_use_id = getattr(blk, "id", None)
                     except Exception:
+                        tool_use_id = None
+                    # Capture input as dict
+                    try:
+                        tool_input_obj = getattr(blk, "input", None)
+                        if isinstance(tool_input_obj, dict):
+                            tool_query = tool_input_obj.get("query")
+                        else:
+                            tool_query = None
+                    except Exception:
+                        tool_input_obj = None
                         tool_query = None
-            if used_tool:
+
+            if used_tool and tool_use_id:
                 # Build web context once and send as tool_result
                 web_ctx = ""
                 try:
@@ -249,16 +261,29 @@ def _run_claude_with(system: str, user_message: str, *, model_name: Optional[str
                     web_ctx = _build_web_context(q)
                 except Exception:
                     web_ctx = ""
-                tool_result = [{
+                assistant_tool = {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": "web_search",
+                        "input": tool_input_obj or ({"query": tool_query} if tool_query else {}),
+                    }],
+                }
+                tool_result = {
                     "role": "tool",
                     "name": "web_search",
-                    "content": web_ctx or "",
-                }]
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": [{"type": "text", "text": web_ctx or ""}],
+                    }],
+                }
                 msg2 = client.messages.create(
                     model=mname,
                     max_tokens=4096,
                     system=system,
-                    messages=history + tool_result,  # continue conversation providing tool output
+                    messages=history + [assistant_tool, tool_result],
                 )
                 out = _extract_text(msg2)
             else:
