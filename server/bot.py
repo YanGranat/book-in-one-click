@@ -25,6 +25,8 @@ from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, 
 from .kv import set_gen_lang, get_gen_lang
 from .kv import set_refine_enabled, get_refine_enabled
 from .kv import push_history, get_history, clear_history, rate_allow
+# Chat runner
+from services.chat.run import run_chat_message, build_system_prompt
 # Fact-check settings (KV). Use robust import with fallbacks for older deployments
 try:
     from .kv import (
@@ -104,6 +106,10 @@ class GenerateStates(StatesGroup):
     ChoosingGenType = State()
     ChoosingSeriesPreset = State()
     ChoosingSeriesCount = State()
+
+
+class ChatStates(StatesGroup):
+    Active = State()
 
 
 def _is_ru(ui_lang: str) -> bool:
@@ -270,6 +276,37 @@ def create_dispatcher() -> Dispatcher:
             "Выберите язык интерфейса / Choose interface language:",
             reply_markup=build_ui_lang_inline(),
         )
+
+        # Update command menu: add /chat only for admins in their private chat
+        try:
+            if message.from_user and message.chat and message.chat.type == "private":
+                is_admin = message.from_user.id in ADMIN_IDS
+                base_cmds = [
+                    types.BotCommand(command="start", description="Начать"),
+                    types.BotCommand(command="generate", description="Сгенерировать"),
+                    types.BotCommand(command="settings", description="Настройки"),
+                    types.BotCommand(command="balance", description="Баланс"),
+                    types.BotCommand(command="pricing", description="Цены"),
+                    types.BotCommand(command="history", description="История"),
+                    types.BotCommand(command="info", description="Инфо"),
+                    types.BotCommand(command="cancel", description="Отмена"),
+                ]
+                if is_admin:
+                    admin_cmds = base_cmds + [
+                        types.BotCommand(command="chat", description="Чат с ИИ"),
+                        types.BotCommand(command="endchat", description="Завершить чат"),
+                    ]
+                    try:
+                        await dp.bot.set_my_commands(admin_cmds, scope=types.BotCommandScopeChat(message.chat.id))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        await dp.bot.set_my_commands(base_cmds, scope=types.BotCommandScopeChat(message.chat.id))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     @dp.message_handler(commands=["info"])  # type: ignore
     async def cmd_info(message: types.Message, state: FSMContext):
@@ -2085,10 +2122,11 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 url = ""
             tag = {"post":"post","post_series":"series","article":"article","summary":"summary"}.get(kind, kind or "result")
+            idtxt = f" [id: {int(it.get('id'))}]" if it.get("id") else ""
             if url:
-                lines.append(f"• [{tag}] <a href='{url}'>{topic}</a>")
+                lines.append(f"• [{tag}] <a href='{url}'>{topic}</a>{idtxt}")
             else:
-                lines.append(f"• [{tag}] {topic}")
+                lines.append(f"• [{tag}] {topic}{idtxt}")
         prefix = "История генераций (последние):\n" if _is_ru(ui_lang) else "Your recent generations:\n"
         # Inline clear button for clarity
         kb = types.InlineKeyboardMarkup()
@@ -2248,6 +2286,180 @@ def create_dispatcher() -> Dispatcher:
             await message.answer("Спасибо! Кредиты начислены." if _is_ru(ui_lang) else "Thank you! Credits added.")
         except Exception:
             pass
+
+    # ---- Chat mode ----
+    @dp.message_handler(commands=["chat"])  # type: ignore
+    async def cmd_chat(message: types.Message, state: FSMContext):
+        if not message.from_user or message.from_user.id not in ADMIN_IDS:
+            await message.answer("Недоступно.")
+            return
+        # Parse args
+        parts = (message.text or "").strip().split()
+        req_id = None
+        if len(parts) >= 2:
+            if parts[1].lower() == "id" and len(parts) >= 3 and parts[2].isdigit():
+                req_id = int(parts[2])
+            elif parts[1].isdigit():
+                req_id = int(parts[1])
+        # Resolve context strictly from DB
+        content = None
+        kind = "result"
+        src_id = None
+        if SessionLocal is None:
+            await message.answer("БД недоступна.")
+            return
+        try:
+            from sqlalchemy import select
+            async with SessionLocal() as s:
+                from .db import ResultDoc, Job, User
+                # Determine current admin's DB uid
+                db_uid = None
+                try:
+                    uq = await s.execute(select(User).where(User.telegram_id == int(message.from_user.id)))
+                    urow = uq.scalars().first()
+                    if urow is not None:
+                        db_uid = int(urow.id)
+                except Exception:
+                    db_uid = None
+                if req_id is not None:
+                    q = await s.execute(
+                        select(ResultDoc, Job.user_id)
+                        .select_from(ResultDoc.__table__.join(Job.__table__, ResultDoc.job_id == Job.id))
+                        .where(ResultDoc.id == int(req_id))
+                    )
+                    row = q.first()
+                    if not row:
+                        await message.answer("Результат не найден.")
+                        return
+                    rdoc, owner_uid = row
+                    if db_uid is not None and int(owner_uid) != db_uid and int(owner_uid) != int(message.from_user.id):
+                        await message.answer("Доступ запрещён.")
+                        return
+                    content = getattr(rdoc, "content", None)
+                    kind = getattr(rdoc, "kind", "result") or "result"
+                    src_id = int(getattr(rdoc, "id", 0) or 0)
+                else:
+                    # last result for this admin
+                    from sqlalchemy import or_ as _or
+                    cond = (Job.user_id == int(message.from_user.id))
+                    if db_uid is not None:
+                        cond = _or(cond, Job.user_id == db_uid)
+                    q = await s.execute(
+                        select(ResultDoc, Job.user_id)
+                        .select_from(ResultDoc.__table__.join(Job.__table__, ResultDoc.job_id == Job.id))
+                        .where(cond)
+                        .order_by(ResultDoc.created_at.desc())
+                        .limit(1)
+                    )
+                    row = q.first()
+                    if not row:
+                        await message.answer("Нет результатов для контекста чата.")
+                        return
+                    rdoc, _ = row
+                    content = getattr(rdoc, "content", None)
+                    kind = getattr(rdoc, "kind", "result") or "result"
+                    src_id = int(getattr(rdoc, "id", 0) or 0)
+        except Exception:
+            await message.answer("Ошибка при получении контекста.")
+            return
+
+        await state.update_data(chat_context={
+            "kind": kind,
+            "content": content or "",
+            "result_id": src_id,
+        })
+        await ChatStates.Active.set()
+        await message.answer((f"Чат активирован. Источник: id {src_id}" if src_id else "Чат активирован"))
+
+    @dp.message_handler(commands=["endchat"], state=ChatStates.Active)  # type: ignore
+    async def cmd_endchat(message: types.Message, state: FSMContext):
+        await state.finish()
+        await message.answer("Чат завершён.")
+
+    @dp.message_handler(state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
+    async def chat_active_message(message: types.Message, state: FSMContext):
+        if (message.text or "").strip().startswith("/"):
+            await state.finish()
+            await message.answer("Чат завершён.")
+            return
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ctx = data.get("chat_context") or {}
+        kind = (ctx.get("kind") or "result")
+        full_content = (ctx.get("content") or "")
+        # Detect language from user input or UI
+        try:
+            det = (detect_lang_from_text(message.text or "") or "").lower()
+            chat_lang = "en" if det.startswith("en") else ("ru" if _is_ru(ui_lang) else "en")
+        except Exception:
+            chat_lang = "ru" if _is_ru(ui_lang) else "en"
+        # Keep short rolling history in state for better coherence
+        history = (data.get("chat_history") or [])
+        # Construct compact user_message: include last turns
+        def _format_history(items):
+            out = []
+            for role, content in items[-6:]:
+                out.append(f"[{role}] {content}")
+            return "\n".join(out)
+        user_payload = ("\n\n" + _format_history(history) + "\n\n[user] " + (message.text or "")).strip()
+        try:
+            prov = "openai"
+            if message.from_user:
+                try:
+                    prov = await get_provider(message.from_user.id)
+                except Exception:
+                    prov = "openai"
+            system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=full_content)
+            reply = run_chat_message(prov, system, user_payload)
+        except Exception as e:
+            await message.answer(f"Ошибка: {e}")
+            return
+        text = (reply or "").strip()
+        # md_output wrapper -> send file
+        import re
+        m = re.search(r"<md_output([^>]*)>([\s\S]*?)</md_output>", text)
+        if m:
+            attrs = m.group(1) or ""
+            body = m.group(2) or ""
+            from io import BytesIO
+            doc = body if body.endswith("\n") else (body + "\n")
+            buf = BytesIO(doc.encode("utf-8"))
+            title = None
+            mt = re.search(r"title=\"([^\"]+)\"", attrs)
+            if mt:
+                title = mt.group(1)
+            fname = safe_filename_base(title) if title else "result"
+            buf.name = f"{fname}.md"
+            await message.answer_document(buf, caption=("Готово" if _is_ru(ui_lang) else "Done"))
+            return
+        # Otherwise chunked messages
+        def _chunks(s: str, limit: int = 4000):
+            parts, buf = [], []
+            for para in (s or "").split("\n\n"):
+                cur = ("\n\n".join(buf) if buf else "")
+                if len(cur) + (2 if cur else 0) + len(para) <= limit:
+                    buf.append(para)
+                else:
+                    if buf:
+                        parts.append("\n\n".join(buf))
+                        buf = []
+                    if len(para) <= limit:
+                        buf = [para]
+                    else:
+                        for i in range(0, len(para), limit):
+                            parts.append(para[i:i+limit])
+            if buf:
+                parts.append("\n\n".join(buf))
+            return parts
+        # Update history
+        try:
+            history.append(("user", message.text or ""))
+            history.append(("assistant", text))
+            await state.update_data(chat_history=history)
+        except Exception:
+            pass
+        for chunk in _chunks(text):
+            await message.answer(chunk)
 
     return dp
 

@@ -27,3 +27,14 @@ Simple smoke test behavior:
 - Saves to `output/simple_test/`
 - Filenames: `<тема>_test.md`, with auto-increment (`_2`, `_3`, …) if a file exists
 - Writes only the generated content (no headers/metadata)
+
+4) Telegram-style chat (console)
+```
+venv\Scripts\python.exe scripts\chat_telegram.py --lang ru
+venv\Scripts\python.exe scripts\chat_telegram.py --lang ru --context-id 123
+venv\Scripts\python.exe scripts\chat_telegram.py --lang en --save-md
+```
+Flags:
+- `--lang` — ru|en|auto (по умолчанию auto — определяется по первому вводу)
+- `--context-id` — id результата (`ResultDoc.id`) для обсуждения предыдущей генерации (полный текст подаётся в контекст)
+- `--save-md` — принудительно сохранить ответ в `.md`, если модель не вернула `<md_output>`
