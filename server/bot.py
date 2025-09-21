@@ -2461,6 +2461,166 @@ def create_dispatcher() -> Dispatcher:
         for chunk in _chunks(text):
             await message.answer(chunk)
 
+    # ---- Auto-chat entry for admins on plain text (no command) ----
+    @dp.message_handler(content_types=types.ContentTypes.TEXT, state="*")  # type: ignore
+    async def auto_chat_entry(message: types.Message, state: FSMContext):
+        txt = (message.text or "").strip()
+        # Ignore commands or empty
+        if not txt or txt.startswith("/"):
+            return
+        # Admins only and private chat only
+        if not message.from_user or message.from_user.id not in ADMIN_IDS:
+            return
+        try:
+            if message.chat and getattr(message.chat, "type", "") != "private":
+                return
+        except Exception:
+            pass
+        # Do not interfere with generation/topic states or active chat
+        try:
+            cur = await state.get_state()
+        except Exception:
+            cur = None
+        try:
+            if cur in {GenerateStates.WaitingTopic.state}:
+                return
+        except Exception:
+            pass
+        try:
+            if cur == ChatStates.Active.state:
+                return
+        except Exception:
+            pass
+
+        # Resolve last result for this admin
+        content = None
+        kind = "result"
+        src_id = None
+        if SessionLocal is None:
+            return
+        try:
+            from sqlalchemy import select
+            async with SessionLocal() as s:
+                from .db import ResultDoc, Job, User
+                db_uid = None
+                try:
+                    uq = await s.execute(select(User).where(User.telegram_id == int(message.from_user.id)))
+                    urow = uq.scalars().first()
+                    if urow is not None:
+                        db_uid = int(urow.id)
+                except Exception:
+                    db_uid = None
+                from sqlalchemy import or_ as _or
+                cond = (Job.user_id == int(message.from_user.id))
+                if db_uid is not None:
+                    cond = _or(cond, Job.user_id == db_uid)
+                q = await s.execute(
+                    select(ResultDoc, Job.user_id)
+                    .select_from(ResultDoc.__table__.join(Job.__table__, ResultDoc.job_id == Job.id))
+                    .where(cond)
+                    .order_by(ResultDoc.created_at.desc())
+                    .limit(1)
+                )
+                row = q.first()
+                if not row:
+                    await message.answer("Нет результатов для контекста чата. Сначала сгенерируйте пост.")
+                    return
+                rdoc, _ = row
+                content = getattr(rdoc, "content", None)
+                kind = getattr(rdoc, "kind", "result") or "result"
+                src_id = int(getattr(rdoc, "id", 0) or 0)
+        except Exception:
+            return
+
+        # Initialize chat state and context
+        await state.update_data(chat_context={
+            "kind": kind,
+            "content": content or "",
+            "result_id": src_id,
+            "chat_history": [],
+        })
+        await ChatStates.Active.set()
+
+        # Detect language
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        try:
+            det = (detect_lang_from_text(txt) or "").lower()
+            chat_lang = "en" if det.startswith("en") else ("ru" if _is_ru(ui_lang) else "en")
+        except Exception:
+            chat_lang = "ru" if _is_ru(ui_lang) else "en"
+
+        # Prepare payload (no prior history yet)
+        try:
+            prov = "openai"
+            if message.from_user:
+                try:
+                    prov = await get_provider(message.from_user.id)
+                except Exception:
+                    prov = "openai"
+            system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=(content or ""))
+            reply = run_chat_message(prov, system, txt)
+        except Exception as e:
+            await message.answer(f"Ошибка: {e}")
+            return
+
+        # Send result (md_output or chunks) and store history
+        text = (reply or "").strip()
+        import re
+        m = re.search(r"<md_output([^>]*)>([\s\S]*?)</md_output>", text)
+        if m:
+            attrs = m.group(1) or ""
+            body = m.group(2) or ""
+            from io import BytesIO
+            doc = body if body.endswith("\n") else (body + "\n")
+            buf = BytesIO(doc.encode("utf-8"))
+            title = None
+            mt = re.search(r"title=\"([^\"]+)\"", attrs)
+            if mt:
+                title = mt.group(1)
+            fname = safe_filename_base(title) if title else "result"
+            buf.name = f"{fname}.md"
+            await message.answer_document(buf, caption=("Готово" if _is_ru(ui_lang) else "Done"))
+            # Update history
+            try:
+                hist = (data.get("chat_history") or [])
+                hist.append(("user", txt))
+                hist.append(("assistant", body))
+                await state.update_data(chat_history=hist)
+            except Exception:
+                pass
+            return
+
+        # Chunked send
+        def _chunks(s: str, limit: int = 4000):
+            parts, buf = [], []
+            for para in (s or "").split("\n\n"):
+                cur = ("\n\n".join(buf) if buf else "")
+                if len(cur) + (2 if cur else 0) + len(para) <= limit:
+                    buf.append(para)
+                else:
+                    if buf:
+                        parts.append("\n\n".join(buf))
+                        buf = []
+                    if len(para) <= limit:
+                        buf = [para]
+                    else:
+                        for i in range(0, len(para), limit):
+                            parts.append(para[i:i+limit])
+            if buf:
+                parts.append("\n\n".join(buf))
+            return parts
+
+        for chunk in _chunks(text):
+            await message.answer(chunk)
+        try:
+            hist = (data.get("chat_history") or [])
+            hist.append(("user", txt))
+            hist.append(("assistant", text))
+            await state.update_data(chat_history=hist)
+        except Exception:
+            pass
+
     return dp
 
 
