@@ -7,6 +7,9 @@ import re
 from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 
+# In-memory caches for provider-native sessions (process-lifetime)
+_GEMINI_CHAT_CACHE: Dict[str, Any] = {}
+
 
 def _try_import_sdk():
     try:
@@ -146,11 +149,21 @@ def _run_gemini_with(system: str, user_message: str, *, model_name: Optional[str
                 role = (it.get("role") or "user").lower()
                 text = it.get("content") or ""
                 ghistory.append({"role": ("user" if role == "user" else "model"), "parts": [text]})
-            if ghistory:
-                chat = model.start_chat(history=ghistory)
-                resp = chat.send_message(user_message)
-            else:
-                resp = model.generate_content(user_message)
+            cache_key = f"{session_id or ''}:{mname}"
+            if cache_key in _GEMINI_CHAT_CACHE:
+                try:
+                    chat = _GEMINI_CHAT_CACHE[cache_key]
+                except Exception:
+                    chat = None
+            if chat is None:
+                # Initialize chat with history (if any) and cache it
+                if ghistory:
+                    chat = model.start_chat(history=ghistory)
+                else:
+                    chat = model.start_chat()
+                _GEMINI_CHAT_CACHE[cache_key] = chat
+            # Reuse the same native chat session for this turn
+            resp = chat.send_message(user_message)
             txt = (getattr(resp, "text", None) or "").strip()
             if not txt:
                 parts = []
