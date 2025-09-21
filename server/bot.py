@@ -2409,10 +2409,31 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def chat_active_message(message: types.Message, state: FSMContext):
-        if (message.text or "").strip().startswith("/"):
-            await state.finish()
-            await message.answer("Чат завершён.")
+        # For any command: silently finish chat state and let command handlers run
+        txt = (message.text or "").strip()
+        if txt.startswith("/"):
+            # Allow explicit /endchat handler to finish and notify
+            try:
+                cmd = txt.split()[0].lower()
+            except Exception:
+                cmd = "/"
+            if cmd.startswith("/endchat"):
+                return
+            # For any other command: silently finish chat and let command handlers run
+            try:
+                await state.finish()
+            except Exception:
+                pass
             return
+        # Deduplicate: avoid processing the same message twice (webhook retries)
+        try:
+            sd = await state.get_data()
+            last_id = int(sd.get("last_handled_message_id") or 0)
+            if last_id == int(message.message_id):
+                return
+            await state.update_data(last_handled_message_id=int(message.message_id))
+        except Exception:
+            pass
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         ctx = data.get("chat_context") or {}
@@ -2501,6 +2522,15 @@ def create_dispatcher() -> Dispatcher:
         # Ignore commands or empty
         if not txt or txt.startswith("/"):
             return
+        # Deduplicate: avoid processing the same message twice (webhook retries)
+        try:
+            sd = await state.get_data()
+            last_id = int(sd.get("last_handled_message_id") or 0)
+            if last_id == int(message.message_id):
+                return
+            await state.update_data(last_handled_message_id=int(message.message_id))
+        except Exception:
+            pass
         # Admins only and private chat only
         if not message.from_user or message.from_user.id not in ADMIN_IDS:
             return
