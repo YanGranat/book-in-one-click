@@ -277,34 +277,65 @@ def create_dispatcher() -> Dispatcher:
             reply_markup=build_ui_lang_inline(),
         )
 
-        # Update command menu: add /chat only for admins in their private chat
+        # Update command menu: full set in private chat; add /chat only for admins
         try:
             if message.from_user and message.chat and message.chat.type == "private":
                 is_admin = message.from_user.id in ADMIN_IDS
-                base_cmds = [
-                    types.BotCommand(command="start", description="Начать"),
-                    types.BotCommand(command="generate", description="Сгенерировать"),
-                    types.BotCommand(command="settings", description="Настройки"),
-                    types.BotCommand(command="balance", description="Баланс"),
-                    types.BotCommand(command="pricing", description="Цены"),
-                    types.BotCommand(command="history", description="История"),
-                    types.BotCommand(command="info", description="Инфо"),
-                    types.BotCommand(command="cancel", description="Отмена"),
+                # RU set
+                base_ru = [
+                    types.BotCommand("start", "Начать"),
+                    types.BotCommand("generate", "Сгенерировать"),
+                    types.BotCommand("settings", "Настройки"),
+                    types.BotCommand("balance", "Баланс"),
+                    types.BotCommand("pricing", "Цены"),
+                    types.BotCommand("history", "История"),
+                    types.BotCommand("info", "Инфо"),
+                    types.BotCommand("lang", "Язык интерфейса"),
+                    types.BotCommand("lang_generate", "Язык генерации"),
+                    types.BotCommand("provider", "Провайдер"),
+                    types.BotCommand("logs", "Логи генерации"),
+                    types.BotCommand("incognito", "Инкогнито"),
+                    types.BotCommand("factcheck", "Факт-чекинг"),
+                    types.BotCommand("depth", "Глубина"),
+                    types.BotCommand("refine", "Финальная редактура"),
+                    types.BotCommand("cancel", "Отмена"),
+                ]
+                # EN set
+                base_en = [
+                    types.BotCommand("start", "Start"),
+                    types.BotCommand("generate", "Generate"),
+                    types.BotCommand("settings", "Settings"),
+                    types.BotCommand("balance", "Balance"),
+                    types.BotCommand("pricing", "Pricing"),
+                    types.BotCommand("history", "History"),
+                    types.BotCommand("info", "Info"),
+                    types.BotCommand("lang", "Language"),
+                    types.BotCommand("lang_generate", "Gen language"),
+                    types.BotCommand("provider", "Provider"),
+                    types.BotCommand("logs", "Logs"),
+                    types.BotCommand("incognito", "Incognito"),
+                    types.BotCommand("factcheck", "Fact-check"),
+                    types.BotCommand("depth", "Depth"),
+                    types.BotCommand("refine", "Refine"),
+                    types.BotCommand("cancel", "Cancel"),
                 ]
                 if is_admin:
-                    admin_cmds = base_cmds + [
-                        types.BotCommand(command="chat", description="Чат с ИИ"),
-                        types.BotCommand(command="endchat", description="Завершить чат"),
+                    base_ru = base_ru + [
+                        types.BotCommand("chat", "Чат с ИИ"),
+                        types.BotCommand("endchat", "Завершить чат"),
                     ]
-                    try:
-                        await dp.bot.set_my_commands(admin_cmds, scope=types.BotCommandScopeChat(message.chat.id))
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        await dp.bot.set_my_commands(base_cmds, scope=types.BotCommandScopeChat(message.chat.id))
-                    except Exception:
-                        pass
+                    base_en = base_en + [
+                        types.BotCommand("chat", "Chat with AI"),
+                        types.BotCommand("endchat", "End chat"),
+                    ]
+                try:
+                    await dp.bot.set_my_commands(base_en, scope=types.BotCommandScopeChat(message.chat.id))
+                except Exception:
+                    pass
+                try:
+                    await dp.bot.set_my_commands(base_ru, scope=types.BotCommandScopeChat(message.chat.id), language_code="ru")
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -2410,7 +2441,9 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     prov = "openai"
             system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=full_content)
-            reply = run_chat_message(prov, system, user_payload)
+            import asyncio as _aio
+            _loop = _aio.get_running_loop()
+            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, user_payload))
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
             return
@@ -2559,7 +2592,9 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     prov = "openai"
             system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=(content or ""))
-            reply = run_chat_message(prov, system, txt)
+            import asyncio as _aio
+            _loop = _aio.get_running_loop()
+            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, txt))
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
             return
