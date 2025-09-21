@@ -127,9 +127,13 @@ def _run_gemini_with(system: str, user_message: str, *, model_name: Optional[str
     last_err = None
     for mname in fallbacks:
         try:
-            # Attempt to start a chat session using provider-native chat if possible
-            # Note: Python SDK supports start_chat(history=[...])
+            # Try enabling Google Search grounding if available via safety_settings/tools kwargs
             tools = []
+            try:
+                # Recent SDKs expose tool config via dicts
+                tools = [{"google_search": {}}]
+            except Exception:
+                tools = []
             model = genai.GenerativeModel(model_name=mname, system_instruction=system, tools=tools)
             chat = None
             history_msgs: List[Dict[str, str]] = []
@@ -184,7 +188,7 @@ def _run_claude_with(system: str, user_message: str, *, model_name: Optional[str
     last_err = None
     for mname in fallbacks:
         try:
-            # Prefer simple message flow without tools to avoid unhandled tool_use
+            # Prefer simple message flow; if tool_use appears, handle minimal cycle for web_search stub
             # Build message list using KV fallback history as conversation
             history: List[Dict[str, Any]] = []
             c_id, u_id, prov = _parse_session_id(session_id)
@@ -199,13 +203,53 @@ def _run_claude_with(system: str, user_message: str, *, model_name: Optional[str
                 max_tokens=4096,
                 system=system,
                 messages=history,
+                tools=[{
+                    "name": "web_search",
+                    "description": "Search the web and return brief results for grounding.",
+                    "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+                }],
             )
-            parts = []
+            # If the model returned a tool_use, respond once with our prebuilt context
+            def _extract_text(m: Any) -> str:
+                parts = []
+                for blk in getattr(m, "content", []) or []:
+                    t = getattr(blk, "text", None)
+                    if t:
+                        parts.append(t)
+                return ("\n\n".join(parts)).strip()
+
+            used_tool = False
+            tool_query = None
             for blk in getattr(msg, "content", []) or []:
-                txt = getattr(blk, "text", None)
-                if txt:
-                    parts.append(txt)
-            out = ("\n\n".join(parts)).strip()
+                if getattr(blk, "type", "") == "tool_use" and getattr(blk, "name", "") == "web_search":
+                    used_tool = True
+                    # Capture query if available
+                    try:
+                        tool_query = getattr(blk, "input", {}).get("query")  # type: ignore
+                    except Exception:
+                        tool_query = None
+            if used_tool:
+                # Build web context once and send as tool_result
+                web_ctx = ""
+                try:
+                    q = tool_query or user_message
+                    web_ctx = _build_web_context(q)
+                except Exception:
+                    web_ctx = ""
+                tool_result = [{
+                    "role": "tool",
+                    "name": "web_search",
+                    "content": web_ctx or "",
+                }]
+                msg2 = client.messages.create(
+                    model=mname,
+                    max_tokens=4096,
+                    system=system,
+                    messages=history + tool_result,  # continue conversation providing tool output
+                )
+                out = _extract_text(msg2)
+            else:
+                out = _extract_text(msg)
             if session_id:
                 c_id, u_id, prov = _parse_session_id(session_id)
                 if c_id and u_id:
@@ -303,13 +347,13 @@ def run_chat_summary(provider: str, text: str) -> str:
     )
     if prov == "openai":
         model = os.getenv("OPENAI_FAST_MODEL", os.getenv("OPENAI_MODEL", "gpt-5"))
-        return _run_openai_with(sys_prompt, text, model)
+        return _run_openai_with(sys_prompt, text, model_name=model)
     if prov in {"gemini", "google"}:
         mname = os.getenv("GEMINI_FAST_MODEL", os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
-        return _run_gemini_with(sys_prompt, text, mname)
+        return _run_gemini_with(sys_prompt, text, model_name=mname)
     # Claude fast fallback
     cname = os.getenv("ANTHROPIC_FAST_MODEL", os.getenv("ANTHROPIC_MODEL", "claude-4-haiku-latest"))
-    return _run_claude_with(sys_prompt, text, cname)
+    return _run_claude_with(sys_prompt, text, model_name=cname)
 
 
 def _should_ground(user_message: str) -> bool:

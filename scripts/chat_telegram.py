@@ -45,7 +45,9 @@ def _run_chat(chat_lang: str, user_input: str, *, context_kind: Optional[str], c
         from services.chat.run import build_system_prompt, run_chat_message
         system = build_system_prompt(chat_lang=chat_lang, kind=(context_kind or "result"), full_content=context_content)
         provider = (os.getenv("CHAT_PROVIDER") or os.getenv("OPENAI_PROVIDER") or os.getenv("DEFAULT_PROVIDER") or "openai").strip().lower()
-        return run_chat_message(provider, system, user_input)
+        # Stable console session id by provider
+        sess = f"console:0:{provider}"
+        return run_chat_message(provider, system, user_input, session_id=sess)
     else:
         from llm_agents.chat_telegram.assistant import build_chat_telegram_assistant
         from agents import Runner  # type: ignore
