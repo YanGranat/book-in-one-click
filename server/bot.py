@@ -8,6 +8,10 @@ from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+try:
+    from aiogram.contrib.fsm_storage.redis import RedisStorage2  # type: ignore
+except Exception:
+    RedisStorage2 = None  # type: ignore
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardRemove
@@ -251,9 +255,32 @@ def _stars_enabled() -> bool:
 # Removed legacy ReplyKeyboard-based builders to unify inline-only UI
 
 
+def _try_build_redis_storage():
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url or RedisStorage2 is None:
+        return None
+    try:
+        from urllib.parse import urlsplit
+        parts = urlsplit(url)
+        host = parts.hostname or "localhost"
+        port = int(parts.port or 6379)
+        db = 0
+        try:
+            # e.g. redis://:pwd@host:port/2
+            if parts.path and parts.path.strip("/"):
+                db = int(parts.path.strip("/"))
+        except Exception:
+            db = 0
+        password = parts.password
+        return RedisStorage2(host=host, port=port, db=db, password=password)
+    except Exception:
+        return None
+
+
 def create_dispatcher() -> Dispatcher:
     bot = Bot(token=TELEGRAM_TOKEN)
-    dp = Dispatcher(bot, storage=MemoryStorage())
+    storage = _try_build_redis_storage() or MemoryStorage()
+    dp = Dispatcher(bot, storage=storage)
 
     # Simple in-memory guard to avoid duplicate generation per chat
     RUNNING_CHATS: Set[int] = set()
@@ -2407,24 +2434,24 @@ def create_dispatcher() -> Dispatcher:
         await state.finish()
         await message.answer("Чат завершён.")
 
-    @dp.message_handler(state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
+    # Generic commands while chat active: finish state and re-dispatch the same update
+    @dp.message_handler(lambda m: (m.text or "").startswith("/"), state=ChatStates.Active)  # type: ignore
+    async def cmd_any_in_chat(message: types.Message, state: FSMContext):
+        try:
+            await state.finish()
+        except Exception:
+            pass
+        try:
+            upd = types.Update(message=message)
+            await dp.process_update(upd)
+        except Exception:
+            pass
+        return
+
+    @dp.message_handler(lambda m: not (getattr(m.from_user, "is_bot", False) or (m.text or "").startswith("/")), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def chat_active_message(message: types.Message, state: FSMContext):
-        # For any command: silently finish chat state and let command handlers run
         txt = (message.text or "").strip()
-        if txt.startswith("/"):
-            # Allow explicit /endchat handler to finish and notify
-            try:
-                cmd = txt.split()[0].lower()
-            except Exception:
-                cmd = "/"
-            if cmd.startswith("/endchat"):
-                return
-            # For any other command: silently finish chat and let command handlers run
-            try:
-                await state.finish()
-            except Exception:
-                pass
-            return
+        # Ignore bot/self messages handled via decorator predicate; no-op here
         # Deduplicate: avoid processing the same message twice (webhook retries)
         try:
             sd = await state.get_data()
@@ -2445,12 +2472,23 @@ def create_dispatcher() -> Dispatcher:
             chat_lang = "en" if det.startswith("en") else ("ru" if _is_ru(ui_lang) else "en")
         except Exception:
             chat_lang = "ru" if _is_ru(ui_lang) else "en"
-        # Keep short rolling history in state for better coherence
+        # Keep rolling history in state; if too long, build a recap to keep prompt short
         history = (data.get("chat_history") or [])
+        try:
+            if len(history) > 60:
+                prov = await get_provider(message.from_user.id) if message.from_user else "openai"
+                from services.chat.run import run_chat_summary
+                # prepare plain text transcript
+                transcript = "\n".join(f"[{r}]: {c}" for r, c in history)
+                recap = run_chat_summary(prov, transcript)
+                history = [("recap", recap)] + history[-40:]
+                await state.update_data(chat_history=history)
+        except Exception:
+            pass
         # Construct compact user_message: include last turns
         def _format_history(items):
             out = []
-            for role, content in items[-6:]:
+            for role, content in items[-40:]:
                 out.append(f"[{role}] {content}")
             return "\n".join(out)
         user_payload = ("\n\n" + _format_history(history) + "\n\n[user] " + (message.text or "")).strip()
@@ -2471,20 +2509,21 @@ def create_dispatcher() -> Dispatcher:
         text = (reply or "").strip()
         # md_output wrapper -> send file
         import re
-        m = re.search(r"<md_output([^>]*)>([\s\S]*?)</md_output>", text)
-        if m:
-            attrs = m.group(1) or ""
-            body = m.group(2) or ""
+        blocks = list(re.finditer(r"<md_output([^>]*)>([\s\S]*?)</md_output>", text))
+        if blocks:
             from io import BytesIO
-            doc = body if body.endswith("\n") else (body + "\n")
-            buf = BytesIO(doc.encode("utf-8"))
-            title = None
-            mt = re.search(r"title=\"([^\"]+)\"", attrs)
-            if mt:
-                title = mt.group(1)
-            fname = safe_filename_base(title) if title else "result"
-            buf.name = f"{fname}.md"
-            await message.answer_document(buf, caption=("Готово" if _is_ru(ui_lang) else "Done"))
+            for idx, bm in enumerate(blocks, start=1):
+                attrs = bm.group(1) or ""
+                body = bm.group(2) or ""
+                doc = body if body.endswith("\n") else (body + "\n")
+                buf = BytesIO(doc.encode("utf-8"))
+                title = None
+                mt = re.search(r"title=\"([^\"]+)\"", attrs)
+                if mt:
+                    title = mt.group(1)
+                base = safe_filename_base(title) if title else f"result_{idx}"
+                buf.name = f"{base}.md"
+                await message.answer_document(buf, caption=("Готово" if _is_ru(ui_lang) else "Done"))
             return
         # Otherwise chunked messages
         def _chunks(s: str, limit: int = 4000):
@@ -2516,7 +2555,7 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(chunk)
 
     # ---- Auto-chat entry for admins on plain text (no command) ----
-    @dp.message_handler(content_types=types.ContentTypes.TEXT, state="*")  # type: ignore
+    @dp.message_handler(lambda m: not getattr(m.from_user, "is_bot", False), content_types=types.ContentTypes.TEXT, state="*")  # type: ignore
     async def auto_chat_entry(message: types.Message, state: FSMContext):
         txt = (message.text or "").strip()
         # Ignore commands or empty
@@ -2632,25 +2671,27 @@ def create_dispatcher() -> Dispatcher:
         # Send result (md_output or chunks) and store history
         text = (reply or "").strip()
         import re
-        m = re.search(r"<md_output([^>]*)>([\s\S]*?)</md_output>", text)
-        if m:
-            attrs = m.group(1) or ""
-            body = m.group(2) or ""
+        blocks2 = list(re.finditer(r"<md_output([^>]*)>([\s\S]*?)</md_output>", text))
+        if blocks2:
             from io import BytesIO
-            doc = body if body.endswith("\n") else (body + "\n")
-            buf = BytesIO(doc.encode("utf-8"))
-            title = None
-            mt = re.search(r"title=\"([^\"]+)\"", attrs)
-            if mt:
-                title = mt.group(1)
-            fname = safe_filename_base(title) if title else "result"
-            buf.name = f"{fname}.md"
-            await message.answer_document(buf, caption=("Готово" if _is_ru(ui_lang) else "Done"))
-            # Update history
+            for idx, bm in enumerate(blocks2, start=1):
+                attrs = bm.group(1) or ""
+                body = bm.group(2) or ""
+                doc = body if body.endswith("\n") else (body + "\n")
+                buf = BytesIO(doc.encode("utf-8"))
+                title = None
+                mt = re.search(r"title=\"([^\"]+)\"", attrs)
+                if mt:
+                    title = mt.group(1)
+                base = safe_filename_base(title) if title else f"result_{idx}"
+                buf.name = f"{base}.md"
+                await message.answer_document(buf, caption=("Готово" if _is_ru(ui_lang) else "Done"))
+            # Update history with concatenated body text for simplicity
             try:
+                joined = "\n\n".join(bm.group(2) or "" for bm in blocks2)
                 hist = (data.get("chat_history") or [])
                 hist.append(("user", txt))
-                hist.append(("assistant", body))
+                hist.append(("assistant", joined))
                 await state.update_data(chat_history=hist)
             except Exception:
                 pass

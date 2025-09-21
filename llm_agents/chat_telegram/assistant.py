@@ -5,7 +5,7 @@ from typing import Any
 
 
 def _load_prompt(chat_lang: str = "ru") -> str:
-    prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "chat_telegram" / "system.md"
+    prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "chat_telegram" / "assistant.md"
     txt = prompt_path.read_text(encoding="utf-8")
     return txt.replace("{chat_lang}", chat_lang or "ru")
 
