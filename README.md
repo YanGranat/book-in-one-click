@@ -309,12 +309,14 @@ pip freeze > requirements.txt
 4) Если нужен структурированный ответ — опишите Pydantic‑схему и используйте `utils/json_parse.py`.
 5) Добавьте короткие smoke‑скрипты для проверки (см. ниже) и обновите Memory Bank.
 
-## 🧪 Smoke‑проверки
+## 🧪 Быстрая проверка
 
-Примеры:
+Для базовой проверки используйте имеющиеся CLI‑скрипты:
 ```bat
-venv\Scripts\python.exe scripts\smoke_post.py --topic "Photosynthesis" --provider openai --lang en
-venv\Scripts\python.exe scripts\smoke_chat.py --message "Суммируй контекст: ракеты и орбиты" --provider gemini
+venv\Scripts\python.exe scripts\simple_test.py
+venv\Scripts\python.exe scripts\popular_science_post.py --topic "Photosynthesis" --provider openai --lang en
+venv\Scripts\python.exe scripts\popular_science_series_post.py --topic "Photosynthesis" --provider openai --lang en
+venv\Scripts\python.exe scripts\chat_telegram.py --message "привет" --context_kind result
 ```
 
 ## 📖 Примеры
