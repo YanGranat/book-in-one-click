@@ -17,6 +17,8 @@ import asyncio
 import time
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
+from utils.models import get_model
+from services.providers.runner import ProviderRunner
 from utils.slug import safe_filename_base
 from utils.web import build_search_context
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
@@ -120,7 +122,7 @@ def generate_post(
         agent = Agent(
             name="Generic Agent",
             instructions=system,
-            model=(model or os.getenv("OPENAI_MODEL", "gpt-5")),
+            model=(model or get_model("openai", "heavy")),
         )
         res_local = Runner.run_sync(agent, user_message_local)
         return getattr(res_local, "final_output", "")
@@ -129,7 +131,7 @@ def generate_post(
         agent = Agent(
             name="Popular Science Post Writer",
             instructions=instructions,
-            model="gpt-5",
+            model=get_model("openai", "heavy"),
         )
         user_message_local = (
             f"<input>\n"
@@ -140,119 +142,23 @@ def generate_post(
         res_local = Runner.run_sync(agent, user_message_local)
         return getattr(res_local, "final_output", "")
 
-    def _run_gemini_with(system: str, user_message_local: str, model_name: Optional[str] = None) -> str:
-        import google.generativeai as genai  # type: ignore
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
-        # Try preferred model then safe fallbacks
-        preferred = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        fallbacks = [
-            preferred,
-            os.getenv("GEMINI_MODEL", "gemini-2.0-pro-exp-02-05"),
-            "gemini-2.0-pro",
-            os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash"),
-            "gemini-1.5-pro-latest",
-        ]
-        last_err = None
-        for mname in fallbacks:
-            try:
-                model = genai.GenerativeModel(model_name=mname, system_instruction=system)
-                resp = model.generate_content(user_message_local)
-                return (getattr(resp, "text", None) or "").strip()
-            except Exception as e:  # try next fallback
-                last_err = e
-                continue
-        raise RuntimeError(f"Gemini request failed for all models; last error: {last_err}")
-
-    def _run_gemini_json_with(system: str, user_message_local: str, model_name: Optional[str] = None) -> str:
-        import google.generativeai as genai  # type: ignore
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
-        preferred = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        fallbacks = [
-            preferred,
-            os.getenv("GEMINI_MODEL", "gemini-2.0-pro-exp-02-05"),
-            "gemini-2.0-pro",
-            os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash"),
-            "gemini-1.5-pro-latest",
-        ]
-        last_err = None
-        for mname in fallbacks:
-            try:
-                model = genai.GenerativeModel(
-                    model_name=mname,
-                    system_instruction=system,
-                    generation_config={"response_mime_type": "application/json"},
-                )
-                resp = model.generate_content(user_message_local)
-                txt = (getattr(resp, "text", None) or "").strip()
-                if not txt:
-                    # Some SDK variants put JSON in parts; try to collect
-                    parts = []
-                    try:
-                        for c in getattr(resp, "candidates", []) or []:
-                            for part in getattr(getattr(c, "content", None), "parts", []) or []:
-                                t = getattr(part, "text", None)
-                                if t:
-                                    parts.append(t)
-                    except Exception:
-                        pass
-                    txt = ("\n".join(parts)).strip()
-                return txt
-            except Exception as e:
-                last_err = e
-                continue
-        raise RuntimeError(f"Gemini JSON request failed for all models; last error: {last_err}")
-
-    def _run_claude_with(system: str, user_message_local: str, model_name: Optional[str] = None) -> str:
-        import anthropic  # type: ignore
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        preferred = model_name or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-        fallbacks = [
-            preferred,
-            "claude-3-7-sonnet-latest",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-opus-20240229",
-        ]
-        last_err = None
-        for mname in fallbacks:
-            try:
-                msg = client.messages.create(
-                    model=mname,
-                    max_tokens=4096,
-                    system=system,
-                    messages=[{"role": "user", "content": user_message_local}],
-                )
-                parts = []
-                for blk in getattr(msg, "content", []) or []:
-                    txt = getattr(blk, "text", None)
-                    if txt:
-                        parts.append(txt)
-                return ("\n\n".join(parts)).strip()
-            except Exception as e:
-                last_err = e
-                continue
-        raise RuntimeError(f"Claude request failed for all models; last error: {last_err}")
+    # Provider-agnostic runners
 
     def run_with_provider(system: str, user_inp: str, speed: str = "heavy") -> str:
+        pr = ProviderRunner(_prov)
         if _prov == "openai":
-            model = os.getenv("OPENAI_FAST_MODEL", "gpt-5-mini") if speed == "fast" else os.getenv("OPENAI_MODEL", "gpt-5")
+            # Prefer Agents SDK path for OpenAI to keep tools/session parity
+            model = get_model("openai", "fast" if speed == "fast" else "heavy")
             return _run_openai_with(system, user_inp, model)
-        if _prov in {"gemini", "google"}:
-            mname = os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash") if speed == "fast" else os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-            return _run_gemini_with(system, user_inp, mname)
-        # Claude: same model for fast/heavy unless overridden
-        cname = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-0")
-        return _run_claude_with(system, user_inp, cname)
+        return pr.run_text(system, user_inp, speed=("fast" if speed == "fast" else "heavy"))
 
     def run_json_with_provider(system: str, user_inp: str, cls: Type, speed: str = "fast"):
         import json
-        # Prefer provider-native JSON channel where available
-        if _prov in {"gemini", "google"}:
-            mname = os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash") if speed == "fast" else os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-            txt = _run_gemini_json_with(system, user_inp, mname)
+        pr = ProviderRunner(_prov)
+        if _prov in {"gemini", "google", "claude"}:
+            txt = pr.run_json(system, user_inp, speed=("fast" if speed == "fast" else "heavy"))
         else:
-            txt = run_with_provider(system, user_inp, speed)
+            txt = pr.run_text(system, user_inp, speed=("fast" if speed == "fast" else "heavy"))
         # strip code fences if any
         if txt.strip().startswith("```") and txt.strip().endswith("```"):
             txt = "\n".join([line for line in txt.strip().splitlines()[1:-1]])

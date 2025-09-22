@@ -1,0 +1,37 @@
+{
+  "openai": {
+    "tiers": {
+      "superfast": { "model": "gpt-5-mini" },
+      "fast": { "model": "gpt-5-mini" },
+      "medium": { "model": "gpt-5" },
+      "heavy": { "model": "gpt-5" }
+    },
+    "json_mode": { "supported": true }
+  },
+  "gemini": {
+    "tiers": {
+      "superfast": { "model": "gemini-2.5-flash" },
+      "fast": { "model": "gemini-2.5-flash" },
+      "medium": { "model": "gemini-2.5-pro" },
+      "heavy": { "model": "gemini-2.5-pro" }
+    },
+    "json_mode": {
+      "supported": true,
+      "response_mime_type": "application/json"
+    }
+  },
+  "claude": {
+    "tiers": {
+      "superfast": { "model": "claude-haiku-4-0" },
+      "fast": { "model": "claude-haiku-4-0" },
+      "medium": { "model": "claude-sonnet-4-0" },
+      "heavy": { "model": "claude-sonnet-4-0" }
+    },
+    "json_mode": {
+      "supported": true,
+      "response_format": { "type": "json_object" }
+    }
+  }
+}
+
+

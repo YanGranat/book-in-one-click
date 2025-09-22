@@ -2431,6 +2431,26 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["endchat"], state=ChatStates.Active)  # type: ignore
     async def cmd_endchat(message: types.Message, state: FSMContext):
+        try:
+            # Clear provider-native session and KV history for this chat
+            prov = "openai"
+            if message.from_user:
+                try:
+                    prov = await get_provider(message.from_user.id)
+                except Exception:
+                    prov = "openai"
+            try:
+                from services.chat.run import clear_provider_sessions
+                sid = f"{message.chat.id}:{message.from_user.id}:{prov}"
+                clear_provider_sessions(prov, sid)
+            except Exception:
+                pass
+            try:
+                await chat_clear(message.from_user.id, message.chat.id, prov)
+            except Exception:
+                pass
+        except Exception:
+            pass
         await state.finish()
         await message.answer("Чат завершён.")
 

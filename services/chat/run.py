@@ -8,7 +8,11 @@ from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 
 # In-memory caches for provider-native sessions (process-lifetime)
+# Add simple LRU+TTL for Gemini chats to avoid unbounded growth
 _GEMINI_CHAT_CACHE: Dict[str, Any] = {}
+_GEMINI_CHAT_META: Dict[str, Tuple[float, int]] = {}
+_GEMINI_CHAT_CAPACITY = 512
+_GEMINI_CHAT_TTL_SEC = 45 * 60
 
 
 def _try_import_sdk():
@@ -45,6 +49,22 @@ def _parse_session_id(session_id: Optional[str]) -> Tuple[int, int, str]:
         return (0, 0, "openai")
 
 
+def clear_provider_sessions(provider: str, session_id: Optional[str]) -> None:
+    """Clear native provider sessions and KV fallback for a given session_id.
+    For Gemini: drop cached chat by key. KV history is cleared by caller.
+    """
+    p = (provider or "openai").strip().lower()
+    try:
+        if p in {"gemini", "google"}:
+            key_prefix = f"{session_id or ''}:"
+            for k in list(_GEMINI_CHAT_CACHE.keys()):
+                if k.startswith(key_prefix):
+                    _GEMINI_CHAT_CACHE.pop(k, None)
+                    _GEMINI_CHAT_META.pop(k, None)
+    except Exception:
+        pass
+
+
 def _kv_get_history(telegram_id: int, chat_id: int, provider: str, limit: int = 200) -> List[Dict[str, str]]:
     try:
         from server.kv import chat_get  # type: ignore
@@ -58,8 +78,9 @@ def _kv_get_history(telegram_id: int, chat_id: int, provider: str, limit: int = 
         except RuntimeError:
             loop = None
         if loop and loop.is_running():
-            # We may be on a worker thread without running loop; create one temporarily
-            return _aio.run(chat_get(telegram_id, chat_id, provider, limit=limit))  # type: ignore
+            # Running loop: schedule coroutine and wait synchronously
+            fut = _aio.run_coroutine_threadsafe(chat_get(telegram_id, chat_id, provider, limit=limit), loop)
+            return fut.result(timeout=5.0)  # type: ignore
         else:
             return _aio.run(chat_get(telegram_id, chat_id, provider, limit=limit))  # type: ignore
     except Exception:
@@ -79,8 +100,8 @@ def _kv_append(telegram_id: int, chat_id: int, provider: str, role: str, content
         except RuntimeError:
             loop = None
         if loop and loop.is_running():
-            # Fire-and-forget on background loop
-            _aio.get_event_loop().create_task(chat_append(telegram_id, chat_id, provider, role, content))  # type: ignore
+            # Submit to running loop in fire-and-forget manner
+            loop.create_task(chat_append(telegram_id, chat_id, provider, role, content))  # type: ignore
         else:
             _aio.run(chat_append(telegram_id, chat_id, provider, role, content))  # type: ignore
     except Exception:
@@ -150,9 +171,26 @@ def _run_gemini_with(system: str, user_message: str, *, model_name: Optional[str
                 text = it.get("content") or ""
                 ghistory.append({"role": ("user" if role == "user" else "model"), "parts": [text]})
             cache_key = f"{session_id or ''}:{mname}"
+            # Evict expired entries
+            try:
+                import time as _t
+                now = _t.time()
+                expired = [k for k, (ts, _) in list(_GEMINI_CHAT_META.items()) if now - ts > _GEMINI_CHAT_TTL_SEC]
+                for k in expired:
+                    _GEMINI_CHAT_META.pop(k, None)
+                    _GEMINI_CHAT_CACHE.pop(k, None)
+            except Exception:
+                pass
             if cache_key in _GEMINI_CHAT_CACHE:
                 try:
                     chat = _GEMINI_CHAT_CACHE[cache_key]
+                    # touch LRU
+                    try:
+                        import time as _t
+                        ts, cnt = _GEMINI_CHAT_META.get(cache_key, (0.0, 0))
+                        _GEMINI_CHAT_META[cache_key] = (_t.time(), cnt + 1)
+                    except Exception:
+                        pass
                 except Exception:
                     chat = None
             if chat is None:
@@ -162,6 +200,17 @@ def _run_gemini_with(system: str, user_message: str, *, model_name: Optional[str
                 else:
                     chat = model.start_chat()
                 _GEMINI_CHAT_CACHE[cache_key] = chat
+                try:
+                    import time as _t
+                    _GEMINI_CHAT_META[cache_key] = (_t.time(), 1)
+                    # Enforce capacity by evicting oldest by ts
+                    if len(_GEMINI_CHAT_CACHE) > _GEMINI_CHAT_CAPACITY:
+                        oldest = sorted(_GEMINI_CHAT_META.items(), key=lambda kv: kv[1][0])[: max(0, len(_GEMINI_CHAT_CACHE) - _GEMINI_CHAT_CAPACITY)]
+                        for k, _info in oldest:
+                            _GEMINI_CHAT_META.pop(k, None)
+                            _GEMINI_CHAT_CACHE.pop(k, None)
+                except Exception:
+                    pass
             # Reuse the same native chat session for this turn
             resp = chat.send_message(user_message)
             txt = (getattr(resp, "text", None) or "").strip()
@@ -312,7 +361,8 @@ def run_chat_message(provider: str, system: str, user_message: str, *, session_i
     except Exception:
         pass
     if prov == "openai":
-        model = os.getenv("OPENAI_MODEL", "gpt-5")
+        from utils.models import get_model
+        model = get_model("openai", "heavy")
         # Also push to KV for cross-provider continuity
         try:
             c_id, u_id, p = _parse_session_id(session_id)
@@ -330,11 +380,12 @@ def run_chat_message(provider: str, system: str, user_message: str, *, session_i
             pass
         return reply
     if prov in {"gemini", "google"}:
-        # Support both Pro and Flash via ENV
-        mname = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+        from utils.models import get_model
+        mname = get_model("gemini", "heavy")
         return _run_gemini_with(system, user_message, model_name=mname, session_id=session_id)
-    # default to Claude (Claude 4 by default if configured)
-    cname = os.getenv("ANTHROPIC_MODEL", "claude-4-sonnet-latest")
+    # default to Claude
+    from utils.models import get_model
+    cname = get_model("claude", "heavy")
     return _run_claude_with(system, user_message, model_name=cname, session_id=session_id)
 
 
@@ -384,13 +435,16 @@ def run_chat_summary(provider: str, text: str) -> str:
         "Keep key facts, decisions, and user intent. Preserve language.\n"
     )
     if prov == "openai":
-        model = os.getenv("OPENAI_FAST_MODEL", os.getenv("OPENAI_MODEL", "gpt-5"))
+        from utils.models import get_model
+        model = get_model("openai", "fast")
         return _run_openai_with(sys_prompt, text, model_name=model)
     if prov in {"gemini", "google"}:
-        mname = os.getenv("GEMINI_FAST_MODEL", os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+        from utils.models import get_model
+        mname = get_model("gemini", "fast")
         return _run_gemini_with(sys_prompt, text, model_name=mname)
     # Claude fast fallback
-    cname = os.getenv("ANTHROPIC_FAST_MODEL", os.getenv("ANTHROPIC_MODEL", "claude-4-haiku-latest"))
+    from utils.models import get_model
+    cname = get_model("claude", "fast")
     return _run_claude_with(sys_prompt, text, model_name=cname)
 
 

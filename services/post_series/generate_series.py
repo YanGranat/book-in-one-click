@@ -26,6 +26,7 @@ from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_f
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from utils.slug import safe_filename_base
 from schemas.series import PostIdea, PostIdeaList, ListSufficiency, ExtendResponse, PrioritizedList
+from services.providers.runner import ProviderRunner
 
 
 def _try_import_sdk():
@@ -39,123 +40,18 @@ def _try_import_sdk():
         ) from e
 
 
-class _ProviderRunner:
+class _ProviderAdapter:
     def __init__(self, provider: str):
-        self.provider = (provider or "openai").strip().lower()
-
-    def _run_openai_with(self, system: str, user_message: str, model: Optional[str] = None) -> str:
-        Agent, Runner = _try_import_sdk()
-        agent = Agent(name="Series Agent", instructions=system, model=(model or os.getenv("OPENAI_MODEL", "gpt-5")))
-        res = Runner.run_sync(agent, user_message)
-        return getattr(res, "final_output", "")
-
-    def _run_gemini_with(self, system: str, user_message: str, model_name: Optional[str] = None) -> str:
-        import google.generativeai as genai  # type: ignore
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
-        preferred = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        fallbacks = [
-            preferred,
-            os.getenv("GEMINI_MODEL", "gemini-2.0-pro-exp-02-05"),
-            "gemini-2.0-pro",
-            os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash"),
-            "gemini-1.5-pro-latest",
-        ]
-        last_err = None
-        for mname in fallbacks:
-            try:
-                model = genai.GenerativeModel(model_name=mname, system_instruction=system)
-                resp = model.generate_content(user_message)
-                return (getattr(resp, "text", None) or "").strip()
-            except Exception as e:
-                last_err = e
-                continue
-        raise RuntimeError(f"Gemini request failed; last error: {last_err}")
-
-    def _run_gemini_json_with(self, system: str, user_message: str, model_name: Optional[str] = None) -> str:
-        import google.generativeai as genai  # type: ignore
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
-        preferred = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-        fallbacks = [
-            preferred,
-            os.getenv("GEMINI_MODEL", "gemini-2.0-pro-exp-02-05"),
-            "gemini-2.0-pro",
-            os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash"),
-            "gemini-1.5-pro-latest",
-        ]
-        last_err = None
-        for mname in fallbacks:
-            try:
-                model = genai.GenerativeModel(
-                    model_name=mname,
-                    system_instruction=system,
-                    generation_config={"response_mime_type": "application/json"},
-                )
-                resp = model.generate_content(user_message)
-                txt = (getattr(resp, "text", None) or "").strip()
-                if not txt:
-                    parts = []
-                    try:
-                        for c in getattr(resp, "candidates", []) or []:
-                            for part in getattr(getattr(c, "content", None), "parts", []) or []:
-                                t = getattr(part, "text", None)
-                                if t:
-                                    parts.append(t)
-                    except Exception:
-                        pass
-                    txt = ("\n".join(parts)).strip()
-                return txt
-            except Exception as e:
-                last_err = e
-                continue
-        raise RuntimeError(f"Gemini JSON request failed; last error: {last_err}")
-
-    def _run_claude_with(self, system: str, user_message: str, model_name: Optional[str] = None) -> str:
-        import anthropic  # type: ignore
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        preferred = model_name or os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-        fallbacks = [preferred, "claude-3-7-sonnet-latest", "claude-3-5-sonnet-20241022", "claude-3-opus-20240229"]
-        last_err = None
-        for mname in fallbacks:
-            try:
-                msg = client.messages.create(
-                    model=mname, max_tokens=4096, system=system, messages=[{"role": "user", "content": user_message}]
-                )
-                parts = []
-                for blk in getattr(msg, "content", []) or []:
-                    txt = getattr(blk, "text", None)
-                    if txt:
-                        parts.append(txt)
-                return ("\n\n".join(parts)).strip()
-            except Exception as e:
-                last_err = e
-                continue
-        raise RuntimeError(f"Claude request failed; last error: {last_err}")
+        self._runner = ProviderRunner(provider)
 
     def run_text(self, system: str, user_message: str, speed: str = "heavy") -> str:
-        if self.provider == "openai":
-            model = os.getenv("OPENAI_FAST_MODEL", "gpt-5-mini") if speed == "fast" else os.getenv("OPENAI_MODEL", "gpt-5")
-            return self._run_openai_with(system, user_message, model)
-        if self.provider in {"gemini", "google"}:
-            mname = os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash") if speed == "fast" else os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-            return self._run_gemini_with(system, user_message, mname)
-        # Claude: one heavy model
-        cname = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-        return self._run_claude_with(system, user_message, cname)
+        return self._runner.run_text(system, user_message, speed=speed)
 
     def run_json(self, system: str, user_message: str, cls: Type, speed: str = "fast"):
-        txt = None
-        if self.provider in {"gemini", "google"}:
-            mname = os.getenv("GEMINI_FAST_MODEL", "gemini-2.5-flash") if speed == "fast" else os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
-            txt = self._run_gemini_json_with(system, user_message, mname)
-        else:
-            txt = self.run_text(system, user_message, speed)
+        import json as _json
+        txt = self._runner.run_json(system, user_message, speed=speed)
         if txt.strip().startswith("```") and txt.strip().endswith("```"):
             txt = "\n".join([line for line in txt.strip().splitlines()[1:-1]])
-
-        def _norm_key(s: str) -> str:
-            return "".join(ch for ch in (s or "").lower() if ch.isalnum())
 
         def _snake_case(name: str) -> str:
             import re as _re
@@ -165,24 +61,21 @@ class _ProviderRunner:
 
         def _normalize(obj):
             if isinstance(obj, dict):
-                out = {}
-                for k, v in obj.items():
-                    out[_snake_case(k)] = _normalize(v)
-                return out
+                return { _snake_case(k): _normalize(v) for k, v in obj.items() }
             if isinstance(obj, list):
                 return [_normalize(x) for x in obj]
             return obj
 
         try:
-            data = json.loads(txt)
+            data = _json.loads(txt)
         except Exception:
             import re as _re
             m = _re.search(r"\{[\s\S]*\}\s*$", txt)
             if not m:
-                if self.provider in {"gemini", "google"} and speed != "heavy":
+                if speed != "heavy":
                     return self.run_json(system, user_message, cls, speed="heavy")
                 raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
-            data = json.loads(m.group(0))
+            data = _json.loads(m.group(0))
         data = _normalize(data)
         return cls.model_validate(data)
 
@@ -266,7 +159,7 @@ def generate_series(
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     Agent, Runner = _try_import_sdk()
-    pr = _ProviderRunner(_prov)
+    pr = _ProviderAdapter(_prov)
 
     def _emit(stage: str) -> None:
         if on_progress:
