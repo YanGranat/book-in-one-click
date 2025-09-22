@@ -2441,17 +2441,42 @@ def create_dispatcher() -> Dispatcher:
             await state.finish()
         except Exception:
             pass
+        # Direct dispatch to the proper command handler to avoid timing races
         try:
-            # Re-dispatch the same message as a fresh Update so the command handler runs immediately
-            from aiogram import Bot as _Bot, Dispatcher as _Dispatcher  # type: ignore
-            _Bot.set_current(dp.bot)
-            _Dispatcher.set_current(dp)
-            import time as _t, asyncio as _aio
-            upd = types.Update(update_id=int(getattr(message, "message_id", 0) or int(_t.time() * 1000)), message=message)
-            # Schedule asynchronously to avoid handler re-entrancy with stale FSM state
-            _aio.create_task(dp.process_update(upd))
+            raw = (message.text or "").strip()
+            cmd = raw.split()[0].lstrip("/").split("@")[0].lower()
+            handlers = {
+                "start": cmd_start,
+                "info": cmd_info,
+                "generate": cmd_generate,
+                "series": cmd_series,
+                "series_fixed": cmd_series_fixed,
+                "settings": cmd_settings,
+                "history": cmd_history,
+                "history_clear": cmd_history_clear,
+                "balance": cmd_balance,
+                "buy": cmd_buy,
+                "pricing": cmd_pricing,
+                "lang": cmd_lang,
+                "lang_generate": cmd_lang_generate,
+                "provider": cmd_provider,
+                "incognito": cmd_incognito,
+                "refine": cmd_refine,
+                "factcheck": cmd_factcheck,
+                "depth": cmd_depth,
+                "chat": cmd_chat,
+                "endchat": cmd_endchat,
+                "cancel": cmd_cancel,
+                "logs": cmd_logs,
+            }
+            h = handlers.get(cmd)
+            if h is not None:
+                try:
+                    await h(message, state)  # type: ignore[arg-type]
+                except TypeError:
+                    # Some handlers accept only (message)
+                    await h(message)  # type: ignore[misc]
         except Exception:
-            # Swallow, but do not block the event loop; the user can retry
             pass
         return
 
