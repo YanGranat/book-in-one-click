@@ -1,0 +1,15 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+.env
+output/
+output_example/
+memory-bank/
+OpenAI Agents SDK Documentation.md
+
