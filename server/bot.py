@@ -2435,7 +2435,7 @@ def create_dispatcher() -> Dispatcher:
         await message.answer("Чат завершён.")
 
     # Generic commands while chat active: finish state and re-dispatch the same update
-    @dp.message_handler(lambda m: (m.text or "").startswith("/"), state=ChatStates.Active)  # type: ignore
+    @dp.message_handler(lambda m: (m.text or "").startswith("/"), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def cmd_any_in_chat(message: types.Message, state: FSMContext):
         try:
             await state.finish()
@@ -2446,12 +2446,13 @@ def create_dispatcher() -> Dispatcher:
             from aiogram import Bot as _Bot, Dispatcher as _Dispatcher  # type: ignore
             _Bot.set_current(dp.bot)
             _Dispatcher.set_current(dp)
-            import time as _t
+            import time as _t, asyncio as _aio
             upd = types.Update(update_id=int(getattr(message, "message_id", 0) or int(_t.time() * 1000)), message=message)
-            await dp.process_update(upd)
+            # Schedule asynchronously to avoid handler re-entrancy with stale FSM state
+            _aio.create_task(dp.process_update(upd))
         except Exception:
             # Swallow, but do not block the event loop; the user can retry
-            return
+            pass
         return
 
     @dp.message_handler(lambda m: not (getattr(m.from_user, "is_bot", False) or (m.text or "").startswith("/")), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
