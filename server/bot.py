@@ -2442,10 +2442,16 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         try:
-            upd = types.Update(message=message)
+            # Re-dispatch the same message as a fresh Update so the command handler runs immediately
+            from aiogram import Bot as _Bot, Dispatcher as _Dispatcher  # type: ignore
+            _Bot.set_current(dp.bot)
+            _Dispatcher.set_current(dp)
+            import time as _t
+            upd = types.Update(update_id=int(getattr(message, "message_id", 0) or int(_t.time() * 1000)), message=message)
             await dp.process_update(upd)
         except Exception:
-            pass
+            # Swallow, but do not block the event loop; the user can retry
+            return
         return
 
     @dp.message_handler(lambda m: not (getattr(m.from_user, "is_bot", False) or (m.text or "").startswith("/")), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
