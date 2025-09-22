@@ -93,7 +93,11 @@ async def get_history_cleared_at(telegram_id: int) -> Optional[float]:
         val = await r.get(key)
         if val is None:
             return None
-
+        # Decode bytes and convert to float timestamp
+        sval = val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val)
+        return float(sval)
+    except Exception:
+        return None
 
 # ---- Chat session history (provider-agnostic) ----
 
@@ -141,13 +145,6 @@ async def chat_clear(telegram_id: int, chat_id: int, provider: str) -> None:
         await r.delete(key)
     except Exception:
         pass
-        try:
-            sval = val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val)
-        except Exception:
-            sval = str(val)
-        return float(sval)
-    except Exception:
-        return None
 
 
 # ---- Simple rate limiting via Redis counters ----
