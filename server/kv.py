@@ -13,6 +13,7 @@ except Exception as e:  # pragma: no cover
 
 
 _redis_client: Optional["redis.Redis"] = None
+_inmem_kv: Optional[dict] = None
 
 
 def kv_prefix() -> str:
@@ -23,12 +24,87 @@ def kv_prefix() -> str:
 
 
 def get_redis() -> "redis.Redis":
-    global _redis_client
+    global _redis_client, _inmem_kv
     if _redis_client is not None:
         return _redis_client
     url = os.getenv("REDIS_URL", "")
-    if not url:
-        raise RuntimeError("REDIS_URL is not set; provide Internal Key Value URL from Render")
+    if not url or os.getenv("DEV_INMEM_KV", "").strip() in {"1", "true", "yes"}:
+        # Lightweight in-memory KV for local dev/testing
+        class _InMem:
+            def __init__(self):
+                from collections import deque
+                self.store: dict[str, Any] = {}
+                self.lists: dict[str, deque] = {}
+
+            async def set(self, k, v):
+                self.store[k] = v
+
+            async def get(self, k):
+                return self.store.get(k)
+
+            async def delete(self, k):
+                self.store.pop(k, None)
+                self.lists.pop(k, None)
+
+            async def expire(self, k, _ttl):
+                return 1
+
+            async def lpush(self, k, v):
+                from collections import deque
+                dq = self.lists.setdefault(k, deque())
+                dq.appendleft(v)
+
+            async def rpush(self, k, v):
+                from collections import deque
+                dq = self.lists.setdefault(k, deque())
+                dq.append(v)
+
+            async def ltrim(self, k, start, end):
+                from collections import deque
+                dq = self.lists.get(k)
+                if dq is None:
+                    return
+                items = list(dq)[start:end+1 if end != -1 else None]
+                self.lists[k] = deque(items)
+
+            async def lrange(self, k, start, end):
+                dq = self.lists.get(k)
+                if dq is None:
+                    return []
+                items = list(dq)
+                # emulate Redis negative indices
+                n = len(items)
+                if start < 0:
+                    start = max(0, n + start)
+                if end < 0:
+                    end = n - 1
+                return items[start:end+1]
+
+            async def incr(self, k):
+                val = int(self.store.get(k) or 0) + 1
+                self.store[k] = str(val)
+                return val
+
+            async def incrby(self, k, amt):
+                val = int(self.store.get(k) or 0) + int(amt)
+                self.store[k] = str(val)
+                return val
+
+            async def decrby(self, k, amt):
+                val = int(self.store.get(k) or 0) - int(amt)
+                self.store[k] = str(val)
+                return val
+
+            async def eval(self, _lua, _nkeys, _key, cost):
+                bal = int(self.store.get(_key) or 0)
+                c = int(cost)
+                if bal >= c:
+                    self.store[_key] = str(bal - c)
+                    return bal - c
+                return -1
+
+        _inmem_kv = _InMem()
+        return _inmem_kv  # type: ignore
     if redis is None:
         raise RuntimeError("redis package not installed; add 'redis' to requirements.txt")
     _redis_client = redis.from_url(url)

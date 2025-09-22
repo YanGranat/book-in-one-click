@@ -23,6 +23,7 @@ from utils.slug import safe_filename_base
 from utils.web import build_search_context
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from pipelines.post.pipeline import build_instructions as build_post_instructions
+from utils.json_parse import parse_json_best_effort
 
 
 def _try_import_sdk():
@@ -283,20 +284,11 @@ def generate_post(
             return obj
 
         try:
-            data = json.loads(txt)
-            data = _unwrap(data)
-            data = _normalize(data)
-            return cls.model_validate(data)
+            data_obj = parse_json_best_effort(txt)
+            data_obj = _unwrap(data_obj)
+            data_obj = _normalize(data_obj)
+            return cls.model_validate(data_obj)
         except Exception:
-            # try to find last json block at end of text
-            import re
-            m = re.search(r"\{[\s\S]*\}\s*$", txt)
-            if m:
-                data2 = json.loads(m.group(0))
-                data2 = _unwrap(data2)
-                data2 = _normalize(data2)
-                return cls.model_validate(data2)
-            # As a last resort on Gemini/Claude, retry on heavy
             if _prov in {"gemini", "google"} and speed != "heavy":
                 return run_json_with_provider(system, user_inp, cls, speed="heavy")
             raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
