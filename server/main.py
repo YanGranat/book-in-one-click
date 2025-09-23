@@ -182,12 +182,18 @@ async def list_logs():
                     .limit(200)
                 )
                 rows = res.all()
-                seen_ids: set[int] = set()
+                # Build dict to strictly keep one item per JobLog.id
+                items_by_id: dict[int, dict] = {}
                 for jl, jtype, jstatus, resid in rows:
-                    # Avoid duplicates caused by multiple ResultDoc rows per Job
-                    if int(getattr(jl, "id", 0) or 0) in seen_ids:
+                    rid_val = int(getattr(jl, "id", 0) or 0)
+                    if rid_val in items_by_id:
+                        # Already captured this log; prefer to keep existing (or update result_id if missing)
+                        if items_by_id[rid_val].get("result_id") is None and resid is not None:
+                            try:
+                                items_by_id[rid_val]["result_id"] = int(resid)
+                            except Exception:
+                                pass
                         continue
-                    seen_ids.add(int(getattr(jl, "id", 0) or 0))
                     # Extract topic from stored content if available
                     topic = ""
                     try:
@@ -212,7 +218,7 @@ async def list_logs():
                             mtype = p.parent.name or ""
                     except Exception:
                         pass
-                    items.append({
+                    items_by_id[rid_val] = {
                         "id": jl.id,
                         "job_id": jl.job_id,
                         "kind": jl.kind,
@@ -222,7 +228,9 @@ async def list_logs():
                         "mtype": mtype,
                         "status": (jstatus or ""),
                         "result_id": (int(resid) if resid is not None else None),
-                    })
+                    }
+                # Materialize into list preserving DB order by iterating rows again
+                items = [items_by_id[int(getattr(jl, "id", 0) or 0)] for jl, *_ in rows if int(getattr(jl, "id", 0) or 0) in items_by_id]
         except Exception as e:
             print(f"[ERROR] DB read failed: {e}")
     # Fallback: sync read in case async engine/session isn't available
