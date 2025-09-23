@@ -164,7 +164,7 @@ async def allow_download(key: str, ip: str):
 async def root():
     return {"ok": True}
 @app.get("/logs")
-async def list_logs():
+async def list_logs(_: bool = Depends(require_admin)):
     items = []
     
     # Read only from DB
@@ -298,7 +298,7 @@ async def list_logs():
 
 
 @app.get("/logs/{log_id}")
-async def get_log(log_id: int):
+async def get_log(log_id: int, _: bool = Depends(require_admin)):
     # Read only from DB
     if SessionLocal is None:
         # Try sync fallback
@@ -905,7 +905,7 @@ async def result_view_ui_id(res_id: int):
 
 
 @app.get("/debug/results-summary")
-async def debug_results_summary():
+async def debug_results_summary(_: bool = Depends(require_admin)):
     out = {"total": 0, "visible": 0, "hidden": 0, "recent": []}
     if SessionLocal is None:
         return out

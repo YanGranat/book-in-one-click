@@ -944,21 +944,36 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=enabled; fc_enabled=False; fc_depth=2
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
             msg = "Инкогнито: включён." if (enabled and ui_lang=="ru") else ("Incognito: enabled." if enabled else ("Инкогнито: отключён." if ui_lang=="ru" else "Incognito: disabled."))
             await query.message.edit_reply_markup() if query.message else None
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding_flag = bool((await state.get_data()).get("onboarding"))
-            if onboarding_flag and (query.from_user and query.from_user.id in ADMIN_IDS):
-                # After incognito, ask refine then fact-check (admins only)
-                prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-                await dp.bot.send_message(
-                    query.message.chat.id if query.message else query.from_user.id,
-                    prompt,
-                    reply_markup=build_yesno_inline("refine", ui_lang),
-                )
+            if onboarding_flag:
+                if (query.from_user and query.from_user.id in ADMIN_IDS):
+                    # Admins: after incognito → refine → fact-check
+                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+                    await dp.bot.send_message(
+                        query.message.chat.id if query.message else query.from_user.id,
+                        prompt,
+                        reply_markup=build_yesno_inline("refine", ui_lang),
+                    )
+                else:
+                    # Non-admins: skip refine/fact-check, go to generation type
+                    kb = InlineKeyboardMarkup()
+                    kb.add(
+                        InlineKeyboardButton(text=("Пост" if _is_ru(ui_lang) else "Post"), callback_data="set:gentype:post"),
+                        InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
+                    )
+                    await dp.bot.send_message(
+                        query.message.chat.id if query.message else query.from_user.id,
+                        ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"),
+                        reply_markup=kb,
+                    )
+                    await GenerateStates.ChoosingGenType.set()
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
