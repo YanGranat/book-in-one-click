@@ -182,7 +182,12 @@ async def list_logs():
                     .limit(200)
                 )
                 rows = res.all()
+                seen_ids: set[int] = set()
                 for jl, jtype, jstatus, resid in rows:
+                    # Avoid duplicates caused by multiple ResultDoc rows per Job
+                    if int(getattr(jl, "id", 0) or 0) in seen_ids:
+                        continue
+                    seen_ids.add(int(getattr(jl, "id", 0) or 0))
                     # Extract topic from stored content if available
                     topic = ""
                     try:
