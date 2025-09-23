@@ -29,6 +29,7 @@ from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, 
 from .kv import set_gen_lang, get_gen_lang
 from .kv import set_refine_enabled, get_refine_enabled
 from .kv import push_history, get_history, clear_history, rate_allow
+from .kv import chat_clear
 # Chat runner
 from services.chat.run import run_chat_message, build_system_prompt
 # Fact-check settings (KV). Use robust import with fallbacks for older deployments
@@ -114,6 +115,10 @@ class GenerateStates(StatesGroup):
 
 class ChatStates(StatesGroup):
     Active = State()
+
+
+class HistoryStates(StatesGroup):
+    WaitingDeleteIds = State()
 
 
 def _is_ru(ui_lang: str) -> bool:
@@ -2097,6 +2102,63 @@ def create_dispatcher() -> Dispatcher:
         RUNNING_CHATS.discard(chat_id)
 
     # ---- History command ----
+    async def _list_deletable_ids_for_user(telegram_user_id: int, ids: Optional[list[int]] | None = None, *, only_visible: bool = False) -> list[int]:
+        """Return list of ResultDoc IDs belonging to the telegram user.
+        If ids provided, intersect with them. If only_visible, filter hidden=0/NULL.
+        """
+        if SessionLocal is None:
+            return []
+        from sqlalchemy import select as _select
+        from sqlalchemy import or_ as _or
+        from sqlalchemy import join as _join
+        async with SessionLocal() as _s:
+            from .db import ResultDoc, Job, User
+            # Map telegram -> DB user.id when possible
+            db_uid: Optional[int] = None
+            try:
+                uq = await _s.execute(_select(User).where(User.telegram_id == int(telegram_user_id)))
+                urow = uq.scalars().first()
+                if urow is not None:
+                    db_uid = int(urow.id)
+            except Exception:
+                db_uid = None
+            cond = Job.user_id == int(telegram_user_id)
+            if db_uid is not None:
+                cond = _or(cond, Job.user_id == db_uid)
+            jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
+            sel = _select(ResultDoc.id).select_from(jn).where(cond)
+            if ids:
+                try:
+                    _ids = [int(x) for x in ids if isinstance(x, int)]
+                except Exception:
+                    _ids = []
+                if _ids:
+                    sel = sel.where(ResultDoc.id.in_(_ids))
+                else:
+                    return []
+            else:
+                if only_visible:
+                    from sqlalchemy import or_ as __or
+                    sel = sel.where(__or(ResultDoc.hidden == 0, ResultDoc.hidden.is_(None)))
+            res = await _s.execute(sel)
+            return [int(row[0]) for row in res.fetchall() if row and row[0]]
+
+    async def _delete_results_for_user(telegram_user_id: int, ids: Optional[list[int]] | None = None, *, only_visible: bool = False) -> int:
+        """Delete ResultDoc rows by IDs (or all) that belong to this Telegram user.
+        Returns number of deleted rows.
+        """
+        if SessionLocal is None:
+            return 0
+        from sqlalchemy import delete as _delete
+        allowed_ids = await _list_deletable_ids_for_user(telegram_user_id, ids=ids, only_visible=only_visible)
+        if not allowed_ids:
+            return 0
+        async with SessionLocal() as _s:
+            from .db import ResultDoc
+            await _s.execute(_delete(ResultDoc).where(ResultDoc.id.in_(allowed_ids)))
+            await _s.commit()
+        return len(allowed_ids)
+
     @dp.message_handler(commands=["history"])  # type: ignore
     async def cmd_history(message: types.Message, state: FSMContext):
         data = await state.get_data()
@@ -2108,6 +2170,12 @@ def create_dispatcher() -> Dispatcher:
                 from .kv import set_history_cleared_at
                 await clear_history(message.from_user.id)
                 await set_history_cleared_at(message.from_user.id)
+                # Also remove user's results from Results page (including hidden)
+                if message.from_user:
+                    try:
+                        await _delete_results_for_user(message.from_user.id, only_visible=False)
+                    except Exception:
+                        pass
             except Exception:
                 pass
             await message.answer("История очищена." if _is_ru(ui_lang) else "History cleared.")
@@ -2189,6 +2257,7 @@ def create_dispatcher() -> Dispatcher:
         # Inline clear button for clarity
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(text=("Очистить историю" if _is_ru(ui_lang) else "Clear history"), callback_data="history:clear"))
+        kb.add(types.InlineKeyboardButton(text=("Удалить выборочно" if _is_ru(ui_lang) else "Delete selected"), callback_data="history:delete"))
         await message.answer(prefix + "\n".join(lines), parse_mode=types.ParseMode.HTML, disable_web_page_preview=True, reply_markup=kb)
 
     @dp.message_handler(commands=["history_clear"])  # type: ignore
@@ -2197,6 +2266,17 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         try:
             await clear_history(message.from_user.id)
+            try:
+                from .kv import set_history_cleared_at
+                await set_history_cleared_at(message.from_user.id)
+            except Exception:
+                pass
+            # Remove user's results from Results page as well (including hidden)
+            if message.from_user:
+                try:
+                    await _delete_results_for_user(message.from_user.id, only_visible=False)
+                except Exception:
+                    pass
         except Exception:
             pass
         await message.answer("История очищена." if _is_ru(ui_lang) else "History cleared.")
@@ -2207,6 +2287,12 @@ def create_dispatcher() -> Dispatcher:
             from .kv import set_history_cleared_at
             await clear_history(query.from_user.id)
             await set_history_cleared_at(query.from_user.id)
+            # Also delete all results for this user from Results page (including hidden)
+            if query.from_user:
+                try:
+                    await _delete_results_for_user(query.from_user.id, only_visible=False)
+                except Exception:
+                    pass
         except Exception:
             pass
         try:
@@ -2219,6 +2305,123 @@ def create_dispatcher() -> Dispatcher:
             chat_id=query.message.chat.id,
             message_id=query.message.message_id,
             text=("История очищена." if _is_ru(ui_lang) else "History cleared."),
+        )
+
+    @dp.callback_query_handler(lambda c: c.data == "history:delete")  # type: ignore
+    async def cb_history_delete(query: types.CallbackQuery, state: FSMContext):
+        try:
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+        except Exception:
+            ui_lang = "ru"
+        prompt_ru = "Напишите через запятую id результатов, которые нужно удалить (например: 36, 34)."
+        prompt_en = "Send comma-separated result IDs to delete (e.g.: 36, 34)."
+        await HistoryStates.WaitingDeleteIds.set()
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        # Show Cancel button while waiting for IDs
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(text=("Отмена" if _is_ru(ui_lang) else "Cancel"), callback_data="history:delete_cancel"))
+        await dp.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=(prompt_ru if _is_ru(ui_lang) else prompt_en),
+            reply_markup=kb,
+        )
+
+    @dp.message_handler(state=HistoryStates.WaitingDeleteIds, content_types=types.ContentTypes.TEXT)  # type: ignore
+    async def history_delete_ids_received(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        raw = (message.text or "").strip()
+        # Textual cancel fallback
+        if raw.lower() in {"отмена", "cancel"}:
+            await state.finish()
+            await message.answer("Удаление отменено." if _is_ru(ui_lang) else "Deletion cancelled.")
+            return
+        # Parse comma/space separated integers
+        import re as _re
+        parts = [_p.strip() for _p in _re.split(r"[,\s]+", raw) if _p.strip()]
+        ids: list[int] = []
+        for p in parts:
+            try:
+                ids.append(int(p))
+            except Exception:
+                continue
+        if not ids:
+            await message.answer("Не распознал id. Отправьте, например: 36, 34" if _is_ru(ui_lang) else "No IDs found. For example: 36, 34")
+            return
+        # Build confirmation: which ids are allowed vs skipped
+        allowed: list[int] = []
+        try:
+            if message.from_user:
+                allowed = await _list_deletable_ids_for_user(message.from_user.id, ids=ids)
+        except Exception:
+            allowed = []
+        allowed_set = set(allowed)
+        skipped = [i for i in ids if i not in allowed_set]
+        if not allowed:
+            await message.answer("Нечего удалять: не найдено ваших результатов с такими ID." if _is_ru(ui_lang) else "Nothing to delete: no matching results owned by you.")
+            await state.finish()
+            return
+        # Save pending list and show confirm/cancel
+        await state.update_data(pending_delete_ids=allowed)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(text=("Подтвердить" if _is_ru(ui_lang) else "Confirm"), callback_data="history:delete_confirm"))
+        kb.add(types.InlineKeyboardButton(text=("Отмена" if _is_ru(ui_lang) else "Cancel"), callback_data="history:delete_cancel"))
+        lines = []
+        lines.append(("Будут удалены id: " if _is_ru(ui_lang) else "Will delete ids: ") + ", ".join(str(x) for x in allowed))
+        if skipped:
+            lines.append(("Пропущены (не ваши/не найдены): " if _is_ru(ui_lang) else "Skipped (not yours/not found): ") + ", ".join(str(x) for x in skipped))
+        await message.answer("\n".join(lines), reply_markup=kb)
+
+    @dp.callback_query_handler(lambda c: c.data == "history:delete_cancel", state=HistoryStates.WaitingDeleteIds)  # type: ignore
+    async def cb_history_delete_cancel(query: types.CallbackQuery, state: FSMContext):
+        try:
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+        except Exception:
+            ui_lang = "ru"
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        try:
+            await state.finish()
+        except Exception:
+            pass
+        await dp.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=("Удаление отменено." if _is_ru(ui_lang) else "Deletion cancelled."),
+        )
+
+    @dp.callback_query_handler(lambda c: c.data == "history:delete_confirm", state=HistoryStates.WaitingDeleteIds)  # type: ignore
+    async def cb_history_delete_confirm(query: types.CallbackQuery, state: FSMContext):
+        try:
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+            ids = [int(x) for x in (data.get("pending_delete_ids") or [])]
+        except Exception:
+            ui_lang = "ru"
+            ids = []
+        deleted = 0
+        try:
+            if query.from_user and ids:
+                deleted = await _delete_results_for_user(query.from_user.id, ids=ids)
+        except Exception:
+            deleted = 0
+        try:
+            await state.finish()
+        except Exception:
+            pass
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        await dp.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=((f"Удалено: {deleted}" if _is_ru(ui_lang) else f"Deleted: {deleted}") if deleted > 0 else ("Ничего не удалено." if _is_ru(ui_lang) else "Nothing deleted.")),
         )
 
     # Legacy state handler removed: fact-check choices are inline-only now
