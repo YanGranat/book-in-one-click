@@ -149,7 +149,7 @@ def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
-def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: bool, logs_enabled: bool, incognito: bool, fc_enabled: bool, fc_depth: int) -> InlineKeyboardMarkup:
+def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: bool, logs_enabled: bool, incognito: bool, fc_enabled: bool, fc_depth: int, *, is_admin: bool = True) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     ru = _is_ru(ui_lang)
     # Provider row
@@ -164,11 +164,12 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
         InlineKeyboardButton(text=("EN" + (" ✓" if gen_lang == "en" else "")), callback_data="set:gen_lang:en"),
         InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if gen_lang == "auto" else "")), callback_data="set:gen_lang:auto"),
     )
-    # Refine row
-    kb.add(
-        InlineKeyboardButton(text=(("Редактура: вкл" if ru else "Refine: on") + (" ✓" if refine else "")), callback_data="set:refine:yes"),
-        InlineKeyboardButton(text=(("Редактура: выкл" if ru else "Refine: off") + (" ✓" if not refine else "")), callback_data="set:refine:no"),
-    )
+    # Refine row (admins only)
+    if is_admin:
+        kb.add(
+            InlineKeyboardButton(text=(("Редактура: вкл" if ru else "Refine: on") + (" ✓" if refine else "")), callback_data="set:refine:yes"),
+            InlineKeyboardButton(text=(("Редактура: выкл" if ru else "Refine: off") + (" ✓" if not refine else "")), callback_data="set:refine:no"),
+        )
     # Logs row
     kb.add(
         InlineKeyboardButton(text=(("Логи: вкл" if ru else "Logs: on") + (" ✓" if logs_enabled else "")), callback_data="set:logs:enable"),
@@ -179,17 +180,18 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
         InlineKeyboardButton(text=(("Инкогнито: вкл" if ru else "Incognito: on") + (" ✓" if incognito else "")), callback_data="set:incog:enable"),
         InlineKeyboardButton(text=(("Инкогнито: выкл" if ru else "Incognito: off") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
     )
-    # Fact-check row
-    kb.add(
-        InlineKeyboardButton(text=(("Факт-чекинг: вкл" if ru else "Fact-check: on") + (" ✓" if fc_enabled else "")), callback_data="set:fc_cmd:enable"),
-        InlineKeyboardButton(text=(("Факт-чекинг: выкл" if ru else "Fact-check: off") + (" ✓" if not fc_enabled else "")), callback_data="set:fc_cmd:disable"),
-    )
-    # Depth row
-    kb.add(
-        InlineKeyboardButton(text=("D=1" + (" ✓" if fc_depth == 1 else "")), callback_data="set:depth:1"),
-        InlineKeyboardButton(text=("D=2" + (" ✓" if fc_depth == 2 else "")), callback_data="set:depth:2"),
-        InlineKeyboardButton(text=("D=3" + (" ✓" if fc_depth == 3 else "")), callback_data="set:depth:3"),
-    )
+    # Fact-check row (admins only)
+    if is_admin:
+        kb.add(
+            InlineKeyboardButton(text=(("Факт-чекинг: вкл" if ru else "Fact-check: on") + (" ✓" if fc_enabled else "")), callback_data="set:fc_cmd:enable"),
+            InlineKeyboardButton(text=(("Факт-чекинг: выкл" if ru else "Fact-check: off") + (" ✓" if not fc_enabled else "")), callback_data="set:fc_cmd:disable"),
+        )
+        # Depth row
+        kb.add(
+            InlineKeyboardButton(text=("D=1" + (" ✓" if fc_depth == 1 else "")), callback_data="set:depth:1"),
+            InlineKeyboardButton(text=("D=2" + (" ✓" if fc_depth == 2 else "")), callback_data="set:depth:2"),
+            InlineKeyboardButton(text=("D=3" + (" ✓" if fc_depth == 3 else "")), callback_data="set:depth:3"),
+        )
     return kb
 
 
@@ -313,11 +315,11 @@ def create_dispatcher() -> Dispatcher:
             reply_markup=build_ui_lang_inline(),
         )
 
-        # Update command menu: full set in private chat; add /chat only for admins
+        # Update command menu: full set in private chat; admin-only extras
         try:
             if message.from_user and message.chat and message.chat.type == "private":
                 is_admin = message.from_user.id in ADMIN_IDS
-                # RU set
+                # RU set (user default)
                 base_ru = [
                     types.BotCommand("start", "Начать"),
                     types.BotCommand("generate", "Сгенерировать"),
@@ -331,12 +333,9 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("provider", "Провайдер"),
                     types.BotCommand("logs", "Логи генерации"),
                     types.BotCommand("incognito", "Инкогнито"),
-                    types.BotCommand("factcheck", "Факт-чекинг"),
-                    types.BotCommand("depth", "Глубина"),
-                    types.BotCommand("refine", "Финальная редактура"),
                     types.BotCommand("cancel", "Отмена"),
                 ]
-                # EN set
+                # EN set (user default)
                 base_en = [
                     types.BotCommand("start", "Start"),
                     types.BotCommand("generate", "Generate"),
@@ -350,17 +349,21 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("provider", "Provider"),
                     types.BotCommand("logs", "Logs"),
                     types.BotCommand("incognito", "Incognito"),
-                    types.BotCommand("factcheck", "Fact-check"),
-                    types.BotCommand("depth", "Depth"),
-                    types.BotCommand("refine", "Refine"),
                     types.BotCommand("cancel", "Cancel"),
                 ]
                 if is_admin:
+                    # Admin extras: factcheck/depth/refine/chat
                     base_ru = base_ru + [
+                        types.BotCommand("factcheck", "Факт-чекинг"),
+                        types.BotCommand("depth", "Глубина"),
+                        types.BotCommand("refine", "Финальная редактура"),
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
                     ]
                     base_en = base_en + [
+                        types.BotCommand("factcheck", "Fact-check"),
+                        types.BotCommand("depth", "Depth"),
+                        types.BotCommand("refine", "Refine"),
                         types.BotCommand("chat", "Chat with AI"),
                         types.BotCommand("endchat", "End chat"),
                     ]
@@ -849,7 +852,8 @@ def create_dispatcher() -> Dispatcher:
             "Quick settings (all toggles via buttons):"
         )
         await state.update_data(in_settings=True)
-        await message.answer(title, reply_markup=build_settings_keyboard(ui_lang, prov, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth)))
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        await message.answer(title, reply_markup=build_settings_keyboard(ui_lang, prov, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin))
 
     @dp.message_handler(commands=["logs"])  # type: ignore
     async def cmd_logs(message: types.Message, state: FSMContext):
@@ -947,8 +951,8 @@ def create_dispatcher() -> Dispatcher:
             await query.message.edit_reply_markup() if query.message else None
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding_flag = bool((await state.get_data()).get("onboarding"))
-            if onboarding_flag:
-                # After incognito, ask refine then fact-check
+            if onboarding_flag and (query.from_user and query.from_user.id in ADMIN_IDS):
+                # After incognito, ask refine then fact-check (admins only)
                 prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
                 await dp.bot.send_message(
                     query.message.chat.id if query.message else query.from_user.id,
@@ -958,6 +962,9 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
+        if not message.from_user or message.from_user.id not in ADMIN_IDS:
+            await message.answer("Недоступно.")
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
@@ -965,6 +972,9 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:refine:"))  # type: ignore
     async def cb_set_refine(query: types.CallbackQuery, state: FSMContext):
+        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+            await query.answer()
+            return
         val = (query.data or "").split(":")[-1]
         enabled = (val == "yes")
         data = await state.get_data()
@@ -995,8 +1005,8 @@ def create_dispatcher() -> Dispatcher:
             await query.message.edit_reply_markup() if query.message else None
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding = bool((await state.get_data()).get("onboarding"))
-            if onboarding:
-                # After refine in onboarding → ask fact-check
+            if onboarding and (query.from_user and query.from_user.id in ADMIN_IDS):
+                # After refine in onboarding → ask fact-check (admins only)
                 prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
 
@@ -1044,6 +1054,9 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"))  # type: ignore
     async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
+        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+            await query.answer()
+            return
         val = (query.data or "").split(":")[-1]
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
@@ -1076,6 +1089,9 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
+        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+            await query.answer()
+            return
         val = (query.data or "").split(":")[-1]
         try:
             depth = int(val)
@@ -1125,6 +1141,9 @@ def create_dispatcher() -> Dispatcher:
     # ---- Fact-check settings command ----
     @dp.message_handler(commands=["factcheck"])  # type: ignore
     async def cmd_factcheck(message: types.Message, state: FSMContext):
+        if not message.from_user or message.from_user.id not in ADMIN_IDS:
+            await message.answer("Недоступно.")
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Факт-чекинг?" if _is_ru(ui_lang) else "Fact-check?"
@@ -1132,6 +1151,9 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc_cmd:"))  # type: ignore
     async def cb_fc_cmd_toggle(query: types.CallbackQuery, state: FSMContext):
+        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+            await query.answer()
+            return
         val = (query.data or "").split(":")[-1]
         enabled = (val == "enable")
         await set_factcheck_enabled(query.from_user.id, enabled)
@@ -1279,7 +1301,7 @@ def create_dispatcher() -> Dispatcher:
                                     user = await ensure_user_with_credits(session, message.from_user.id)
                                     ok, remaining = await charge_credits(session, user, int(total_cost), reason="post_series_fixed_prepay")
                                     if not ok:
-                                        await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                        await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
                                         await state.finish()
                                         RUNNING_CHATS.discard(chat_id)
                                         return
@@ -1288,7 +1310,7 @@ def create_dispatcher() -> Dispatcher:
                             else:
                                 ok, remaining = await charge_credits_kv(message.from_user.id, int(total_cost))  # type: ignore
                                 if not ok:
-                                    await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                    await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
                                     await state.finish()
                                     RUNNING_CHATS.discard(chat_id)
                                     return
@@ -1319,7 +1341,7 @@ def create_dispatcher() -> Dispatcher:
                                 balance = 0
                         prepay_budget = min(30, balance)
                         if prepay_budget <= 0:
-                            await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                            await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
                             await state.finish()
                             RUNNING_CHATS.discard(chat_id)
                             return
@@ -1345,7 +1367,7 @@ def create_dispatcher() -> Dispatcher:
                                     user = await get_or_create_user(session, message.from_user.id)
                                     ok, remaining = await charge_credits(session, user, int(prepay_budget), reason="post_series_auto_prepay")
                                     if not ok:
-                                        await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                        await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
                                         await state.finish()
                                         RUNNING_CHATS.discard(chat_id)
                                         return
@@ -1354,7 +1376,7 @@ def create_dispatcher() -> Dispatcher:
                             else:
                                 ok, remaining = await charge_credits_kv(message.from_user.id, int(prepay_budget))  # type: ignore
                                 if not ok:
-                                    await message.answer("Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits")
+                                    await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
                                     await state.finish()
                                     RUNNING_CHATS.discard(chat_id)
                                     return
@@ -1601,10 +1623,15 @@ def create_dispatcher() -> Dispatcher:
             if not charged and message.from_user:
                 ok, remaining = await charge_credits_kv(message.from_user.id, unit_cost)
                 if not ok:
-                    warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
-                    await message.answer(warn, reply_markup=ReplyKeyboardRemove())
+                    need = max(0, int(unit_cost) - int(remaining))
+                    warn = (
+                        f"Недостаточно кредитов. Не хватает: {need}. Используйте /buy для пополнения."
+                        if _is_ru(ui_lang)
+                        else f"Insufficient credits. Need: {need}. Use /buy to top up."
+                    )
+                    await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                     try:
-                        await message.answer(
+                        await dp.bot.send_message(
                             ("Купить кредиты за ⭐? Один кредит = 200⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 200⭐"),
                             reply_markup=build_buy_keyboard(ui_lang),
                         )
@@ -1951,11 +1978,22 @@ def create_dispatcher() -> Dispatcher:
                 unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
                 ok, remaining = await charge_credits_kv(query.from_user.id, unit_cost)
                 if not ok:
-                    warn = "Недостаточно кредитов" if _is_ru(ui_lang) else "Insufficient credits"
-                    await dp.bot.send_message(chat_id, warn)
-                    RUNNING_CHATS.discard(chat_id)
+                    need = max(0, int(unit_cost) - int(remaining))
+                    warn = (
+                        f"Недостаточно кредитов. Не хватает: {need}. Используйте /buy для пополнения."
+                        if _is_ru(ui_lang)
+                        else f"Insufficient credits. Need: {need}. Use /buy to top up."
+                    )
+                    await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
+                    try:
+                        await dp.bot.send_message(
+                            ("Купить кредиты за ⭐? Один кредит = 200⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 200⭐"),
+                            reply_markup=build_buy_keyboard(ui_lang),
+                        )
+                    except Exception:
+                        pass
                     await state.finish()
-                    await query.answer()
+                    RUNNING_CHATS.discard(chat_id)
                     return
         except SQLAlchemyError:
             warn = "Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later."
@@ -2483,16 +2521,16 @@ def create_dispatcher() -> Dispatcher:
         if _is_ru(ui_lang):
             await message.answer(
                 "Цены:\n"
-                "- Пост: 1 кредит (+1 легкий факт‑чек, +3 глубокий; +1 редактура)\n"
-                "- Серия: 1×N кредитов (каждый пост по формуле выше)\n"
+                "- Пост: 1 кредит\n"
+                "- Серия: 1×N кредитов\n"
                 "- Статья: 3 кредита\n- Книга: по главам\n"
                 "Оплата: Telegram Stars (если включено)."
             )
         else:
             await message.answer(
                 "Pricing:\n"
-                "- Post: 1 credit (+1 light fact‑check, +3 deep; +1 refine)\n"
-                "- Series: 1×N credits (per post as above)\n"
+                "- Post: 1 credit\n"
+                "- Series: 1×N credits\n"
                 "- Article: 3 credits\n- Book: per chapter\n"
                 "Payments: Telegram Stars (if enabled)."
             )
