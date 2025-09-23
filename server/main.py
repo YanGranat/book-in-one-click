@@ -737,10 +737,10 @@ async def results_ui():
             link = f"/results-ui/id/{it['id']}"
             topic = (it.get('topic','') or '').replace('<','&lt;').replace('>','&gt;')
             rows.append(
-                f"<tr data-id='{it.get('id')}' data-topic='{topic.lower()}' data-prov='{(it.get('provider','') or '').lower()}' data-lang='{(it.get('lang','') or '').lower()}' data-kind='{(it.get('kind','') or '').lower()}'>"
+                f"<tr data-id='{it.get('id')}' data-topic='{topic.lower()}' data-lang='{(it.get('lang','') or '').lower()}' data-kind='{(it.get('kind','') or '').lower()}'>"
                 f"<td class='t-topic'><a href='{link}'>{topic or '(no topic)'}</a></td>"
                 f"<td class='t-created'>{it.get('created_at','')}</td><td class='t-kind'>{it.get('kind','')}</td>"
-                f"<td class='t-prov'>{it.get('provider','')}</td><td class='t-lang'>{it.get('lang','')}</td>"
+                f"<td class='t-lang'>{it.get('lang','')}</td>"
                 f"</tr>"
             )
     html = (
@@ -774,8 +774,8 @@ async def results_ui():
         "<button id='refresh'>Refresh</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
-        "<table id='tbl'><thead><tr><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Type</th><th>Provider</th><th data-sort='lang'>Lang</th></tr></thead><tbody>"
-        + ("".join(rows) or "<tr><td colspan='7' class='muted'>No results yet</td></tr>")
+        "<table id='tbl'><thead><tr><th data-sort='topic'>Topic</th><th data-sort='created'>Created</th><th>Type</th><th data-sort='lang'>Lang</th></tr></thead><tbody>"
+        + ("".join(rows) or "<tr><td colspan='4' class='muted'>No results yet</td></tr>")
         + "</tbody></table>"
         "<footer>Tip: Filter by lang and search by topic. Click headers to sort. Use the theme switcher for light/dark.</footer>"
         "<script>"
