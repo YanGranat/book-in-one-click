@@ -196,13 +196,17 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
 def build_genlang_inline(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     if _is_ru(ui_lang):
-        kb.add(InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"))
-        kb.add(InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"))
-        kb.add(InlineKeyboardButton(text="Авто", callback_data="set:gen_lang:auto"))
+        kb.add(
+            InlineKeyboardButton(text="Авто", callback_data="set:gen_lang:auto"),
+            InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"),
+            InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"),
+        )
     else:
-        kb.add(InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"))
-        kb.add(InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"))
-        kb.add(InlineKeyboardButton(text="Auto", callback_data="set:gen_lang:auto"))
+        kb.add(
+            InlineKeyboardButton(text="Auto", callback_data="set:gen_lang:auto"),
+            InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"),
+            InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"),
+        )
     return kb
 
 
@@ -428,12 +432,15 @@ def create_dispatcher() -> Dispatcher:
                 "<b>Как пользоваться:</b>\n"
                 "- /generate — выбрать Пост или Серию; серия: пресеты 2/5/авто/кастом.\n"
                 "- /start — пройти настройку заново (язык интерфейса, язык генерации, редактура, провайдер, логи, инкогнито, факт‑чекинг, глубина).\n"
+                "- /history — показать историю генераций, выборочно удалить или очистить всё.\n"
+                "- /history_clear — очистить историю.\n"
                 "- /factcheck — задать дефолт факт‑чекинга (вкл/выкл и глубину).\n"
                 "- /depth — установить глубину факт‑чекинга по умолчанию.\n"
                 "- /refine — включить/выключить финальную редактуру.\n"
-                "- /lang, /lang_generate, /provider, /logs, /incognito — точечно поменять настройки.\n\n"
+                "- /lang, /lang_generate, /provider, /logs, /incognito — точечно поменять настройки.\n"
+                "- /chat, /endchat — чат с ИИ (для админов).\n\n"
                 "<b>Результаты:</b>\n"
-                f"- Список всех результатов: {RESULTS_ORIGIN}/results-ui\n"
+                f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n"
                 "- Каждый результат — Markdown‑файл, который можно скачать и править; серия — один агрегатный .md.\n\n"
                 "<b>Кредиты:</b>\n"
                 "- Пост: 1 кредит; факт‑чек +1 (лёгкий) или +3 (глубокий ≥3); редактура +1.\n"
@@ -449,19 +456,22 @@ def create_dispatcher() -> Dispatcher:
                 f"- Финальная редактура: {'включена' if refine_enabled else 'отключена'}\n"
                 f"- Факт‑чекинг: {'включён' if fc_enabled else 'отключён'}"
                 + (f" (глубина {fc_depth})" if fc_enabled else "")
-                + "\n\nGitHub проекта: https://github.com/YanGranat/book-in-one-click"
+                + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
             )
         else:
             text = (
                 "<b>How to use:</b>\n"
                 "- /generate — choose Post or Series; series: presets 2/5/auto/custom.\n"
-                "- /start — run onboarding (UI lang, gen lang, refine, provider, logs, incognito, fact‑check, depth).\n"
-                "- /factcheck — set default fact‑check (enable/disable and depth).\n"
+                "- /start — onboarding (UI lang, gen lang, refine, provider, logs, incognito, fact‑check, depth).\n"
+                "- /history — show history, delete selected or clear all.\n"
+                "- /history_clear — clear history.\n"
+                "- /factcheck — set default fact‑check (enable/disable + depth).\n"
                 "- /depth — set default fact‑check depth.\n"
                 "- /refine — enable/disable final refine step.\n"
-                "- /lang, /lang_generate, /provider, /logs, /incognito — tweak settings individually.\n\n"
+                "- /lang, /lang_generate, /provider, /logs, /incognito — tweak settings individually.\n"
+                "- /chat, /endchat — chat with AI (admins).\n\n"
                 "<b>Results:</b>\n"
-                f"- All results page: {RESULTS_ORIGIN}/results-ui\n"
+                f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n"
                 "- Each result is a Markdown file; series arrive as one aggregate .md.\n\n"
                 "<b>Credits:</b>\n"
                 "- Post: 1 credit; fact‑check +1 (light) or +3 (deep ≥3); refine +1.\n"
@@ -477,7 +487,7 @@ def create_dispatcher() -> Dispatcher:
                 f"- Final refine: {'enabled' if refine_enabled else 'disabled'}\n"
                 f"- Fact‑check: {'enabled' if fc_enabled else 'disabled'}"
                 + (f" (depth {fc_depth})" if fc_enabled else "")
-                + "\n\nProject GitHub: https://github.com/YanGranat/book-in-one-click"
+                + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
             )
         await message.answer(text, disable_web_page_preview=True, parse_mode=types.ParseMode.HTML)
 
@@ -556,14 +566,14 @@ def create_dispatcher() -> Dispatcher:
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
                 # After generation language → ask provider
-                prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if _is_ru(ui_lang) else "Choose provider (OpenAI/Gemini/Claude):"
+                prompt = "Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        prompt = "Выберите провайдера (OpenAI/Gemini/Claude):" if ui_lang == "ru" else "Choose provider (OpenAI/Gemini/Claude):"
+        prompt = "Выберите провайдера:" if ui_lang == "ru" else "Choose provider:"
         await message.answer(prompt, reply_markup=build_provider_inline())
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:provider:"))  # type: ignore
@@ -883,7 +893,11 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
-                prompt = "Инкогнито режим: включить или отключить?" if _is_ru(ui_lang) else "Incognito: Enable or Disable?"
+                prompt = (
+                    "Инкогнито режим? Ваши генерации не будут видны на странице с результатами генераций всех пользователей."
+                    if _is_ru(ui_lang)
+                    else "Incognito mode? Your generations will not be visible on the public results page."
+                )
                 await dp.bot.send_message(
                     query.message.chat.id if query.message else query.from_user.id,
                     prompt,
@@ -895,9 +909,9 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = (
-            "Инкогнито режим (ваши результаты не будут отображаться на публичной странице результатов):"
+            "Инкогнито режим? Ваши генерации не будут видны на странице с результатами генераций всех пользователей."
             if ui_lang == "ru"
-            else "Incognito (your results will not appear on the public results page):"
+            else "Incognito mode? Your generations will not be visible on the public results page."
         )
         await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
@@ -2253,7 +2267,7 @@ def create_dispatcher() -> Dispatcher:
                 lines.append(f"• [{tag}] <a href='{url}'>{topic}</a>{idtxt}")
             else:
                 lines.append(f"• [{tag}] {topic}{idtxt}")
-        prefix = "История генераций (последние):\n" if _is_ru(ui_lang) else "Your recent generations:\n"
+        prefix = "История генераций (последние):\n\n" if _is_ru(ui_lang) else "Your recent generations:\n\n"
         # Inline clear button for clarity
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(text=("Очистить историю" if _is_ru(ui_lang) else "Clear history"), callback_data="history:clear"))
@@ -2314,8 +2328,8 @@ def create_dispatcher() -> Dispatcher:
             ui_lang = (data.get("ui_lang") or "ru").strip()
         except Exception:
             ui_lang = "ru"
-        prompt_ru = "Напишите через запятую id результатов, которые нужно удалить (например: 36, 34)."
-        prompt_en = "Send comma-separated result IDs to delete (e.g.: 36, 34)."
+        prompt_ru = "Напишите через запятую id результатов, которые нужно удалить."
+        prompt_en = "Send comma-separated result IDs to delete."
         await HistoryStates.WaitingDeleteIds.set()
         try:
             await query.answer()
