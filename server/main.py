@@ -33,6 +33,61 @@ WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 
 app = FastAPI(title="Book in One Click Bot API")
 
+# ----- Admin UI auth (HTTP Basic) -----
+_basic = HTTPBasic()
+
+async def require_admin(request: Request, creds: HTTPBasicCredentials = Depends(_basic)) -> bool:
+    user = os.getenv("ADMIN_UI_USER", "admin")
+    pwd = os.getenv("ADMIN_UI_PASSWORD", "")
+    if not pwd:
+        # Explicitly deny when password is not configured
+        raise HTTPException(status_code=503, detail="ADMIN_UI_PASSWORD not configured")
+    # Brute-force lock: IP-based attempt counter via Redis
+    client_ip = None
+    try:
+        client_ip = request.client.host if request and request.client else None
+    except Exception:
+        client_ip = None
+    lock_key = None
+    r = None
+    try:
+        r = get_redis()
+        if client_ip:
+            lock_key = f"{kv_prefix()}:adminui:fail:{client_ip}"
+            val = None
+            try:
+                val = await r.get(lock_key)  # type: ignore
+            except Exception:
+                val = None
+            # If locked (value like 'LOCK'), block
+            if val and (isinstance(val, (bytes, bytearray)) and val.decode("utf-8").startswith("LOCK")):
+                raise HTTPException(status_code=429, detail="Too many attempts")
+    except Exception:
+        r = None
+
+    if secrets.compare_digest(creds.username, user) and secrets.compare_digest(creds.password, pwd):
+        # On success, clear fail counter
+        try:
+            if r and lock_key:
+                await r.delete(lock_key)  # type: ignore
+        except Exception:
+            pass
+        return True
+
+    # On failure, increment counter
+    try:
+        if r and client_ip and lock_key:
+            cnt = await r.incr(lock_key)  # type: ignore
+            # first failure => set TTL 15 minutes
+            await r.expire(lock_key, 15 * 60)  # type: ignore
+            if int(cnt) >= 10:
+                await r.set(lock_key, "LOCK", ex=15 * 60)  # type: ignore
+                raise HTTPException(status_code=429, detail="Too many attempts")
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
+
 
 async def _rate_allow_download(key_base: str, ip: str, *, per_min: int, per_hour: int, per_day: int) -> bool:
     if not ip:
