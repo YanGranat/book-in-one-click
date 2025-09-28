@@ -284,8 +284,8 @@ async def list_logs(_: bool = Depends(require_admin)):
                         "status": (jstatus or ""),
                         "result_id": (int(resid) if resid is not None else None),
                     }
-                # Materialize into list preserving DB order by iterating rows again
-                items = [items_by_id[int(getattr(jl, "id", 0) or 0)] for jl, *_ in rows if int(getattr(jl, "id", 0) or 0) in items_by_id]
+                # Materialize in first-seen order (dict preserves insertion order)
+                items = list(items_by_id.values())
         except Exception as e:
             print(f"[ERROR] DB read failed: {e}")
     # Fallback: sync read in case async engine/session isn't available
