@@ -152,13 +152,22 @@ def _run_gemini_with(system: str, user_message: str, *, model_name: Optional[str
     for mname in fallbacks:
         try:
             # Try enabling Google Search grounding if available via safety_settings/tools kwargs
-            tools = []
+            tools = None
             try:
-                # Recent SDKs expose tool config via dicts
-                tools = [{"google_search": {}}]
+                # Prefer typed Tool/GoogleSearch when available
+                from google.generativeai.types import Tool as _Tool, GoogleSearch as _GoogleSearch  # type: ignore
+                tools = [_Tool(google_search=_GoogleSearch())]
             except Exception:
-                tools = []
-            model = genai.GenerativeModel(model_name=mname, system_instruction=system, tools=tools)
+                try:
+                    # Fallback to dict-based tool config on older SDKs
+                    tools = [{"google_search": {}}]
+                except Exception:
+                    tools = None
+            # Instantiate model; if tools are rejected by SDK/backend, retry without tools
+            try:
+                model = genai.GenerativeModel(model_name=mname, system_instruction=system, tools=tools if tools else None)
+            except Exception:
+                model = genai.GenerativeModel(model_name=mname, system_instruction=system)
             chat = None
             history_msgs: List[Dict[str, str]] = []
             c_id, u_id, prov = _parse_session_id(session_id)
@@ -212,7 +221,13 @@ def _run_gemini_with(system: str, user_message: str, *, model_name: Optional[str
                 except Exception:
                     pass
             # Reuse the same native chat session for this turn
-            resp = chat.send_message(user_message)
+            try:
+                resp = chat.send_message(user_message)
+            except Exception:
+                # If the send fails due to tools incompatibility, rebuild chat without tools and retry
+                model_no_tools = genai.GenerativeModel(model_name=mname, system_instruction=system)
+                chat = model_no_tools.start_chat(history=ghistory) if ghistory else model_no_tools.start_chat()
+                resp = chat.send_message(user_message)
             txt = (getattr(resp, "text", None) or "").strip()
             if not txt:
                 parts = []

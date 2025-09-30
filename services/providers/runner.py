@@ -45,18 +45,40 @@ class ProviderRunner:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         genai.configure(api_key=api_key)
         mname = get_model("gemini", tier)
-        tools = []
+        # Try to enable Google Search grounding when SDK supports it; otherwise fall back gracefully
+        tools = None
         try:
-            tools = [{"google_search": {}}]
+            # Prefer typed Tool/GoogleSearch if available (newer SDKs)
+            from google.generativeai.types import Tool as _Tool, GoogleSearch as _GoogleSearch  # type: ignore
+            tools = [_Tool(google_search=_GoogleSearch())]
         except Exception:
-            tools = []
+            try:
+                # Older SDKs sometimes accept dict shape
+                tools = [{"google_search": {}}]
+            except Exception:
+                tools = None
         gen_cfg = {}
         if json_mode and is_json_supported("gemini"):
             jm = get_json_mode("gemini")
             mime = jm.get("response_mime_type") or "application/json"
             gen_cfg = {"response_mime_type": mime}
-        model = genai.GenerativeModel(model_name=mname, system_instruction=system, tools=tools, generation_config=gen_cfg or None)
-        resp = model.generate_content(user_message)
+        # Create model; if tools are not recognized by SDK or backend, retry without tools
+        try:
+            model = genai.GenerativeModel(
+                model_name=mname,
+                system_instruction=system,
+                tools=tools if tools else None,
+                generation_config=gen_cfg or None,
+            )
+            resp = model.generate_content(user_message)
+        except Exception:
+            # Retry without tools to avoid "Unknown field for FunctionDeclaration: google_search"
+            model = genai.GenerativeModel(
+                model_name=mname,
+                system_instruction=system,
+                generation_config=gen_cfg or None,
+            )
+            resp = model.generate_content(user_message)
         txt = (getattr(resp, "text", None) or "").strip()
         if not txt:
             parts: List[str] = []
