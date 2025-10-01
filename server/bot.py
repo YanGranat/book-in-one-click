@@ -154,6 +154,7 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
     ru = _is_ru(ui_lang)
     # Provider row
     kb.add(
+        InlineKeyboardButton(text=(("Авто" if ru else "Auto")), callback_data="set:provider:auto"),
         InlineKeyboardButton(text=("OpenAI" + (" ✓" if provider == "openai" else "")), callback_data="set:provider:openai"),
         InlineKeyboardButton(text=("Gemini" + (" ✓" if provider == "gemini" else "")), callback_data="set:provider:gemini"),
         InlineKeyboardButton(text=("Claude" + (" ✓" if provider == "claude" else "")), callback_data="set:provider:claude"),
@@ -221,6 +222,8 @@ def build_ui_lang_inline() -> InlineKeyboardMarkup:
 
 def build_provider_inline() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
+    # Default prompt elsewhere is RU/EN; keep button text simple
+    kb.add(InlineKeyboardButton(text="Auto", callback_data="set:provider:auto"))
     kb.add(InlineKeyboardButton(text="OpenAI", callback_data="set:provider:openai"))
     kb.add(InlineKeyboardButton(text="Gemini", callback_data="set:provider:gemini"))
     kb.add(InlineKeyboardButton(text="Claude", callback_data="set:provider:claude"))
@@ -410,8 +413,9 @@ def create_dispatcher() -> Dispatcher:
             pass
 
         def _prov_name(p: str) -> str:
-            m = {"openai": "OpenAI", "gemini": "Gemini", "claude": "Claude"}
-            return m.get((p or "").strip().lower(), p or "openai")
+            m = {"openai": "OpenAI", "gemini": "Gemini", "claude": "Claude", "auto": "OpenAI"}
+            key = (p or "").strip().lower()
+            return m.get(key, p or "openai")
 
         def _lang_human(l: str, ru: bool) -> str:
             if ru:
@@ -582,7 +586,10 @@ def create_dispatcher() -> Dispatcher:
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:provider:"))  # type: ignore
     async def cb_set_provider(query: types.CallbackQuery, state: FSMContext):
         prov = (query.data or "").split(":")[-1]
-        if prov not in {"openai","gemini","claude"}:
+        # Map 'auto' to 'openai' by default
+        if prov == "auto":
+            prov = "openai"
+        if prov not in {"openai", "gemini", "claude"}:
             await query.answer()
             return
         data = await state.get_data()
