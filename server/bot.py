@@ -154,7 +154,7 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
     ru = _is_ru(ui_lang)
     # Provider row
     kb.add(
-        InlineKeyboardButton(text=(("Авто" if ru else "Auto")), callback_data="set:provider:auto"),
+        InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if provider == "auto" else "")), callback_data="set:provider:auto"),
         InlineKeyboardButton(text=("OpenAI" + (" ✓" if provider == "openai" else "")), callback_data="set:provider:openai"),
         InlineKeyboardButton(text=("Gemini" + (" ✓" if provider == "gemini" else "")), callback_data="set:provider:gemini"),
         InlineKeyboardButton(text=("Claude" + (" ✓" if provider == "claude" else "")), callback_data="set:provider:claude"),
@@ -586,10 +586,8 @@ def create_dispatcher() -> Dispatcher:
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:provider:"))  # type: ignore
     async def cb_set_provider(query: types.CallbackQuery, state: FSMContext):
         prov = (query.data or "").split(":")[-1]
-        # Map 'auto' to 'openai' by default
-        if prov == "auto":
-            prov = "openai"
-        if prov not in {"openai", "gemini", "claude"}:
+        # Accept 'auto' as a stored preference; runtime mapping happens at call sites
+        if prov not in {"auto", "openai", "gemini", "claude"}:
             await query.answer()
             return
         data = await state.get_data()
@@ -1450,7 +1448,7 @@ def create_dispatcher() -> Dispatcher:
                     lambda: _gen_series(
                         topic,
                         lang=eff_lang,
-                        provider=(prov or "openai"),
+                        provider=((prov if prov != "auto" else "openai") or "openai"),
                         mode=mode_param,
                         count=count_param,
                         max_iterations=int(os.getenv("SERIES_MAX_ITER", "1")),
@@ -1806,7 +1804,7 @@ def create_dispatcher() -> Dispatcher:
                     lambda: generate_post(
                         topic,
                         lang=eff_lang,
-                        provider=(prov or "openai"),
+                        provider=((prov if prov != "auto" else "openai") or "openai"),
                         factcheck=True,
                         research_iterations=int(depth or 2),
                         job_meta=job_meta,
@@ -1821,7 +1819,7 @@ def create_dispatcher() -> Dispatcher:
                     lambda: generate_post(
                         topic,
                         lang=eff_lang,
-                        provider=(prov or "openai"),
+                        provider=((prov if prov != "auto" else "openai") or "openai"),
                         factcheck=False,
                         job_meta=job_meta,
                         on_progress=_on_progress,
@@ -2115,13 +2113,13 @@ def create_dispatcher() -> Dispatcher:
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
-                    lambda: generate_post(topic, lang=eff_lang, provider=(prov or "openai"), factcheck=True, research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
+                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
             else:
                 fut = loop.run_in_executor(
                     None,
-                    lambda: generate_post(topic, lang=eff_lang, provider=(prov or "openai"), factcheck=False, job_meta=job_meta, use_refine=refine_enabled),
+                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=False, job_meta=job_meta, use_refine=refine_enabled),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
             with open(path, "rb") as f:
@@ -2831,8 +2829,9 @@ def create_dispatcher() -> Dispatcher:
             system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=full_content)
             import asyncio as _aio
             _loop = _aio.get_running_loop()
-            sid = f"{message.chat.id}:{message.from_user.id}:{prov}"
-            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, user_payload, session_id=sid))
+            eff_prov = (prov if prov != "auto" else "openai")
+            sid = f"{message.chat.id}:{message.from_user.id}:{eff_prov}"
+            reply = await _loop.run_in_executor(None, lambda: run_chat_message(eff_prov, system, user_payload, session_id=sid))
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
             return
@@ -2993,8 +2992,9 @@ def create_dispatcher() -> Dispatcher:
             system = build_system_prompt(chat_lang=chat_lang, kind=kind, full_content=(content or ""))
             import asyncio as _aio
             _loop = _aio.get_running_loop()
-            sid = f"{message.chat.id}:{message.from_user.id}:{prov}"
-            reply = await _loop.run_in_executor(None, lambda: run_chat_message(prov, system, txt, session_id=sid))
+            eff_prov = (prov if prov != "auto" else "openai")
+            sid = f"{message.chat.id}:{message.from_user.id}:{eff_prov}"
+            reply = await _loop.run_in_executor(None, lambda: run_chat_message(eff_prov, system, txt, session_id=sid))
         except Exception as e:
             await message.answer(f"Ошибка: {e}")
             return
