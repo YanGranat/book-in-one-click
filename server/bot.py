@@ -1336,6 +1336,12 @@ def create_dispatcher() -> Dispatcher:
                 import asyncio as _asyncio
                 loop = _asyncio.get_running_loop()
                 timeout_s = int(os.getenv("GEN_TIMEOUT_S", "3600"))
+                # Resolve incognito flag upfront (cannot use await inside lambda)
+                try:
+                    inc_flag = (await get_incognito(message.from_user.id)) if message.from_user else False
+                except Exception:
+                    inc_flag = False
+
                 fut = loop.run_in_executor(
                     None,
                     lambda: generate_article(
@@ -1343,7 +1349,7 @@ def create_dispatcher() -> Dispatcher:
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         output_subdir="deep_article",
-                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id, "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False},
+                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
                     ),
                 )
                 article_path = await _asyncio.wait_for(fut, timeout=timeout_s)
