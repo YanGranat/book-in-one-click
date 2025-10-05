@@ -1351,6 +1351,8 @@ def create_dispatcher() -> Dispatcher:
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         output_subdir="deep_article",
                         job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
+                        enable_research=False if not (await get_factcheck_enabled(message.from_user.id) if message.from_user else False) else True,
+                        enable_refine=bool(await get_refine_enabled(message.from_user.id) if message.from_user else False),
                     ),
                 )
                 try:

@@ -36,6 +36,8 @@ def generate_article(
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
     return_log_path: bool = False,
+    enable_research: bool = True,
+    enable_refine: bool = True,
 ) -> Path | str:
     """
     Generate a deep popular science article and save it to output/<output_subdir>/.
@@ -82,7 +84,7 @@ def generate_article(
     log_lines: list[str] = []
     def log(section: str, body: str):
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
-    log("🧭 Config", f"provider={_prov}\nlang={lang}")
+    log("🧭 Config", f"provider={_prov}\nlang={lang}\nresearch={bool(enable_research)}\nrefine={bool(enable_refine)}")
 
     # Agents import
     from llm_agents.deep_popular_science_article.module_01_structure.sections_and_subsections import build_sections_and_subsections_agent
@@ -115,78 +117,81 @@ def generate_article(
     outline = Runner.run_sync(content_agent, user_content).final_output  # type: ignore
     log("📑 Outline · Subsections Content", f"```json\n{outline.model_dump_json()}\n```")
 
-    # Module 2
-    tr_agent = build_topic_research_agent()
-    tr_user = (
-        "<input>\n"
-        f"<topic>{topic}</topic>\n"
-        f"<lang>{lang}</lang>\n"
-        f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-        "</input>"
-    )
-    top_changes: OutlineChangeList = Runner.run_sync(tr_agent, tr_user).final_output  # type: ignore
-    log("🔎 Research · Topic Changes", f"```json\n{top_changes.model_dump_json()}\n```")
-    ed_agent = build_outline_editor_agent()
-    ed_user = (
-        "<input>\n"
-        f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-        f"<changes_json>{top_changes.model_dump_json()}</changes_json>\n"
-        "</input>"
-    )
-    outline = Runner.run_sync(ed_agent, ed_user).final_output  # type: ignore
-    log("🛠️ Outline · Applied Topic Changes", f"```json\n{outline.model_dump_json()}\n```")
-
-    sr_agent = build_section_research_agent()
-    ssr_agent = build_subsection_research_agent()
-    evidence_list: list[dict[str, Any]] = []
-    for sec in outline.sections:
-        sr_user = (
+    # Module 2 (optional)
+    if enable_research:
+        tr_agent = build_topic_research_agent()
+        tr_user = (
             "<input>\n"
             f"<topic>{topic}</topic>\n"
             f"<lang>{lang}</lang>\n"
             f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-            f"<section_id>{sec.id}</section_id>\n"
             "</input>"
         )
-        sec_changes: OutlineChangeList = Runner.run_sync(sr_agent, sr_user).final_output  # type: ignore
-        log("🔎 Research · Section Changes", f"{sec.id} → ```json\n{sec_changes.model_dump_json()}\n```")
-        ed_user2 = (
+        top_changes: OutlineChangeList = Runner.run_sync(tr_agent, tr_user).final_output  # type: ignore
+        log("🔎 Research · Topic Changes", f"```json\n{top_changes.model_dump_json()}\n```")
+        ed_agent = build_outline_editor_agent()
+        ed_user = (
             "<input>\n"
             f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-            f"<changes_json>{sec_changes.model_dump_json()}</changes_json>\n"
+            f"<changes_json>{top_changes.model_dump_json()}</changes_json>\n"
             "</input>"
         )
-        outline = Runner.run_sync(ed_agent, ed_user2).final_output  # type: ignore
-        # Subsections
-        for sub in sec.subsections:
-            ss_user = (
+        outline = Runner.run_sync(ed_agent, ed_user).final_output  # type: ignore
+        log("🛠️ Outline · Applied Topic Changes", f"```json\n{outline.model_dump_json()}\n```")
+
+        sr_agent = build_section_research_agent()
+        ssr_agent = build_subsection_research_agent()
+        evidence_list: list[dict[str, Any]] = []
+        for sec in outline.sections:
+            sr_user = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{lang}</lang>\n"
                 f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
                 f"<section_id>{sec.id}</section_id>\n"
-                f"<subsection_id>{sub.id}</subsection_id>\n"
                 "</input>"
             )
-            ss_res = Runner.run_sync(ssr_agent, ss_user).final_output  # type: ignore
-            try:
-                ed_user3 = (
+            sec_changes: OutlineChangeList = Runner.run_sync(sr_agent, sr_user).final_output  # type: ignore
+            log("🔎 Research · Section Changes", f"{sec.id} → ```json\n{sec_changes.model_dump_json()}\n```")
+            ed_user2 = (
+                "<input>\n"
+                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                f"<changes_json>{sec_changes.model_dump_json()}</changes_json>\n"
+                "</input>"
+            )
+            outline = Runner.run_sync(ed_agent, ed_user2).final_output  # type: ignore
+            # Subsections
+            for sub in sec.subsections:
+                ss_user = (
                     "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
                     f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                    f"<changes_json>{ss_res.changes.model_dump_json()}</changes_json>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    f"<subsection_id>{sub.id}</subsection_id>\n"
                     "</input>"
                 )
-                outline = Runner.run_sync(ed_agent, ed_user3).final_output  # type: ignore
-            except Exception:
-                pass
-            try:
-                evidence_list.append(_json.loads(ss_res.evidence.model_dump_json()))
-            except Exception:
-                pass
-    try:
-        log("📚 Evidence · Collected", f"```json\n{_json.dumps(evidence_list, ensure_ascii=False)}\n```")
-    except Exception:
-        pass
+                ss_res = Runner.run_sync(ssr_agent, ss_user).final_output  # type: ignore
+                try:
+                    ed_user3 = (
+                        "<input>\n"
+                        f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                        f"<changes_json>{ss_res.changes.model_dump_json()}</changes_json>\n"
+                        "</input>"
+                    )
+                    outline = Runner.run_sync(ed_agent, ed_user3).final_output  # type: ignore
+                except Exception:
+                    pass
+                try:
+                    evidence_list.append(_json.loads(ss_res.evidence.model_dump_json()))
+                except Exception:
+                    pass
+        try:
+            log("📚 Evidence · Collected", f"```json\n{_json.dumps(evidence_list, ensure_ascii=False)}\n```")
+        except Exception:
+            pass
+    else:
+        log("🔎 Research · Skipped", "Research module disabled by configuration")
 
     # Module 3
     t_agent = build_title_namer_agent()
@@ -241,41 +246,44 @@ def generate_article(
             drafts_by_subsection[(sec.id, sub.id)] = d
             log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n``>")
 
-    # Module 4
-    slr_agent = build_section_lead_refiner_agent()
-    ssr_agent2 = build_subsection_refiner_agent()
-    for sec in outline.sections:
-        lead = leads_by_section.get(sec.id)
-        if lead:
-            slr_user = (
-                "<input>\n"
-                f"<topic>{topic}</topic>\n"
-                f"<lang>{lang}</lang>\n"
-                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                f"<section_id>{sec.id}</section_id>\n"
-                f"<lead_chunk>{lead.model_dump_json()}</lead_chunk>\n"
-                "</input>"
-            )
-            rlead: LeadChunk = Runner.run_sync(slr_agent, slr_user).final_output  # type: ignore
-            leads_by_section[sec.id] = rlead
-            log("✨ Refine · Section Lead", f"{sec.id} → ```json\n{rlead.model_dump_json()}\n```")
-        for sub in sec.subsections:
-            d = drafts_by_subsection.get((sec.id, sub.id))
-            if not d:
-                continue
-            ssr_user2 = (
-                "<input>\n"
-                f"<topic>{topic}</topic>\n"
-                f"<lang>{lang}</lang>\n"
-                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                f"<section_id>{sec.id}</section_id>\n"
-                f"<subsection_id>{sub.id}</subsection_id>\n"
-                f"<draft_chunk>{d.model_dump_json()}</draft_chunk>\n"
-                "</input>"
-            )
-            rd: DraftChunk = Runner.run_sync(ssr_agent2, ssr_user2).final_output  # type: ignore
-            drafts_by_subsection[(sec.id, sub.id)] = rd
-            log("✨ Refine · Subsection", f"{sec.id}/{sub.id} → ```json\n{rd.model_dump_json()}\n```")
+    # Module 4 (optional)
+    if enable_refine:
+        slr_agent = build_section_lead_refiner_agent()
+        ssr_agent2 = build_subsection_refiner_agent()
+        for sec in outline.sections:
+            lead = leads_by_section.get(sec.id)
+            if lead:
+                slr_user = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
+                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    f"<lead_chunk>{lead.model_dump_json()}</lead_chunk>\n"
+                    "</input>"
+                )
+                rlead: LeadChunk = Runner.run_sync(slr_agent, slr_user).final_output  # type: ignore
+                leads_by_section[sec.id] = rlead
+                log("✨ Refine · Section Lead", f"{sec.id} → ```json\n{rlead.model_dump_json()}\n```")
+            for sub in sec.subsections:
+                d = drafts_by_subsection.get((sec.id, sub.id))
+                if not d:
+                    continue
+                ssr_user2 = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
+                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    f"<subsection_id>{sub.id}</subsection_id>\n"
+                    f"<draft_chunk>{d.model_dump_json()}</draft_chunk>\n"
+                    "</input>"
+                )
+                rd: DraftChunk = Runner.run_sync(ssr_agent2, ssr_user2).final_output  # type: ignore
+                drafts_by_subsection[(sec.id, sub.id)] = rd
+                log("✨ Refine · Subsection", f"{sec.id}/{sub.id} → ```json\n{rd.model_dump_json()}\n```")
+    else:
+        log("✨ Refine · Skipped", "Refine module disabled by configuration")
 
     # Assemble final Markdown
     output_dir = ensure_output_dir(output_subdir)
