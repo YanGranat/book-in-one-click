@@ -1343,6 +1343,16 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     inc_flag = False
 
+                # Resolve feature flags upfront (cannot use await inside lambda)
+                try:
+                    fc_flag = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
+                except Exception:
+                    fc_flag = False
+                try:
+                    refine_flag = await get_refine_enabled(message.from_user.id) if message.from_user else False
+                except Exception:
+                    refine_flag = False
+
                 fut = loop.run_in_executor(
                     None,
                     lambda: generate_article(
@@ -1351,8 +1361,8 @@ def create_dispatcher() -> Dispatcher:
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         output_subdir="deep_article",
                         job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
-                        enable_research=False if not (await get_factcheck_enabled(message.from_user.id) if message.from_user else False) else True,
-                        enable_refine=bool(await get_refine_enabled(message.from_user.id) if message.from_user else False),
+                        enable_research=bool(fc_flag),
+                        enable_refine=bool(refine_flag),
                     ),
                 )
                 try:
