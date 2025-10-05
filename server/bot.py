@@ -21,6 +21,7 @@ from utils.env import load_env_from_root
 from utils.lang import detect_lang_from_text
 from services.post.generate import generate_post
 from services.post_series.generate_series import generate_series
+from services.article.generate_article import generate_article
 from utils.slug import safe_filename_base
 from .db import SessionLocal
 from .bot_commands import ADMIN_IDS
@@ -654,6 +655,9 @@ def create_dispatcher() -> Dispatcher:
             InlineKeyboardButton(text=("Пост" if ru else "Post"), callback_data="set:gentype:post"),
             InlineKeyboardButton(text=("Серия" if ru else "Series"), callback_data="set:gentype:series"),
         )
+        kb.add(
+            InlineKeyboardButton(text=("Статья" if ru else "Article"), callback_data="set:gentype:article"),
+        )
         await message.answer(("Что генерировать?" if ru else "What to generate?"), reply_markup=kb)
         await GenerateStates.ChoosingGenType.set()
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:gentype:"), state=GenerateStates.ChoosingGenType)  # type: ignore
@@ -666,6 +670,12 @@ def create_dispatcher() -> Dispatcher:
         if kind == "post":
             await state.update_data(series_mode=None, series_count=None)
             prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+            await GenerateStates.WaitingTopic.set()
+            return
+        if kind == "article":
+            await state.update_data(series_mode=None, series_count=None, gen_article=True)
+            prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
             await GenerateStates.WaitingTopic.set()
             return
@@ -1250,6 +1260,132 @@ def create_dispatcher() -> Dispatcher:
             await message.answer(msg)
             return
         await state.update_data(topic=topic)
+
+        # If article mode is active, branch into article generation flow
+        if bool(data.get("gen_article")):
+            chat_id = message.chat.id
+            if chat_id in RUNNING_CHATS:
+                return
+            RUNNING_CHATS.add(chat_id)
+            try:
+                # Resolve provider/lang
+                prov = (data.get("provider") or "openai").strip().lower()
+                persisted_gen_lang = None
+                try:
+                    if message.from_user:
+                        persisted_gen_lang = await get_gen_lang(message.from_user.id)
+                except Exception:
+                    persisted_gen_lang = None
+                gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+                eff_lang = gen_lang
+                if (gen_lang or "auto").strip().lower() == "auto":
+                    try:
+                        det = (detect_lang_from_text(topic) or "").lower()
+                        eff_lang = "en" if det.startswith("en") else "ru"
+                    except Exception:
+                        eff_lang = "ru"
+
+                # Create Job row (article)
+                job_id = 0
+                try:
+                    if SessionLocal is not None and message.from_user:
+                        async with SessionLocal() as session:
+                            from .db import Job
+                            import json as _json
+                            from .db import get_or_create_user as _get_or_create_user
+                            db_user = await _get_or_create_user(session, message.from_user.id)
+                            params = {"topic": topic, "lang": eff_lang, "provider": prov or "openai"}
+                            j = Job(user_id=db_user.id, type="article", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=3)
+                            session.add(j)
+                            await session.flush()
+                            job_id = int(j.id)
+                            await session.commit()
+                except Exception:
+                    job_id = 0
+
+                # Charge 3 credits for article (admins free)
+                is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+                if not is_admin:
+                    from sqlalchemy.exc import SQLAlchemyError
+                    try:
+                        charged = False
+                        if SessionLocal is not None and message.from_user:
+                            async with SessionLocal() as session:
+                                from .db import get_or_create_user
+                                user = await get_or_create_user(session, message.from_user.id)
+                                ok, remaining = await charge_credits(session, user, 3, reason="article")
+                                if ok:
+                                    await session.commit()
+                                    charged = True
+                        if not charged and message.from_user:
+                            ok, remaining = await charge_credits_kv(message.from_user.id, 3)  # type: ignore
+                            if not ok:
+                                need = max(0, 3 - int(remaining))
+                                warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /buy для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /buy to top up.")
+                                await message.answer(warn)
+                                await state.finish()
+                                RUNNING_CHATS.discard(chat_id)
+                                return
+                    except SQLAlchemyError:
+                        await message.answer("Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later.")
+                        await state.finish()
+                        RUNNING_CHATS.discard(chat_id)
+                        return
+
+                await message.answer("Генерирую статью…" if _is_ru(ui_lang) else "Generating article…")
+                import asyncio as _asyncio
+                loop = _asyncio.get_running_loop()
+                timeout_s = int(os.getenv("GEN_TIMEOUT_S", "3600"))
+                fut = loop.run_in_executor(
+                    None,
+                    lambda: generate_article(
+                        topic,
+                        lang=eff_lang,
+                        provider=((prov if prov != "auto" else "openai") or "openai"),
+                        output_subdir="deep_article",
+                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id, "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False},
+                    ),
+                )
+                article_path = await _asyncio.wait_for(fut, timeout=timeout_s)
+                # Send main result
+                try:
+                    with open(article_path, "rb") as f:
+                        cap = ("Готово (статья): " + Path(article_path).name) if _is_ru(ui_lang) else ("Done (article): " + Path(article_path).name)
+                        await message.answer_document(f, caption=cap)
+                except Exception:
+                    pass
+                # Send log if enabled
+                try:
+                    if message.from_user:
+                        logs_enabled = await get_logs_enabled(message.from_user.id)
+                        if logs_enabled:
+                            from utils.slug import safe_filename_base as _sfb
+                            base = _sfb(topic)
+                            log_files = list(Path(article_path).parent.glob(f"{base}_article_log_*.md"))
+                            if log_files:
+                                lp = log_files[0]
+                                with open(lp, "rb") as log_f:
+                                    log_cap = f"Лог статьи: {lp.name}" if _is_ru(ui_lang) else f"Article log: {lp.name}"
+                                    await message.answer_document(log_f, caption=log_cap)
+                except Exception:
+                    pass
+                # Mark job done
+                try:
+                    if job_id and SessionLocal is not None:
+                        from sqlalchemy import update as _upd
+                        from datetime import datetime as _dt
+                        async with SessionLocal() as session:
+                            from .db import Job
+                            await session.execute(_upd(Job).where(Job.id == job_id).values(status="done", finished_at=_dt.utcnow(), file_path=str(article_path)))
+                            await session.commit()
+                except Exception:
+                    pass
+            except Exception as e:
+                await message.answer((f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"))
+            finally:
+                await state.finish()
+                RUNNING_CHATS.discard(chat_id)
+            return
 
         # If series mode is active, branch into series generation flow
         series_mode = (data.get("series_mode") or "").strip().lower()
