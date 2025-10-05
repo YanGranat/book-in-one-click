@@ -298,11 +298,13 @@ def generate_article(
             body_lines.append(f"\n### {sub_title}\n\n{sub_md}\n")
 
     title_text = (title.title if isinstance(title, TitleProposal) else (outline.title or topic))
+    toc_text = "\n".join(toc_lines)
+    body_text = "\n".join(body_lines)
     article_md = (
         f"# {title_text}\n\n"
         f"{(article_lead.markdown if isinstance(article_lead, LeadChunk) else '')}\n\n"
-        f"{'\n'.join(toc_lines)}\n\n"
-        f"{'\n'.join(body_lines)}\n"
+        f"{toc_text}\n\n"
+        f"{body_text}\n"
     )
     save_markdown(article_path, title=title_text, generator=("OpenAI Agents SDK" if _prov == "openai" else _prov), pipeline="DeepArticle", content=article_md)
 
