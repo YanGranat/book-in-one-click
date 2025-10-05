@@ -1352,7 +1352,18 @@ def create_dispatcher() -> Dispatcher:
                         job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
                     ),
                 )
-                article_path = await _asyncio.wait_for(fut, timeout=timeout_s)
+                try:
+                    article_path = await _asyncio.wait_for(fut, timeout=int(os.getenv("GEN_TIMEOUT_S", "10800")))
+                except _asyncio.TimeoutError:
+                    warn = (
+                        f"Превышено время ожидания ({int(int(os.getenv('GEN_TIMEOUT_S', '10800'))/60)} мин). Генерация продолжается в фоне; проверьте /results-ui позже."
+                        if _is_ru(ui_lang) else
+                        f"Timeout ({int(int(os.getenv('GEN_TIMEOUT_S', '10800'))/60)} min). Generation continues in background; check /results-ui later."
+                    )
+                    await message.answer(warn)
+                    await state.finish()
+                    RUNNING_CHATS.discard(chat_id)
+                    return
                 # Send main result
                 try:
                     with open(article_path, "rb") as f:
