@@ -12,17 +12,17 @@ def _load_prompt() -> str:
 
 
 def try_import_sdk():
-    from agents import Agent  # type: ignore
-    return Agent
+    from agents import Agent, AgentOutputSchema  # type: ignore
+    return Agent, AgentOutputSchema
 
 
 def build_title_namer_agent(model: str | None = None) -> Any:
-    Agent = try_import_sdk()
+    Agent, AgentOutputSchema = try_import_sdk()
     return Agent(
         name="Deep Article · Title Namer",
         instructions=_load_prompt(),
         model=model or "gpt-5",
-        output_type=TitleProposal,
+        output_type=AgentOutputSchema(TitleProposal, strict_json_schema=False),
     )
 
 

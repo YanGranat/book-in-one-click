@@ -12,17 +12,17 @@ def _load_prompt() -> str:
 
 
 def try_import_sdk():
-    from agents import Agent  # type: ignore
-    return Agent
+    from agents import Agent, AgentOutputSchema  # type: ignore
+    return Agent, AgentOutputSchema
 
 
 def build_section_lead_refiner_agent(model: str | None = None) -> Any:
-    Agent = try_import_sdk()
+    Agent, AgentOutputSchema = try_import_sdk()
     return Agent(
         name="Deep Article · Section Lead Refiner",
         instructions=_load_prompt(),
         model=model or "gpt-5",
-        output_type=LeadChunk,
+        output_type=AgentOutputSchema(LeadChunk, strict_json_schema=False),
     )
 
 

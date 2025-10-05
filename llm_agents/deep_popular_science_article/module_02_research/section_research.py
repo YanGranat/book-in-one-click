@@ -12,16 +12,16 @@ def _load_prompt() -> str:
 
 
 def try_import_sdk():
-    from agents import Agent  # type: ignore
+    from agents import Agent, AgentOutputSchema  # type: ignore
     try:
         from agents import WebSearchTool  # type: ignore
     except Exception:
         WebSearchTool = None  # type: ignore
-    return Agent, WebSearchTool
+    return Agent, AgentOutputSchema, WebSearchTool
 
 
 def build_section_research_agent(model: str | None = None) -> Any:
-    Agent, WebSearchTool = try_import_sdk()
+    Agent, AgentOutputSchema, WebSearchTool = try_import_sdk()
     tools = []
     try:
         if WebSearchTool is not None:
@@ -32,7 +32,7 @@ def build_section_research_agent(model: str | None = None) -> Any:
         name="Deep Article · Section Research Planner",
         instructions=_load_prompt(),
         model=model or "gpt-5",
-        output_type=OutlineChangeList,
+        output_type=AgentOutputSchema(OutlineChangeList, strict_json_schema=False),
         tools=tools or None,
     )
 
