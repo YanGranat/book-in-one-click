@@ -1335,7 +1335,8 @@ def create_dispatcher() -> Dispatcher:
                 await message.answer("Генерирую статью…" if _is_ru(ui_lang) else "Generating article…")
                 import asyncio as _asyncio
                 loop = _asyncio.get_running_loop()
-                timeout_s = int(os.getenv("GEN_TIMEOUT_S", "3600"))
+                # 10 часов по умолчанию (можно переопределить GEN_TIMEOUT_S)
+                timeout_s = int(os.getenv("GEN_TIMEOUT_S", "36000"))
                 # Resolve incognito flag upfront (cannot use await inside lambda)
                 try:
                     inc_flag = (await get_incognito(message.from_user.id)) if message.from_user else False
@@ -1353,12 +1354,12 @@ def create_dispatcher() -> Dispatcher:
                     ),
                 )
                 try:
-                    article_path = await _asyncio.wait_for(fut, timeout=int(os.getenv("GEN_TIMEOUT_S", "10800")))
+                    article_path = await _asyncio.wait_for(fut, timeout=timeout_s)
                 except _asyncio.TimeoutError:
                     warn = (
-                        f"Превышено время ожидания ({int(int(os.getenv('GEN_TIMEOUT_S', '10800'))/60)} мин). Генерация продолжается в фоне; проверьте /results-ui позже."
+                        f"Превышено время ожидания ({int(timeout_s/60)} мин). Генерация продолжается в фоне; проверьте /results-ui позже."
                         if _is_ru(ui_lang) else
-                        f"Timeout ({int(int(os.getenv('GEN_TIMEOUT_S', '10800'))/60)} min). Generation continues in background; check /results-ui later."
+                        f"Timeout ({int(timeout_s/60)} min). Generation continues in background; check /results-ui later."
                     )
                     await message.answer(warn)
                     await state.finish()
