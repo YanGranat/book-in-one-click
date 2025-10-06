@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable, Optional, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import asyncio
 import time
@@ -38,6 +39,7 @@ def generate_article(
     return_log_path: bool = False,
     enable_research: bool = True,
     enable_refine: bool = True,
+    max_parallel: Optional[int] = None,
 ) -> Path | str:
     """
     Generate a deep popular science article and save it to output/<output_subdir>/.
@@ -85,6 +87,13 @@ def generate_article(
     def log(section: str, body: str):
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
     log("🧭 Config", f"provider={_prov}\nlang={lang}\nresearch={bool(enable_research)}\nrefine={bool(enable_refine)}")
+    # Determine parallelism (bounded to avoid provider rate limits)
+    par_env = (os.getenv("ARTICLE_MAX_PAR", "").strip() or None)
+    try:
+        _par = int(par_env) if par_env is not None else (int(max_parallel) if max_parallel is not None else 4)
+    except Exception:
+        _par = 4
+    max_workers = max(1, min(16, _par))
 
     # Agents import
     from llm_agents.deep_popular_science_article.module_01_structure.sections_and_subsections import build_sections_and_subsections_agent
@@ -142,16 +151,35 @@ def generate_article(
         sr_agent = build_section_research_agent()
         ssr_agent = build_subsection_research_agent()
         evidence_list: list[dict[str, Any]] = []
-        for sec in outline.sections:
-            sr_user = (
+
+        # Run section-level research in parallel, then apply sequentially
+        def _run_section_research(sec_obj):
+            sr_user_local = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{lang}</lang>\n"
                 f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                f"<section_id>{sec.id}</section_id>\n"
+                f"<section_id>{sec_obj.id}</section_id>\n"
                 "</input>"
             )
-            sec_changes: OutlineChangeList = Runner.run_sync(sr_agent, sr_user).final_output  # type: ignore
+            return Runner.run_sync(sr_agent, sr_user_local).final_output  # type: ignore
+
+        sec_changes_by_id: dict[str, OutlineChangeList] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            future_map = {ex.submit(_run_section_research, sec): sec for sec in outline.sections}
+            for fut in as_completed(list(future_map.keys())):
+                sec = future_map[fut]
+                try:
+                    sec_changes_by_id[sec.id] = fut.result()
+                except Exception:
+                    # Skip failed section research
+                    pass
+
+        # Apply section changes in stable order
+        for sec in outline.sections:
+            sec_changes = sec_changes_by_id.get(sec.id)
+            if not sec_changes:
+                continue
             log("🔎 Research · Section Changes", f"{sec.id} → ```json\n{sec_changes.model_dump_json()}\n```")
             ed_user2 = (
                 "<input>\n"
@@ -160,19 +188,47 @@ def generate_article(
                 "</input>"
             )
             outline = Runner.run_sync(ed_agent, ed_user2).final_output  # type: ignore
-            # Subsections
+
+        # Subsection-level research in parallel across all subsections, then apply sequentially
+        all_subs = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
+
+        def _run_subsection_research(sec_obj, sub_obj):
+            ss_user_local = (
+                "<input>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<lang>{lang}</lang>\n"
+                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                f"<section_id>{sec_obj.id}</section_id>\n"
+                f"<subsection_id>{sub_obj.id}</subsection_id>\n"
+                "</input>"
+            )
+            return Runner.run_sync(ssr_agent, ss_user_local).final_output  # type: ignore
+
+        ss_result_by_key: dict[tuple[str, str], Any] = {}
+        if all_subs:
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                fut_map = {ex.submit(_run_subsection_research, sec, sub): (sec.id, sub.id) for (sec, sub) in all_subs}
+                for fut in as_completed(list(fut_map.keys())):
+                    k = fut_map[fut]
+                    try:
+                        ss_result_by_key[k] = fut.result()
+                    except Exception:
+                        pass
+
+        # Apply subsection changes and collect evidence in stable order
+        for sec in outline.sections:
             for sub in sec.subsections:
-                ss_user = (
-                    "<input>\n"
-                    f"<topic>{topic}</topic>\n"
-                    f"<lang>{lang}</lang>\n"
-                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                    f"<section_id>{sec.id}</section_id>\n"
-                    f"<subsection_id>{sub.id}</subsection_id>\n"
-                    "</input>"
-                )
-                ss_res = Runner.run_sync(ssr_agent, ss_user).final_output  # type: ignore
+                key = (sec.id, sub.id)
+                ss_res = ss_result_by_key.get(key)
+                if not ss_res:
+                    continue
                 try:
+                    ed_user3 = (
+                        "<input>\n"
+                        f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                        f"<changes_json>{ss_res.changes.model_dump_json()}\n".replace("\n", "") + "\n</input>"
+                    )
+                    # The above builds a compact changes_json; ensure valid XML-like wrapper
                     ed_user3 = (
                         "<input>\n"
                         f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
@@ -220,67 +276,141 @@ def generate_article(
     ssw_agent = build_subsection_writer_agent()
     leads_by_section: dict[str, LeadChunk] = {}
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
-    for sec in outline.sections:
-        sl_user = (
+
+    # Section leads in parallel
+    def _run_section_lead(sec_obj):
+        sl_user_local = (
             "<input>\n"
             f"<topic>{topic}</topic>\n"
             f"<lang>{lang}</lang>\n"
             f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-            f"<section_id>{sec.id}</section_id>\n"
+            f"<section_id>{sec_obj.id}</section_id>\n"
             "</input>"
         )
-        lead: LeadChunk = Runner.run_sync(sl_agent, sl_user).final_output  # type: ignore
+        return Runner.run_sync(sl_agent, sl_user_local).final_output  # type: ignore
+
+    lead_result_by_id: dict[str, LeadChunk] = {}
+    if outline.sections:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            fut_map = {ex.submit(_run_section_lead, sec): sec.id for sec in outline.sections}
+            for fut in as_completed(list(fut_map.keys())):
+                sid = fut_map[fut]
+                try:
+                    lead_result_by_id[sid] = fut.result()
+                except Exception:
+                    pass
+    for sec in outline.sections:
+        lead = lead_result_by_id.get(sec.id)
+        if not lead:
+            continue
         leads_by_section[sec.id] = lead
         log("✍️ Section Lead", f"{sec.id} → ```json\n{lead.model_dump_json()}\n```")
+
+    # Subsections drafts in parallel across all subsections
+    all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
+
+    def _run_subsection_draft(sec_obj, sub_obj):
+        ssw_user_local = (
+            "<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{lang}</lang>\n"
+            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+            f"<section_id>{sec_obj.id}</section_id>\n"
+            f"<subsection_id>{sub_obj.id}</subsection_id>\n"
+            "</input>"
+        )
+        return Runner.run_sync(ssw_agent, ssw_user_local).final_output  # type: ignore
+
+    draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
+    if all_subs_writing:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            fut_map2 = {ex.submit(_run_subsection_draft, sec, sub): (sec.id, sub.id) for (sec, sub) in all_subs_writing}
+            for fut in as_completed(list(fut_map2.keys())):
+                key = fut_map2[fut]
+                try:
+                    draft_result_by_key[key] = fut.result()
+                except Exception:
+                    pass
+    for sec in outline.sections:
         for sub in sec.subsections:
-            ssw_user = (
-                "<input>\n"
-                f"<topic>{topic}</topic>\n"
-                f"<lang>{lang}</lang>\n"
-                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                f"<section_id>{sec.id}</section_id>\n"
-                f"<subsection_id>{sub.id}</subsection_id>\n"
-                "</input>"
-            )
-            d: DraftChunk = Runner.run_sync(ssw_agent, ssw_user).final_output  # type: ignore
-            drafts_by_subsection[(sec.id, sub.id)] = d
-            log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n``>")
+            key = (sec.id, sub.id)
+            d = draft_result_by_key.get(key)
+            if not d:
+                continue
+            drafts_by_subsection[key] = d
+            log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
 
     # Module 4 (optional)
     if enable_refine:
         slr_agent = build_section_lead_refiner_agent()
         ssr_agent2 = build_subsection_refiner_agent()
+
+        # Refine section leads in parallel
+        def _run_refine_section_lead(sec_obj, lead_obj):
+            slr_user_local = (
+                "<input>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<lang>{lang}</lang>\n"
+                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                f"<section_id>{sec_obj.id}</section_id>\n"
+                f"<lead_chunk>{lead_obj.model_dump_json()}</lead_chunk>\n"
+                "</input>"
+            )
+            return Runner.run_sync(slr_agent, slr_user_local).final_output  # type: ignore
+
+        refine_lead_by_id: dict[str, LeadChunk] = {}
+        sec_with_leads = [(sec, leads_by_section.get(sec.id)) for sec in outline.sections]
+        sec_with_leads = [(s, l) for (s, l) in sec_with_leads if l is not None]
+        if sec_with_leads:
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                fut_map3 = {ex.submit(_run_refine_section_lead, sec, lead): sec.id for (sec, lead) in sec_with_leads}  # type: ignore
+                for fut in as_completed(list(fut_map3.keys())):
+                    sid = fut_map3[fut]
+                    try:
+                        refine_lead_by_id[sid] = fut.result()
+                    except Exception:
+                        pass
         for sec in outline.sections:
-            lead = leads_by_section.get(sec.id)
-            if lead:
-                slr_user = (
-                    "<input>\n"
-                    f"<topic>{topic}</topic>\n"
-                    f"<lang>{lang}</lang>\n"
-                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                    f"<section_id>{sec.id}</section_id>\n"
-                    f"<lead_chunk>{lead.model_dump_json()}</lead_chunk>\n"
-                    "</input>"
-                )
-                rlead: LeadChunk = Runner.run_sync(slr_agent, slr_user).final_output  # type: ignore
-                leads_by_section[sec.id] = rlead
-                log("✨ Refine · Section Lead", f"{sec.id} → ```json\n{rlead.model_dump_json()}\n```")
+            rlead = refine_lead_by_id.get(sec.id)
+            if not rlead:
+                continue
+            leads_by_section[sec.id] = rlead
+            log("✨ Refine · Section Lead", f"{sec.id} → ```json\n{rlead.model_dump_json()}\n```")
+
+        # Refine subsections in parallel
+        all_subs_for_refine = [(sec, sub, drafts_by_subsection.get((sec.id, sub.id))) for sec in outline.sections for sub in sec.subsections]
+        all_subs_for_refine = [(s, sub, d) for (s, sub, d) in all_subs_for_refine if d is not None]
+
+        def _run_refine_subsection(sec_obj, sub_obj, draft_obj):
+            ssr_user2_local = (
+                "<input>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<lang>{lang}</lang>\n"
+                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                f"<section_id>{sec_obj.id}</section_id>\n"
+                f"<subsection_id>{sub_obj.id}</subsection_id>\n"
+                f"<draft_chunk>{draft_obj.model_dump_json()}</draft_chunk>\n"
+                "</input>"
+            )
+            return Runner.run_sync(ssr_agent2, ssr_user2_local).final_output  # type: ignore
+
+        refined_draft_by_key: dict[tuple[str, str], DraftChunk] = {}
+        if all_subs_for_refine:
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                fut_map4 = {ex.submit(_run_refine_subsection, sec, sub, d): (sec.id, sub.id) for (sec, sub, d) in all_subs_for_refine}
+                for fut in as_completed(list(fut_map4.keys())):
+                    key = fut_map4[fut]
+                    try:
+                        refined_draft_by_key[key] = fut.result()
+                    except Exception:
+                        pass
+        for sec in outline.sections:
             for sub in sec.subsections:
-                d = drafts_by_subsection.get((sec.id, sub.id))
-                if not d:
+                key = (sec.id, sub.id)
+                rd = refined_draft_by_key.get(key)
+                if not rd:
                     continue
-                ssr_user2 = (
-                    "<input>\n"
-                    f"<topic>{topic}</topic>\n"
-                    f"<lang>{lang}</lang>\n"
-                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                    f"<section_id>{sec.id}</section_id>\n"
-                    f"<subsection_id>{sub.id}</subsection_id>\n"
-                    f"<draft_chunk>{d.model_dump_json()}</draft_chunk>\n"
-                    "</input>"
-                )
-                rd: DraftChunk = Runner.run_sync(ssr_agent2, ssr_user2).final_output  # type: ignore
-                drafts_by_subsection[(sec.id, sub.id)] = rd
+                drafts_by_subsection[key] = rd
                 log("✨ Refine · Subsection", f"{sec.id}/{sub.id} → ```json\n{rd.model_dump_json()}\n```")
     else:
         log("✨ Refine · Skipped", "Refine module disabled by configuration")
