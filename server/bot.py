@@ -1132,11 +1132,10 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding_flag = bool((await state.get_data()).get("onboarding"))
             if onboarding_flag:
-                # After incognito decision → ask what to generate (role-based series availability)
-                is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+                # After incognito decision → ask what to generate (series allowed for admins/superadmins)
                 from .bot_commands import SUPER_ADMIN_ID
                 is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
-                kb = build_gentype_keyboard(ui_lang, allow_series=bool(is_admin_local or is_superadmin))
+                kb = build_gentype_keyboard(ui_lang, allow_series=bool(is_superadmin or (query.from_user and query.from_user.id in ADMIN_IDS)))
                 await dp.bot.send_message(
                     query.message.chat.id if query.message else query.from_user.id,
                     ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"),
@@ -1148,29 +1147,47 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_refine(message: types.Message, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
         if not (message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID)):
-            await message.answer("Недоступно.")
+            # Hide from admins/users completely
+            try:
+                await message.delete()
+            except Exception:
+                pass
             return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
         await message.answer(prompt, reply_markup=build_yesno_inline("refine", ui_lang))
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:refine:"))  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:refine:"), state="*")  # type: ignore
     async def cb_set_refine(query: types.CallbackQuery, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
-        if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
-            await query.answer()
+        # Superadmin-only control; block admins/users entirely
+        if not (query.from_user and SUPER_ADMIN_ID is not None and str(query.from_user.id) == str(SUPER_ADMIN_ID)):
+            try:
+                await query.answer()
+            except Exception:
+                pass
             return
         val = (query.data or "").split(":")[-1]
         enabled = (val == "yes")
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
+        # Always answer first to stop spinner
+        try:
+            await query.answer()
+        except Exception:
+            pass
         try:
             if query.from_user:
                 await set_refine_enabled(query.from_user.id, enabled)
         except Exception:
             pass
-        await query.answer()
+        # Best-effort remove inline keyboard
+        try:
+            if query.message:
+                await query.message.edit_reply_markup()
+        except Exception:
+            pass
         in_settings = bool((await state.get_data()).get("in_settings"))
         if in_settings and query.message:
             try:
@@ -1184,19 +1201,56 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=enabled; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
-            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            # Do not display refine/fact-check rows for admins
+            is_admin_local = False
             is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
             kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            msg = "Финальная редактура: включена." if (enabled and ui_lang=="ru") else ("Final refine: enabled." if enabled else ("Финальная редактура: отключена." if ui_lang=="ru" else "Final refine: disabled."))
-            await query.message.edit_reply_markup() if query.message else None
+            msg = (
+                "Финальная редактура: включена." if (enabled and ui_lang=="ru") else (
+                "Final refine: enabled." if enabled else (
+                "Финальная редактура: отключена." if ui_lang=="ru" else "Final refine: disabled."
+                ))
+            )
+            try:
+                await query.message.edit_reply_markup() if query.message else None
+            except Exception:
+                pass
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
-            onboarding = bool((await state.get_data()).get("onboarding"))
-            if onboarding and (query.from_user and query.from_user.id in ADMIN_IDS):
-                # After refine in onboarding → ask fact-check (admins only)
-                prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+            # Continue onboarding flow if applicable
+            sd_all = await state.get_data()
+            onboarding = bool(sd_all.get("onboarding"))
+            if onboarding:
+                # For superadmin only we continue with flow; admins should not see refine/FC
+                from .bot_commands import SUPER_ADMIN_ID as _SA
+                if query.from_user and _SA is not None and int(query.from_user.id) == int(_SA):
+                    # Superadmin flow: refine → next step by active_flow
+                    active_flow = (sd_all.get("active_flow") or "").strip().lower()
+                    ru = _is_ru(ui_lang)
+                    if active_flow == "post":
+                        prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+                        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+                        await GenerateStates.WaitingTopic.set()
+                    elif active_flow == "series":
+                        kb = InlineKeyboardMarkup()
+                        kb.add(
+                            InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
+                            InlineKeyboardButton(text="5", callback_data="set:series_preset:5"),
+                        )
+                        kb.add(
+                            InlineKeyboardButton(text=("Авто" if ru else "Auto"), callback_data="set:series_preset:auto"),
+                            InlineKeyboardButton(text=("Кастом" if ru else "Custom"), callback_data="set:series_preset:custom"),
+                        )
+                        await dp.bot.send_message(
+                            query.message.chat.id if query.message else query.from_user.id,
+                            ("Сколько постов?" if ru else "How many posts?"),
+                            reply_markup=kb,
+                        )
+                        await GenerateStates.ChoosingSeriesPreset.set()
+                else:
+                    # Admin: nothing further here
+                    pass
 
     @dp.message_handler(lambda m: (m.text or "").strip().lower() in {"cancel","отмена"}, state="*")  # type: ignore
     @dp.message_handler(commands=["cancel"], state="*")  # type: ignore
@@ -1243,15 +1297,12 @@ def create_dispatcher() -> Dispatcher:
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"), state="*")  # type: ignore
     async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
-        is_super = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
-        # Allow during onboarding even if ADMIN_IDS misconfigured (only superadmin sees this step in flow)
-        onboarding_flag = False
-        try:
-            onboarding_flag = bool((await state.get_data()).get("onboarding"))
-        except Exception:
-            onboarding_flag = False
-        if not query.from_user or (query.from_user.id not in ADMIN_IDS and not is_super and not onboarding_flag):
-            await query.answer()
+        # Superadmin only
+        if not (query.from_user and SUPER_ADMIN_ID is not None and str(query.from_user.id) == str(SUPER_ADMIN_ID)):
+            try:
+                await query.answer()
+            except Exception:
+                pass
             return
         val = (query.data or "").split(":")[-1]
         data = await state.get_data()
@@ -1720,6 +1771,15 @@ def create_dispatcher() -> Dispatcher:
                     fc_depth_pref = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
                 except Exception:
                     fc_depth_pref = 2
+                # Only superadmin may use refine/fact-check
+                try:
+                    from .bot_commands import SUPER_ADMIN_ID as _SA
+                    is_superadmin_local = bool(message.from_user and _SA is not None and int(message.from_user.id) == int(_SA))
+                except Exception:
+                    is_superadmin_local = False
+                if not is_superadmin_local:
+                    refine_pref = False
+                    fc_enabled_pref = False
                 # Pricing
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
                 unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
@@ -2158,12 +2218,19 @@ def create_dispatcher() -> Dispatcher:
             # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
             eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
 
-            # Refine preference
+            # Refine preference (superadmin only)
             refine_enabled = False
             try:
                 if message.from_user:
                     refine_enabled = await get_refine_enabled(message.from_user.id)
             except Exception:
+                refine_enabled = False
+            try:
+                from .bot_commands import SUPER_ADMIN_ID as _SA
+                is_superadmin_local = bool(message.from_user and _SA is not None and int(message.from_user.id) == int(_SA))
+            except Exception:
+                is_superadmin_local = False
+            if not is_superadmin_local:
                 refine_enabled = False
 
             # Fact-check decision
@@ -2181,6 +2248,10 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     depth = 2
             if not fc_enabled_state:
+                depth = None
+            # Only superadmin may use fact-check
+            if not is_superadmin_local:
+                fc_enabled_state = False
                 depth = None
 
             async with GLOBAL_SEMAPHORE:
