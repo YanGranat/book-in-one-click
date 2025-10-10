@@ -1,24 +1,3 @@
-    @dp.message_handler(commands=["credits"])  # type: ignore
-    async def cmd_credits(message: types.Message, state: FSMContext):
-        data = await state.get_data()
-        ui_lang = (data.get("ui_lang") or "ru").strip()
-        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
-        if is_admin:
-            await message.answer("Админ: генерации бесплатны." if _is_ru(ui_lang) else "Admin: generation is free.")
-            return
-        # Show balance
-        try:
-            bal = await get_balance_kv_only(message.from_user.id) if message.from_user else 0
-        except Exception:
-            bal = 0
-        if _is_ru(ui_lang):
-            txt = [f"Баланс: {int(bal)} кредит(ов).", "", "Цены:", "- Пост: 1 кредит", "- Статья: 100 кредитов", "", "Купить за ⭐ (1 кредит = 50⭐):"]
-        else:
-            txt = [f"Balance: {int(bal)} credits.", "", "Pricing:", "- Post: 1 credit", "- Article: 100 credits", "", "Buy with ⭐ (1 credit = 50⭐):"]
-        try:
-            await message.answer("\n".join(txt), reply_markup=build_buy_keyboard(ui_lang))
-        except Exception:
-            await message.answer("\n".join(txt))
 #!/usr/bin/env python3
 from __future__ import annotations
 
@@ -3633,6 +3612,27 @@ def create_dispatcher() -> Dispatcher:
             await state.update_data(chat_history=hist)
         except Exception:
             pass
+
+    @dp.message_handler(commands=["credits"])  # type: ignore
+    async def cmd_credits(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        if is_admin:
+            await message.answer("Админ: генерации бесплатны." if _is_ru(ui_lang) else "Admin: generation is free.")
+            return
+        try:
+            bal = await get_balance_kv_only(message.from_user.id) if message.from_user else 0
+        except Exception:
+            bal = 0
+        if _is_ru(ui_lang):
+            txt = [f"Баланс: {int(bal)} кредит(ов).", "", "Цены:", "- Пост: 1 кредит", "- Статья: 100 кредитов", "", "Купить за ⭐ (1 кредит = 50⭐):"]
+        else:
+            txt = [f"Balance: {int(bal)} credits.", "", "Pricing:", "- Post: 1 credit", "- Article: 100 credits", "", "Buy with ⭐ (1 credit = 50⭐):"]
+        try:
+            await message.answer("\n".join(txt), reply_markup=build_buy_keyboard(ui_lang))
+        except Exception:
+            await message.answer("\n".join(txt))
 
     return dp
 
