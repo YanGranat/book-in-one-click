@@ -855,6 +855,9 @@ def generate_post(
                             except Exception as _e:
                                 s.rollback()
                                 print(f"[ERROR] Fallback Job create failed: {_e}")
+                    except Exception:
+                        # Non-fatal: keep result_job_id as-is
+                        pass
                     # 2) Persist final ResultDoc independently (even if JobLog failed)
                     if filepath is not None:
                         try:
