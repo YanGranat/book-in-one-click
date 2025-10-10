@@ -386,6 +386,11 @@ def create_dispatcher() -> Dispatcher:
                 if is_superadmin:
                     base_ru.insert(9, types.BotCommand("provider", "Провайдер"))
                     base_en.insert(9, types.BotCommand("provider", "Provider"))
+                    # Superadmin-only toggles
+                    base_ru.append(types.BotCommand("factcheck", "Факт-чекинг"))
+                    base_en.append(types.BotCommand("factcheck", "Fact-check"))
+                    base_ru.append(types.BotCommand("refine", "Финальная редактура"))
+                    base_en.append(types.BotCommand("refine", "Refine"))
                     base_ru.append(types.BotCommand("depth", "Глубина"))
                     base_en.append(types.BotCommand("depth", "Depth"))
                 # Cancel at the very bottom
