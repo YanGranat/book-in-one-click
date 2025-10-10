@@ -1183,6 +1183,16 @@ def create_dispatcher() -> Dispatcher:
                 await query.message.edit_reply_markup()
         except Exception:
             pass
+        # Small acknowledgment to show immediate feedback
+        try:
+            ack = (
+                ("Факт-чекинг: включён." if _is_ru(ui_lang) else "Fact-check: enabled.")
+                if enabled else
+                ("Факт-чекинг: отключён." if _is_ru(ui_lang) else "Fact-check: disabled.")
+            )
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ack)
+        except Exception:
+            pass
         onboarding = bool((await state.get_data()).get("onboarding"))
         if enabled:
             # Depth selection only for superadmin
