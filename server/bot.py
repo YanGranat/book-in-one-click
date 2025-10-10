@@ -771,6 +771,11 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_generate(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
+        # Reset transient mode flags to avoid leakage from previous flows
+        try:
+            await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow=None, next_after_fc=None)
+        except Exception:
+            pass
         # Preload default fact-check preferences from KV for /generate flow
         try:
             fc_enabled = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
@@ -808,18 +813,18 @@ def create_dispatcher() -> Dispatcher:
         if kind == "post":
             # Superadmin: ask FC (with depth), then refine, then topic
             if is_superadmin:
-                await state.update_data(series_mode=None, series_count=None, active_flow="post", next_after_fc="post")
+                await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="post", next_after_fc="post")
                 prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
                 return
             # Admins/users: ask topic directly
-            await state.update_data(series_mode=None, series_count=None)
+            await state.update_data(gen_article=False, series_mode=None, series_count=None)
             prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
             await GenerateStates.WaitingTopic.set()
             return
         if kind == "article":
-            await state.update_data(series_mode=None, series_count=None, gen_article=True)
+            await state.update_data(series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None)
             prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
             await GenerateStates.WaitingTopic.set()
@@ -827,7 +832,7 @@ def create_dispatcher() -> Dispatcher:
         # Series branch
         if is_superadmin:
             # Ask FC (with depth), then refine, then how many posts, then topic
-            await state.update_data(series_mode=None, series_count=None, active_flow="series", next_after_fc="series")
+            await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="series", next_after_fc="series")
             prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
             return
@@ -2147,10 +2152,7 @@ def create_dispatcher() -> Dispatcher:
                     )
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                     try:
-                        await dp.bot.send_message(
-                            ("Купить кредиты за ⭐? Один кредит = 200⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 200⭐"),
-                            reply_markup=build_buy_keyboard(ui_lang),
-                        )
+                        await dp.bot.send_message(("Купить кредиты за ⭐? Один кредит = 50⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 50⭐"), reply_markup=build_buy_keyboard(ui_lang))
                     except Exception:
                         pass
                     await state.finish()
@@ -2503,10 +2505,7 @@ def create_dispatcher() -> Dispatcher:
                     )
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                     try:
-                        await dp.bot.send_message(
-                            ("Купить кредиты за ⭐? Один кредит = 200⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 200⭐"),
-                            reply_markup=build_buy_keyboard(ui_lang),
-                        )
+                        await dp.bot.send_message(("Купить кредиты за ⭐? Один кредит = 50⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 50⭐"), reply_markup=build_buy_keyboard(ui_lang))
                     except Exception:
                         pass
                     await state.finish()
