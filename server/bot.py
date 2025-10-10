@@ -167,8 +167,8 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
         InlineKeyboardButton(text=("EN" + (" ✓" if gen_lang == "en" else "")), callback_data="set:gen_lang:en"),
         InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if gen_lang == "auto" else "")), callback_data="set:gen_lang:auto"),
     )
-    # Refine row (admins only)
-    if is_admin:
+    # Refine row (superadmin only)
+    if is_superadmin:
         kb.add(
             InlineKeyboardButton(text=(("Редактура: вкл" if ru else "Refine: on") + (" ✓" if refine else "")), callback_data="set:refine:yes"),
             InlineKeyboardButton(text=(("Редактура: выкл" if ru else "Refine: off") + (" ✓" if not refine else "")), callback_data="set:refine:no"),
@@ -183,8 +183,8 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
         InlineKeyboardButton(text=(("Публично: да" if ru else "Public: yes") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
         InlineKeyboardButton(text=(("Публично: нет" if ru else "Public: no") + (" ✓" if incognito else "")), callback_data="set:incog:enable"),
     )
-    # Fact-check row (admins only); depth selection removed from settings
-    if is_admin:
+    # Fact-check row (superadmin only); depth selection removed from settings
+    if is_superadmin:
         kb.add(
             InlineKeyboardButton(text=(("Факт-чекинг: вкл" if ru else "Fact-check: on") + (" ✓" if fc_enabled else "")), callback_data="set:fc_cmd:enable"),
             InlineKeyboardButton(text=(("Факт-чекинг: выкл" if ru else "Fact-check: off") + (" ✓" if not fc_enabled else "")), callback_data="set:fc_cmd:disable"),
@@ -367,22 +367,17 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("logs", "Logs"),
                     types.BotCommand("public", "Public"),
                 ]
-                # Move cancel to bottom later
+                # Admin extras: chat only
                 if is_admin:
-                    # Admin extras: factcheck/depth/refine/chat
                     base_ru = base_ru + [
-                        types.BotCommand("factcheck", "Факт-чекинг"),
-                        types.BotCommand("refine", "Финальная редактура"),
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
                     ]
                     base_en = base_en + [
-                        types.BotCommand("factcheck", "Fact-check"),
-                        types.BotCommand("refine", "Refine"),
                         types.BotCommand("chat", "Chat with AI"),
                         types.BotCommand("endchat", "End chat"),
                     ]
-                # Superadmin: add provider and depth commands
+                # Superadmin extras
                 from .bot_commands import SUPER_ADMIN_ID
                 is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
                 if is_superadmin:
@@ -1051,7 +1046,8 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
-        if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID)):
             await message.answer("Недоступно.")
             return
         data = await state.get_data()
@@ -1061,7 +1057,8 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:refine:"))  # type: ignore
     async def cb_set_refine(query: types.CallbackQuery, state: FSMContext):
-        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
             await query.answer()
             return
         val = (query.data or "").split(":")[-1]
@@ -1259,7 +1256,8 @@ def create_dispatcher() -> Dispatcher:
     # ---- Fact-check settings command ----
     @dp.message_handler(commands=["factcheck"])  # type: ignore
     async def cmd_factcheck(message: types.Message, state: FSMContext):
-        if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID)):
             await message.answer("Недоступно.")
             return
         data = await state.get_data()
@@ -1269,7 +1267,8 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc_cmd:"))  # type: ignore
     async def cb_fc_cmd_toggle(query: types.CallbackQuery, state: FSMContext):
-        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
             await query.answer()
             return
         val = (query.data or "").split(":")[-1]
@@ -1813,9 +1812,18 @@ def create_dispatcher() -> Dispatcher:
         onboarding = bool(data.get("onboarding"))
         fc_ready = bool(data.get("fc_ready"))
         if onboarding and not fc_ready:
-            prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
-            await message.answer(prompt, reply_markup=build_yesno_inline("fc", ui_lang))
-            return
+            # Ask FC only for superadmin; others proceed without FC
+            from .bot_commands import SUPER_ADMIN_ID
+            is_super = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+            if is_super:
+                prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
+                await message.answer(prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+                return
+            else:
+                try:
+                    await state.update_data(fc_ready=True, factcheck=False, research_iterations=None)
+                except Exception:
+                    pass
 
         # Rate limiting (admins bypass)
         if not (message.from_user and message.from_user.id in ADMIN_IDS):
