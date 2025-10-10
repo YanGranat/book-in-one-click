@@ -173,11 +173,12 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
             InlineKeyboardButton(text=(("Редактура: вкл" if ru else "Refine: on") + (" ✓" if refine else "")), callback_data="set:refine:yes"),
             InlineKeyboardButton(text=(("Редактура: выкл" if ru else "Refine: off") + (" ✓" if not refine else "")), callback_data="set:refine:no"),
         )
-    # Logs row
-    kb.add(
-        InlineKeyboardButton(text=(("Логи: вкл" if ru else "Logs: on") + (" ✓" if logs_enabled else "")), callback_data="set:logs:enable"),
-        InlineKeyboardButton(text=(("Логи: выкл" if ru else "Logs: off") + (" ✓" if not logs_enabled else "")), callback_data="set:logs:disable"),
-    )
+    # Logs row (admins/superadmins only)
+    if is_admin or is_superadmin:
+        kb.add(
+            InlineKeyboardButton(text=(("Логи: вкл" if ru else "Logs: on") + (" ✓" if logs_enabled else "")), callback_data="set:logs:enable"),
+            InlineKeyboardButton(text=(("Логи: выкл" if ru else "Logs: off") + (" ✓" if not logs_enabled else "")), callback_data="set:logs:disable"),
+        )
     # Public results row
     kb.add(
         InlineKeyboardButton(text=(("Публично: да" if ru else "Public: yes") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
@@ -350,7 +351,6 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("info", "Инфо"),
                     types.BotCommand("lang", "Язык интерфейса"),
                     types.BotCommand("lang_generate", "Язык генерации"),
-                    types.BotCommand("logs", "Логи генерации"),
                     types.BotCommand("public", "Публичность"),
                 ]
                 # EN set (user default)
@@ -364,11 +364,13 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("info", "Info"),
                     types.BotCommand("lang", "Language"),
                     types.BotCommand("lang_generate", "Gen language"),
-                    types.BotCommand("logs", "Logs"),
                     types.BotCommand("public", "Public"),
                 ]
                 # Admin extras: chat only
                 if is_admin:
+                    # For admins, expose /logs explicitly
+                    base_ru.insert(9, types.BotCommand("logs", "Логи генерации"))
+                    base_en.insert(9, types.BotCommand("logs", "Logs"))
                     base_ru = base_ru + [
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
@@ -462,12 +464,12 @@ def create_dispatcher() -> Dispatcher:
             text = (
                 "<b>Как пользоваться:</b>\n"
                 "- /generate — выбрать Пост, Серию или Статью; серия: пресеты 2/5/авто/кастом.\n"
-                "- /start — пройти настройку заново (язык интерфейса, язык генерации, редактура, логи, публикация, факт‑чекинг).\n"
+                "- /start — пройти настройку заново (язык интерфейса, язык генерации, публикация, факт‑чекинг).\n"
                 "- /history — показать историю генераций, выборочно удалить или очистить всё.\n"
                 "- /history_clear — очистить историю.\n"
                 "- /factcheck — задать дефолт факт‑чекинга (вкл/выкл).\n"
                 "- /refine — включить/выключить финальную редактуру.\n"
-                "- /lang, /lang_generate, /logs, /incognito — точечно поменять настройки.\n"
+                "- /lang, /lang_generate, /incognito — точечно поменять настройки.\n"
                 "- /chat, /endchat — чат с ИИ (для админов).\n\n"
                 "<b>Результаты:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n"
@@ -482,7 +484,7 @@ def create_dispatcher() -> Dispatcher:
                 f"- Провайдер: {_prov_name(prov, True)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Публичные результаты: {'да' if not incognito else 'нет'}\n"
-                f"- Логи: {'включены' if logs_enabled else 'отключены'}\n"
+                # logs removed from user info
                 f"- Финальная редактура: {'включена' if refine_enabled else 'отключена'}\n"
                 f"- Факт‑чекинг: {'включён' if fc_enabled else 'отключён'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
@@ -491,12 +493,12 @@ def create_dispatcher() -> Dispatcher:
             text = (
                 "<b>How to use:</b>\n"
                 "- /generate — choose Post, Series or Article; series: presets 2/5/auto/custom.\n"
-                "- /start — onboarding (UI lang, gen lang, refine, logs, publishing, fact‑check).\n"
+                "- /start — onboarding (UI lang, gen lang, publishing, fact‑check).\n"
                 "- /history — show history, delete selected or clear all.\n"
                 "- /history_clear — clear history.\n"
                 "- /factcheck — set default fact‑check (enable/disable).\n"
                 "- /refine — enable/disable final refine step.\n"
-                "- /lang, /lang_generate, /logs, /incognito — tweak settings individually.\n"
+                "- /lang, /lang_generate, /incognito — tweak settings individually.\n"
                 "- /chat, /endchat — chat with AI (admins).\n\n"
                 "<b>Results:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n"
@@ -511,7 +513,7 @@ def create_dispatcher() -> Dispatcher:
                 f"- Provider: {_prov_name(prov, False)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Public results: {'yes' if not incognito else 'no'}\n"
-                f"- Logs: {'enabled' if logs_enabled else 'disabled'}\n"
+                # logs removed from user info
                 f"- Final refine: {'enabled' if refine_enabled else 'disabled'}\n"
                 f"- Fact‑check: {'enabled' if fc_enabled else 'disabled'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
@@ -597,12 +599,18 @@ def create_dispatcher() -> Dispatcher:
             if onboarding:
                 from .bot_commands import SUPER_ADMIN_ID
                 is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+                is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
                 if is_superadmin:
                     prompt = "Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"
                     await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
-                else:
-                    prompt = "Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"
+                elif is_admin_local:
+                    # Admins: still offer logs toggle
+                    prompt = ("Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?")
                     await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("logs", ui_lang))
+                else:
+                    # Regular users: skip logs question → go directly to public results question
+                    prompt = ("Сделать результаты публичными?" if _is_ru(ui_lang) else "Make results public?")
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("incog", ui_lang))
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
@@ -656,14 +664,15 @@ def create_dispatcher() -> Dispatcher:
             kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            # Onboarding continues: after provider → logs toggle
+            # Onboarding continues: after provider (superadmin only)
             await query.message.edit_reply_markup() if query.message else None
             ok = "Провайдер установлен." if ui_lang == "ru" else "Provider set."
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ok)
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
-                prompt = "Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("logs", ui_lang))
+                # After provider (superadmin), go directly to public results question
+                prompt = ("Сделать результаты публичными?" if _is_ru(ui_lang) else "Make results public?")
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("incog", ui_lang))
 
     @dp.message_handler(commands=["lang"])  # type: ignore
     async def cmd_lang(message: types.Message, state: FSMContext):
@@ -927,6 +936,12 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["logs"])  # type: ignore
     async def cmd_logs(message: types.Message, state: FSMContext):
+        # Admin/superadmin only; hide for regular users
+        from .bot_commands import SUPER_ADMIN_ID
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        if not (is_admin or is_superadmin):
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Отправлять логи генерации?" if ui_lang == "ru" else "Send generation logs?"
@@ -1157,8 +1172,17 @@ def create_dispatcher() -> Dispatcher:
                 await set_factcheck_enabled(query.from_user.id, enabled)
         except Exception:
             pass
-        await query.message.edit_reply_markup() if query.message else None
-        await query.answer()
+        # Always answer callback first to avoid long spinner in Telegram
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        # Best-effort attempt to remove the inline keyboard; ignore edit errors
+        try:
+            if query.message:
+                await query.message.edit_reply_markup()
+        except Exception:
+            pass
         onboarding = bool((await state.get_data()).get("onboarding"))
         if enabled:
             # Depth selection only for superadmin
@@ -1910,7 +1934,8 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth_pref = 2
             fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
             unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
-            if SessionLocal is not None and message.from_user:
+            # Only attempt DB charge when not already marked as charged (non-admin)
+            if (not charged) and SessionLocal is not None and message.from_user:
                 async with SessionLocal() as session:
                     user = await ensure_user_with_credits(session, message.from_user.id)
                     ok, remaining = await charge_credits(session, user, unit_cost, reason="post")
@@ -1938,6 +1963,7 @@ def create_dispatcher() -> Dispatcher:
                     RUNNING_CHATS.discard(chat_id)
                     return
         except SQLAlchemyError:
+            # For admin path we do not attempt DB charge; this error indicates a true DB failure for non-admin charge
             warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
             await message.answer(warn, reply_markup=ReplyKeyboardRemove())
             await state.finish()
@@ -3014,6 +3040,63 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         # Direct dispatch to the proper command handler to avoid timing races
+        try:
+            raw = (message.text or "").strip()
+            cmd = raw.split()[0].lstrip("/").split("@")[0].lower()
+            handlers = {
+                "start": cmd_start,
+                "info": cmd_info,
+                "generate": cmd_generate,
+                "series": cmd_series,
+                "series_fixed": cmd_series_fixed,
+                "settings": cmd_settings,
+                "history": cmd_history,
+                "history_clear": cmd_history_clear,
+                "balance": cmd_balance,
+                "buy": cmd_buy,
+                "pricing": cmd_pricing,
+                "lang": cmd_lang,
+                "lang_generate": cmd_lang_generate,
+                "provider": cmd_provider,
+                "public": cmd_incognito,
+                "refine": cmd_refine,
+                "factcheck": cmd_factcheck,
+                "depth": cmd_depth,
+                "chat": cmd_chat,
+                "endchat": cmd_endchat,
+                "cancel": cmd_cancel,
+                "logs": cmd_logs,
+            }
+            h = handlers.get(cmd)
+            if h is not None:
+                try:
+                    await h(message, state)  # type: ignore[arg-type]
+                except TypeError:
+                    # Some handlers accept only (message)
+                    await h(message)  # type: ignore[misc]
+        except Exception:
+            pass
+        return
+
+    # Generic commands while ANY FSM state (except active chat): finish state and re-dispatch
+    @dp.message_handler(lambda m: (m.text or "").startswith("/"), state="*", content_types=types.ContentTypes.TEXT)  # type: ignore
+    async def cmd_any_during_fsm(message: types.Message, state: FSMContext):
+        try:
+            cur = await state.get_state()
+        except Exception:
+            cur = None
+        # Do not shadow chat-specific handler; let it handle commands in chat state
+        try:
+            if cur == ChatStates.Active.state:
+                return
+        except Exception:
+            pass
+        # Finish any other state to avoid blocking commands
+        try:
+            await state.finish()
+        except Exception:
+            pass
+        # Directly dispatch the command to its handler to avoid timing races
         try:
             raw = (message.text or "").strip()
             cmd = raw.split()[0].lstrip("/").split("@")[0].lower()
