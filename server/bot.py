@@ -178,10 +178,10 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
         InlineKeyboardButton(text=(("Логи: вкл" if ru else "Logs: on") + (" ✓" if logs_enabled else "")), callback_data="set:logs:enable"),
         InlineKeyboardButton(text=(("Логи: выкл" if ru else "Logs: off") + (" ✓" if not logs_enabled else "")), callback_data="set:logs:disable"),
     )
-    # Incognito row
+    # Public results row
     kb.add(
-        InlineKeyboardButton(text=(("Инкогнито: вкл" if ru else "Incognito: on") + (" ✓" if incognito else "")), callback_data="set:incog:enable"),
-        InlineKeyboardButton(text=(("Инкогнито: выкл" if ru else "Incognito: off") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
+        InlineKeyboardButton(text=(("Публично: да" if ru else "Public: yes") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
+        InlineKeyboardButton(text=(("Публично: нет" if ru else "Public: no") + (" ✓" if incognito else "")), callback_data="set:incog:enable"),
     )
     # Fact-check row (admins only); depth selection removed from settings
     if is_admin:
@@ -351,7 +351,7 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("lang", "Язык интерфейса"),
                     types.BotCommand("lang_generate", "Язык генерации"),
                     types.BotCommand("logs", "Логи генерации"),
-                    types.BotCommand("incognito", "Инкогнито"),
+                    types.BotCommand("public", "Публичность"),
                 ]
                 # EN set (user default)
                 base_en = [
@@ -365,7 +365,7 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("lang", "Language"),
                     types.BotCommand("lang_generate", "Gen language"),
                     types.BotCommand("logs", "Logs"),
-                    types.BotCommand("incognito", "Incognito"),
+                    types.BotCommand("public", "Public"),
                 ]
                 # Move cancel to bottom later
                 if is_admin:
@@ -438,10 +438,13 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
 
-        def _prov_name(p: str) -> str:
-            m = {"openai": "OpenAI", "gemini": "Gemini", "claude": "Claude", "auto": "OpenAI"}
+        def _prov_name(p: str, ru: bool) -> str:
             key = (p or "").strip().lower()
-            return m.get(key, p or "openai")
+            if key == "auto":
+                return "Авто" if ru else "Auto"
+            if key in {"openai","gemini","claude"}:
+                return key.capitalize()
+            return p or ("Авто" if ru else "Auto")
 
         def _lang_human(l: str, ru: bool) -> str:
             if ru:
@@ -481,9 +484,9 @@ def create_dispatcher() -> Dispatcher:
                 "- /pricing — посмотреть цены по типам.\n\n"
                 ""
                 "<b>Текущие настройки:</b>\n"
-                f"- Провайдер: {_prov_name(prov)}\n"
+                f"- Провайдер: {_prov_name(prov, True)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
-                f"- Публичная публикация: {'включена' if not incognito else 'выключена (приватно)'}\n"
+                f"- Публичные результаты: {'да' if not incognito else 'нет'}\n"
                 f"- Логи: {'включены' if logs_enabled else 'отключены'}\n"
                 f"- Финальная редактура: {'включена' if refine_enabled else 'отключена'}\n"
                 f"- Факт‑чекинг: {'включён' if fc_enabled else 'отключён'}"
@@ -510,9 +513,9 @@ def create_dispatcher() -> Dispatcher:
                 "- /pricing — see pricing per type.\n\n"
                 ""
                 "<b>Current settings:</b>\n"
-                f"- Provider: {_prov_name(prov)}\n"
+                f"- Provider: {_prov_name(prov, False)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
-                f"- Public publishing: {'enabled' if not incognito else 'disabled (private)'}\n"
+                f"- Public results: {'yes' if not incognito else 'no'}\n"
                 f"- Logs: {'enabled' if logs_enabled else 'disabled'}\n"
                 f"- Final refine: {'enabled' if refine_enabled else 'disabled'}\n"
                 f"- Fact‑check: {'enabled' if fc_enabled else 'disabled'}"
@@ -921,11 +924,7 @@ def create_dispatcher() -> Dispatcher:
                 refine = False; logs_enabled = False; incognito = False; fc_enabled = False; fc_depth = 2
         except Exception:
             refine = False; logs_enabled = False; incognito = False; fc_enabled = False; fc_depth = 2
-        title = (
-            "Быстрые настройки (всё — через кнопки, без диалогов):"
-            if _is_ru(ui_lang) else
-            "Quick settings (all toggles via buttons):"
-        )
+        title = ("Настройки" if _is_ru(ui_lang) else "Settings")
         await state.update_data(in_settings=True)
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
@@ -976,9 +975,9 @@ def create_dispatcher() -> Dispatcher:
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
                 prompt = (
-                    "Сделать результаты публичными? По умолчанию они приватны (инкогнито)."
+                    "Сделать результаты публичными?"
                     if _is_ru(ui_lang)
-                    else "Make results public? By default they are private (incognito)."
+                    else "Make results public?"
                 )
                 await dp.bot.send_message(
                     query.message.chat.id if query.message else query.from_user.id,
@@ -986,14 +985,14 @@ def create_dispatcher() -> Dispatcher:
                     reply_markup=build_enable_disable_inline("incog", ui_lang),
                 )
 
-    @dp.message_handler(commands=["incognito"])  # type: ignore
+    @dp.message_handler(commands=["public"])  # type: ignore
     async def cmd_incognito(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = (
-            "Сделать результаты публичными? По умолчанию они приватны (инкогнито)."
+            "Сделать результаты публичными?"
             if ui_lang == "ru"
-            else "Make results public? By default they are private (incognito)."
+            else "Make results public?"
         )
         await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
@@ -1028,11 +1027,11 @@ def create_dispatcher() -> Dispatcher:
             kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            # Re-phrase to positive ask: publish or keep private
+            # Affirmative/negative public state
             msg = (
-                ("Публичная публикация: включена." if ui_lang=="ru" else "Public publishing: enabled.")
-                if enabled
-                else ("Публичная публикация: отключена (приватно)." if ui_lang=="ru" else "Public publishing: disabled (private).")
+                ("Публичные результаты: да." if ui_lang=="ru" else "Public results: yes.")
+                if not enabled  # enabled means incognito ON -> public NO
+                else ("Публичные результаты: нет." if ui_lang=="ru" else "Public results: no.")
             )
             await query.message.edit_reply_markup() if query.message else None
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
@@ -1146,7 +1145,9 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"))  # type: ignore
     async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
-        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+        from .bot_commands import SUPER_ADMIN_ID
+        is_super = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+        if not query.from_user or (query.from_user.id not in ADMIN_IDS and not is_super):
             await query.answer()
             return
         val = (query.data or "").split(":")[-1]
@@ -1180,11 +1181,18 @@ def create_dispatcher() -> Dispatcher:
             # Mark FC decision as done in onboarding to avoid asking again on topic
             await state.update_data(factcheck=False, research_iterations=None, fc_ready=True)
             if onboarding:
-                # After disabling FC in onboarding → ask what to generate (series disabled)
-                kb = build_gentype_keyboard(ui_lang, allow_series=False)
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
-                # Ensure callback is routed correctly
-                await GenerateStates.ChoosingGenType.set()
+                sd = await state.get_data()
+                active_flow = (sd.get("active_flow") or "").strip().lower()
+                if active_flow in {"post", "series"}:
+                    # Proceed to refine question in flow
+                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
+                else:
+                    # After disabling FC in onboarding → ask what to generate (series disabled)
+                    kb = build_gentype_keyboard(ui_lang, allow_series=False)
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
+                    # Ensure callback is routed correctly
+                    await GenerateStates.ChoosingGenType.set()
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
@@ -1228,14 +1236,21 @@ def create_dispatcher() -> Dispatcher:
         else:
             onboarding = bool(data.get("onboarding"))
             if onboarding:
-                # After setting depth in onboarding → ask what to generate
-                kb = InlineKeyboardMarkup()
-                kb.add(
-                    InlineKeyboardButton(text=("Пост" if _is_ru(ui_lang) else "Post"), callback_data="set:gentype:post"),
-                    InlineKeyboardButton(text=("Серия постов" if _is_ru(ui_lang) else "Series of posts"), callback_data="set:gentype:series"),
-                )
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
-                await GenerateStates.ChoosingGenType.set()
+                sd = await state.get_data()
+                active_flow = (sd.get("active_flow") or "").strip().lower()
+                if active_flow == "post":
+                    # Next ask refine for post
+                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
+                elif active_flow == "series":
+                    # Next ask refine for series, then proceed to count
+                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
+                else:
+                    # Fallback: what to generate
+                    kb = build_gentype_keyboard(ui_lang, allow_series=False)
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
+                    await GenerateStates.ChoosingGenType.set()
             else:
                 # Standalone /factcheck flow: confirm and stay
                 msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
@@ -3009,7 +3024,7 @@ def create_dispatcher() -> Dispatcher:
                 "lang": cmd_lang,
                 "lang_generate": cmd_lang_generate,
                 "provider": cmd_provider,
-                "incognito": cmd_incognito,
+                "public": cmd_incognito,
                 "refine": cmd_refine,
                 "factcheck": cmd_factcheck,
                 "depth": cmd_depth,
