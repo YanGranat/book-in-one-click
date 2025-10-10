@@ -815,6 +815,46 @@ def generate_post(
                     except Exception as _e:
                         s.rollback()
                         print(f"[ERROR] JobLog commit failed: {_e}")
+                    # Ensure we have a valid Job.id for history join; if missing, create one based on user_id
+                    try:
+                        if not result_job_id or int(result_job_id) <= 0:
+                            # Try to resolve or create User by telegram id (job_meta.user_id)
+                            from server.db import User, Job as _Job
+                            tg_uid = int((job_meta or {}).get("user_id", 0) or 0)
+                            db_user_id = None
+                            if tg_uid > 0:
+                                try:
+                                    urow = s.query(User).filter(User.telegram_id == tg_uid).first()
+                                except Exception:
+                                    urow = None
+                                if urow is None:
+                                    try:
+                                        urow = User(telegram_id=tg_uid, credits=0)
+                                        s.add(urow)
+                                        s.flush()
+                                    except Exception:
+                                        s.rollback()
+                                        urow = None
+                                if urow is not None:
+                                    db_user_id = int(getattr(urow, "id", 0) or 0)
+                            # Create a Job row linked to this user
+                            try:
+                                import json as __json
+                                params = {
+                                    "topic": topic,
+                                    "lang": lang,
+                                    "provider": _prov,
+                                    "factcheck": bool(factcheck),
+                                    "refine": bool(use_refine),
+                                }
+                                jrow = _Job(user_id=(db_user_id or 0), type="post", status="done", params_json=__json.dumps(params, ensure_ascii=False), cost=1, file_path=str(filepath) if filepath else None)
+                                s.add(jrow)
+                                s.flush()
+                                result_job_id = int(getattr(jrow, "id", 0) or 0)
+                                s.commit()
+                            except Exception as _e:
+                                s.rollback()
+                                print(f"[ERROR] Fallback Job create failed: {_e}")
                     # 2) Persist final ResultDoc independently (even if JobLog failed)
                     if filepath is not None:
                         try:
@@ -822,7 +862,7 @@ def generate_post(
                         except ValueError:
                             rel_doc = str(filepath)
                         rd = ResultDoc(
-                            job_id=result_job_id,
+                            job_id=int(result_job_id or 0),
                             kind=output_subdir,
                             path=rel_doc,
                             topic=topic,
