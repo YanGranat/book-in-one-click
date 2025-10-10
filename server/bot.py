@@ -137,13 +137,13 @@ def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     # Packs: 1, 3, 5, 10, 50 credits at 200 stars per credit
     if _is_ru(ui_lang):
         kb.add(InlineKeyboardButton(text="Купить 1 кредит — 200⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Купить 3 кредита — 600⭐", callback_data="buy:stars:3"))
+        kb.add(InlineKeyboardButton(text="Купить 30 кредитов — 6000⭐", callback_data="buy:stars:30"))
         kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 1000⭐", callback_data="buy:stars:5"))
         kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 2000⭐", callback_data="buy:stars:10"))
         kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 10000⭐", callback_data="buy:stars:50"))
     else:
         kb.add(InlineKeyboardButton(text="Buy 1 credit — 200⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Buy 3 credits — 600⭐", callback_data="buy:stars:3"))
+        kb.add(InlineKeyboardButton(text="Buy 30 credits — 6000⭐", callback_data="buy:stars:30"))
         kb.add(InlineKeyboardButton(text="Buy 5 credits — 1000⭐", callback_data="buy:stars:5"))
         kb.add(InlineKeyboardButton(text="Buy 10 credits — 2000⭐", callback_data="buy:stars:10"))
         kb.add(InlineKeyboardButton(text="Buy 50 credits — 10000⭐", callback_data="buy:stars:50"))
@@ -1469,7 +1469,7 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     job_id = 0
 
-                # Charge 3 credits for article (admins free)
+                # Charge 30 credits for article (admins free)
                 is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
                 if not is_admin:
                     from sqlalchemy.exc import SQLAlchemyError
@@ -1479,7 +1479,7 @@ def create_dispatcher() -> Dispatcher:
                             async with SessionLocal() as session:
                                 from .db import get_or_create_user
                                 user = await get_or_create_user(session, message.from_user.id)
-                                ok, remaining = await charge_credits(session, user, 3, reason="article")
+                                ok, remaining = await charge_credits(session, user, 30, reason="article")
                                 if ok:
                                     await session.commit()
                                     charged = True
@@ -2873,22 +2873,35 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_pricing(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         if _is_ru(ui_lang):
-            await message.answer(
-                "Цены:\n"
-                "- Пост: 1 кредит\n"
-                "- Серия: 1×N кредитов\n"
-                "- Статья: 3 кредита\n- Книга: по главам\n"
-                "Оплата: Telegram Stars (если включено)."
-            )
+            if is_admin:
+                await message.answer(
+                    "Цены:\n"
+                    "- Пост: 1 кредит\n"
+                    "- Серия: 1×N кредитов\n"
+                    "- Статья: 30 кредитов\n"
+                )
+            else:
+                await message.answer(
+                    "Цены:\n"
+                    "- Пост: 1 кредит\n"
+                    "- Статья: 30 кредитов\n"
+                )
         else:
-            await message.answer(
-                "Pricing:\n"
-                "- Post: 1 credit\n"
-                "- Series: 1×N credits\n"
-                "- Article: 3 credits\n- Book: per chapter\n"
-                "Payments: Telegram Stars (if enabled)."
-            )
+            if is_admin:
+                await message.answer(
+                    "Pricing:\n"
+                    "- Post: 1 credit\n"
+                    "- Series: 1×N credits\n"
+                    "- Article: 30 credits\n"
+                )
+            else:
+                await message.answer(
+                    "Pricing:\n"
+                    "- Post: 1 credit\n"
+                    "- Article: 30 credits\n"
+                )
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
     async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
