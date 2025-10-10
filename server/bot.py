@@ -24,7 +24,7 @@ from services.post_series.generate_series import generate_series
 from services.article.generate_article import generate_article
 from utils.slug import safe_filename_base
 from .db import SessionLocal
-from .bot_commands import ADMIN_IDS
+from .bot_commands import ADMIN_IDS, SUPER_ADMIN_ID
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only, refund_credits, refund_credits_kv
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 from .kv import set_gen_lang, get_gen_lang
@@ -150,16 +150,17 @@ def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
-def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: bool, logs_enabled: bool, incognito: bool, fc_enabled: bool, fc_depth: int, *, is_admin: bool = True) -> InlineKeyboardMarkup:
+def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: bool, logs_enabled: bool, incognito: bool, fc_enabled: bool, fc_depth: int, *, is_admin: bool = True, is_superadmin: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     ru = _is_ru(ui_lang)
-    # Provider row
-    kb.add(
-        InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if provider == "auto" else "")), callback_data="set:provider:auto"),
-        InlineKeyboardButton(text=("OpenAI" + (" ✓" if provider == "openai" else "")), callback_data="set:provider:openai"),
-        InlineKeyboardButton(text=("Gemini" + (" ✓" if provider == "gemini" else "")), callback_data="set:provider:gemini"),
-        InlineKeyboardButton(text=("Claude" + (" ✓" if provider == "claude" else "")), callback_data="set:provider:claude"),
-    )
+    # Provider row (superadmin only)
+    if is_superadmin:
+        kb.add(
+            InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if provider == "auto" else "")), callback_data="set:provider:auto"),
+            InlineKeyboardButton(text=("OpenAI" + (" ✓" if provider == "openai" else "")), callback_data="set:provider:openai"),
+            InlineKeyboardButton(text=("Gemini" + (" ✓" if provider == "gemini" else "")), callback_data="set:provider:gemini"),
+            InlineKeyboardButton(text=("Claude" + (" ✓" if provider == "claude" else "")), callback_data="set:provider:claude"),
+        )
     # Generation language row
     kb.add(
         InlineKeyboardButton(text=("RU" + (" ✓" if gen_lang == "ru" else "")), callback_data="set:gen_lang:ru"),
@@ -182,18 +183,13 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
         InlineKeyboardButton(text=(("Инкогнито: вкл" if ru else "Incognito: on") + (" ✓" if incognito else "")), callback_data="set:incog:enable"),
         InlineKeyboardButton(text=(("Инкогнито: выкл" if ru else "Incognito: off") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
     )
-    # Fact-check row (admins only)
+    # Fact-check row (admins only); depth selection removed from settings
     if is_admin:
         kb.add(
             InlineKeyboardButton(text=(("Факт-чекинг: вкл" if ru else "Fact-check: on") + (" ✓" if fc_enabled else "")), callback_data="set:fc_cmd:enable"),
             InlineKeyboardButton(text=(("Факт-чекинг: выкл" if ru else "Fact-check: off") + (" ✓" if not fc_enabled else "")), callback_data="set:fc_cmd:disable"),
         )
-        # Depth row
-        kb.add(
-            InlineKeyboardButton(text=("D=1" + (" ✓" if fc_depth == 1 else "")), callback_data="set:depth:1"),
-            InlineKeyboardButton(text=("D=2" + (" ✓" if fc_depth == 2 else "")), callback_data="set:depth:2"),
-            InlineKeyboardButton(text=("D=3" + (" ✓" if fc_depth == 3 else "")), callback_data="set:depth:3"),
-        )
+        # Depth is no longer configurable via settings (asked only during onboarding/generation)
     return kb
 
 
@@ -258,6 +254,26 @@ def build_depth_inline() -> InlineKeyboardMarkup:
     kb.add(InlineKeyboardButton(text="1", callback_data="set:depth:1"))
     kb.add(InlineKeyboardButton(text="2", callback_data="set:depth:2"))
     kb.add(InlineKeyboardButton(text="3", callback_data="set:depth:3"))
+    return kb
+
+
+def build_gen_depth_inline() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text="1", callback_data="set:gen_depth:1"))
+    kb.add(InlineKeyboardButton(text="2", callback_data="set:gen_depth:2"))
+    kb.add(InlineKeyboardButton(text="3", callback_data="set:gen_depth:3"))
+    return kb
+
+
+def build_gentype_keyboard(ui_lang: str, *, allow_series: bool) -> InlineKeyboardMarkup:
+    ru = _is_ru(ui_lang)
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton(text=("Пост" if ru else "Post"), callback_data="set:gentype:post"),
+        InlineKeyboardButton(text=(("Серия постов" if ru else "Series of posts")), callback_data="set:gentype:series") if allow_series else InlineKeyboardButton(text=("Статья" if ru else "Article"), callback_data="set:gentype:article"),
+    )
+    if allow_series:
+        kb.add(InlineKeyboardButton(text=("Статья" if ru else "Article"), callback_data="set:gentype:article"))
     return kb
 
 
@@ -334,10 +350,8 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("info", "Инфо"),
                     types.BotCommand("lang", "Язык интерфейса"),
                     types.BotCommand("lang_generate", "Язык генерации"),
-                    types.BotCommand("provider", "Провайдер"),
                     types.BotCommand("logs", "Логи генерации"),
                     types.BotCommand("incognito", "Инкогнито"),
-                    types.BotCommand("cancel", "Отмена"),
                 ]
                 # EN set (user default)
                 base_en = [
@@ -350,27 +364,35 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("info", "Info"),
                     types.BotCommand("lang", "Language"),
                     types.BotCommand("lang_generate", "Gen language"),
-                    types.BotCommand("provider", "Provider"),
                     types.BotCommand("logs", "Logs"),
                     types.BotCommand("incognito", "Incognito"),
-                    types.BotCommand("cancel", "Cancel"),
                 ]
+                # Move cancel to bottom later
                 if is_admin:
                     # Admin extras: factcheck/depth/refine/chat
                     base_ru = base_ru + [
                         types.BotCommand("factcheck", "Факт-чекинг"),
-                        types.BotCommand("depth", "Глубина"),
                         types.BotCommand("refine", "Финальная редактура"),
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
                     ]
                     base_en = base_en + [
                         types.BotCommand("factcheck", "Fact-check"),
-                        types.BotCommand("depth", "Depth"),
                         types.BotCommand("refine", "Refine"),
                         types.BotCommand("chat", "Chat with AI"),
                         types.BotCommand("endchat", "End chat"),
                     ]
+                # Superadmin: add provider and depth commands
+                from .bot_commands import SUPER_ADMIN_ID
+                is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+                if is_superadmin:
+                    base_ru.insert(9, types.BotCommand("provider", "Провайдер"))
+                    base_en.insert(9, types.BotCommand("provider", "Provider"))
+                    base_ru.append(types.BotCommand("depth", "Глубина"))
+                    base_en.append(types.BotCommand("depth", "Depth"))
+                # Cancel at the very bottom
+                base_ru.append(types.BotCommand("cancel", "Отмена"))
+                base_en.append(types.BotCommand("cancel", "Cancel"))
                 try:
                     await dp.bot.set_my_commands(base_en, scope=types.BotCommandScopeChat(message.chat.id))
                 except Exception:
@@ -394,10 +416,13 @@ def create_dispatcher() -> Dispatcher:
         logs_enabled = False
         try:
             if message.from_user:
-                try:
-                    prov = await get_provider(message.from_user.id)  # type: ignore
-                except Exception:
-                    prov = prov or "openai"
+                from .bot_commands import SUPER_ADMIN_ID
+                is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+                if is_superadmin:
+                    try:
+                        prov = await get_provider(message.from_user.id)  # type: ignore
+                    except Exception:
+                        prov = prov or "openai"
                 try:
                     gen_lang = await get_gen_lang(message.from_user.id)  # type: ignore
                 except Exception:
@@ -438,14 +463,13 @@ def create_dispatcher() -> Dispatcher:
         if ui_lang == "ru":
             text = (
                 "<b>Как пользоваться:</b>\n"
-                "- /generate — выбрать Пост или Серию; серия: пресеты 2/5/авто/кастом.\n"
-                "- /start — пройти настройку заново (язык интерфейса, язык генерации, редактура, провайдер, логи, инкогнито, факт‑чекинг, глубина).\n"
+                "- /generate — выбрать Пост, Серию или Статью; серия: пресеты 2/5/авто/кастом.\n"
+                "- /start — пройти настройку заново (язык интерфейса, язык генерации, редактура, логи, публикация, факт‑чекинг).\n"
                 "- /history — показать историю генераций, выборочно удалить или очистить всё.\n"
                 "- /history_clear — очистить историю.\n"
-                "- /factcheck — задать дефолт факт‑чекинга (вкл/выкл и глубину).\n"
-                "- /depth — установить глубину факт‑чекинга по умолчанию.\n"
+                "- /factcheck — задать дефолт факт‑чекинга (вкл/выкл).\n"
                 "- /refine — включить/выключить финальную редактуру.\n"
-                "- /lang, /lang_generate, /provider, /logs, /incognito — точечно поменять настройки.\n"
+                "- /lang, /lang_generate, /logs, /incognito — точечно поменять настройки.\n"
                 "- /chat, /endchat — чат с ИИ (для админов).\n\n"
                 "<b>Результаты:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n"
@@ -459,24 +483,22 @@ def create_dispatcher() -> Dispatcher:
                 "<b>Текущие настройки:</b>\n"
                 f"- Провайдер: {_prov_name(prov)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
-                f"- Инкогнито: {'включён' if incognito else 'отключён'}\n"
+                f"- Публичная публикация: {'включена' if not incognito else 'выключена (приватно)'}\n"
                 f"- Логи: {'включены' if logs_enabled else 'отключены'}\n"
                 f"- Финальная редактура: {'включена' if refine_enabled else 'отключена'}\n"
                 f"- Факт‑чекинг: {'включён' if fc_enabled else 'отключён'}"
-                + (f" (глубина {fc_depth})" if fc_enabled else "")
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
             )
         else:
             text = (
                 "<b>How to use:</b>\n"
-                "- /generate — choose Post or Series; series: presets 2/5/auto/custom.\n"
-                "- /start — onboarding (UI lang, gen lang, refine, provider, logs, incognito, fact‑check, depth).\n"
+                "- /generate — choose Post, Series or Article; series: presets 2/5/auto/custom.\n"
+                "- /start — onboarding (UI lang, gen lang, refine, logs, publishing, fact‑check).\n"
                 "- /history — show history, delete selected or clear all.\n"
                 "- /history_clear — clear history.\n"
-                "- /factcheck — set default fact‑check (enable/disable + depth).\n"
-                "- /depth — set default fact‑check depth.\n"
+                "- /factcheck — set default fact‑check (enable/disable).\n"
                 "- /refine — enable/disable final refine step.\n"
-                "- /lang, /lang_generate, /provider, /logs, /incognito — tweak settings individually.\n"
+                "- /lang, /lang_generate, /logs, /incognito — tweak settings individually.\n"
                 "- /chat, /endchat — chat with AI (admins).\n\n"
                 "<b>Results:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n"
@@ -490,11 +512,10 @@ def create_dispatcher() -> Dispatcher:
                 "<b>Current settings:</b>\n"
                 f"- Provider: {_prov_name(prov)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
-                f"- Incognito: {'enabled' if incognito else 'disabled'}\n"
+                f"- Public publishing: {'enabled' if not incognito else 'disabled (private)'}\n"
                 f"- Logs: {'enabled' if logs_enabled else 'disabled'}\n"
                 f"- Final refine: {'enabled' if refine_enabled else 'disabled'}\n"
                 f"- Fact‑check: {'enabled' if fc_enabled else 'disabled'}"
-                + (f" (depth {fc_depth})" if fc_enabled else "")
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
             )
         await message.answer(text, disable_web_page_preview=True, parse_mode=types.ParseMode.HTML)
@@ -553,10 +574,13 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang_cur = gen_lang; refine=False; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang_cur, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            from .bot_commands import SUPER_ADMIN_ID
+            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang_cur, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            # Onboarding continues: after generation language → provider
+            # Onboarding continues: after generation language → provider (superadmin only); others → logs
             msg = {
                 "ru": {
                     "ru": "Язык генерации: русский.",
@@ -573,19 +597,33 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg.get("ru" if ui_lang == "ru" else "en").get(gen_lang, "OK"))
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
-                # After generation language → ask provider
-                prompt = "Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
+                from .bot_commands import SUPER_ADMIN_ID
+                is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+                if is_superadmin:
+                    prompt = "Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_provider_inline())
+                else:
+                    prompt = "Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_enable_disable_inline("logs", ui_lang))
 
     @dp.message_handler(commands=["provider"])  # type: ignore
     async def cmd_provider(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        if not is_superadmin:
+            await message.answer("Недоступно." if ui_lang == "ru" else "Not available.")
+            return
         prompt = "Выберите провайдера:" if ui_lang == "ru" else "Choose provider:"
         await message.answer(prompt, reply_markup=build_provider_inline())
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:provider:"))  # type: ignore
     async def cb_set_provider(query: types.CallbackQuery, state: FSMContext):
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
+            await query.answer()
+            return
         prov = (query.data or "").split(":")[-1]
         # Accept 'auto' as a stored preference; runtime mapping happens at call sites
         if prov not in {"auto", "openai", "gemini", "claude"}:
@@ -614,7 +652,10 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = prov; gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            from .bot_commands import SUPER_ADMIN_ID
+            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
             # Onboarding continues: after provider → logs toggle
@@ -648,16 +689,13 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             fc_depth = 2
         await state.update_data(factcheck=bool(fc_enabled), research_iterations=(int(fc_depth) if fc_enabled else None), fc_ready=True)
-        # Ask Post or Series first
+        # Ask what to generate; users cannot generate series
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        allow_series = bool(is_admin or is_superadmin)
         ru = _is_ru(ui_lang)
-        kb = InlineKeyboardMarkup()
-        kb.add(
-            InlineKeyboardButton(text=("Пост" if ru else "Post"), callback_data="set:gentype:post"),
-            InlineKeyboardButton(text=("Серия" if ru else "Series"), callback_data="set:gentype:series"),
-        )
-        kb.add(
-            InlineKeyboardButton(text=("Статья" if ru else "Article"), callback_data="set:gentype:article"),
-        )
+        kb = build_gentype_keyboard(ui_lang, allow_series=allow_series)
         await message.answer(("Что генерировать?" if ru else "What to generate?"), reply_markup=kb)
         await GenerateStates.ChoosingGenType.set()
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:gentype:"), state=GenerateStates.ChoosingGenType)  # type: ignore
@@ -667,7 +705,22 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         ru = _is_ru(ui_lang)
         await query.answer()
+        # For non-admins, block series
+        is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+        if kind == "series" and not (is_admin or is_superadmin):
+            # silently ignore or send message
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Недоступно." if ru else "Not available."))
+            return
         if kind == "post":
+            # Superadmin: ask FC (with depth), then refine, then topic
+            if is_superadmin:
+                await state.update_data(series_mode=None, series_count=None, active_flow="post", next_after_fc="post")
+                prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+                return
+            # Admins/users: ask topic directly
             await state.update_data(series_mode=None, series_count=None)
             prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
@@ -679,7 +732,14 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
             await GenerateStates.WaitingTopic.set()
             return
-        # Series branch: ask preset 2/5/auto/custom
+        # Series branch
+        if is_superadmin:
+            # Ask FC (with depth), then refine, then how many posts, then topic
+            await state.update_data(series_mode=None, series_count=None, active_flow="series", next_after_fc="series")
+            prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+            return
+        # Admins: ask preset 2/5/auto/custom immediately
         kb = InlineKeyboardMarkup()
         kb.add(
             InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
@@ -868,7 +928,8 @@ def create_dispatcher() -> Dispatcher:
         )
         await state.update_data(in_settings=True)
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
-        await message.answer(title, reply_markup=build_settings_keyboard(ui_lang, prov, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin))
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        await message.answer(title, reply_markup=build_settings_keyboard(ui_lang, prov, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin, is_superadmin=is_superadmin))
 
     @dp.message_handler(commands=["logs"])  # type: ignore
     async def cmd_logs(message: types.Message, state: FSMContext):
@@ -903,7 +964,9 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=enabled; incognito=False; fc_enabled=False; fc_depth=2
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
             # Onboarding continues: after logs → incognito toggle
@@ -913,9 +976,9 @@ def create_dispatcher() -> Dispatcher:
             onboarding = bool((await state.get_data()).get("onboarding"))
             if onboarding:
                 prompt = (
-                    "Инкогнито режим? Ваши генерации не будут видны на странице с результатами генераций всех пользователей."
+                    "Сделать результаты публичными? По умолчанию они приватны (инкогнито)."
                     if _is_ru(ui_lang)
-                    else "Incognito mode? Your generations will not be visible on the public results page."
+                    else "Make results public? By default they are private (incognito)."
                 )
                 await dp.bot.send_message(
                     query.message.chat.id if query.message else query.from_user.id,
@@ -928,9 +991,9 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = (
-            "Инкогнито режим? Ваши генерации не будут видны на странице с результатами генераций всех пользователей."
+            "Сделать результаты публичными? По умолчанию они приватны (инкогнито)."
             if ui_lang == "ru"
-            else "Incognito mode? Your generations will not be visible on the public results page."
+            else "Make results public? By default they are private (incognito)."
         )
         await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
 
@@ -960,35 +1023,32 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=enabled; fc_enabled=False; fc_depth=2
             is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin)
+            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            msg = "Инкогнито: включён." if (enabled and ui_lang=="ru") else ("Incognito: enabled." if enabled else ("Инкогнито: отключён." if ui_lang=="ru" else "Incognito: disabled."))
+            # Re-phrase to positive ask: publish or keep private
+            msg = (
+                ("Публичная публикация: включена." if ui_lang=="ru" else "Public publishing: enabled.")
+                if enabled
+                else ("Публичная публикация: отключена (приватно)." if ui_lang=="ru" else "Public publishing: disabled (private).")
+            )
             await query.message.edit_reply_markup() if query.message else None
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
             onboarding_flag = bool((await state.get_data()).get("onboarding"))
             if onboarding_flag:
-                if (query.from_user and query.from_user.id in ADMIN_IDS):
-                    # Admins: after incognito → refine → fact-check
-                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-                    await dp.bot.send_message(
-                        query.message.chat.id if query.message else query.from_user.id,
-                        prompt,
-                        reply_markup=build_yesno_inline("refine", ui_lang),
-                    )
-                else:
-                    # Non-admins: skip refine/fact-check, go to generation type
-                    kb = InlineKeyboardMarkup()
-                    kb.add(
-                        InlineKeyboardButton(text=("Пост" if _is_ru(ui_lang) else "Post"), callback_data="set:gentype:post"),
-                        InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
-                    )
-                    await dp.bot.send_message(
-                        query.message.chat.id if query.message else query.from_user.id,
-                        ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"),
-                        reply_markup=kb,
-                    )
-                    await GenerateStates.ChoosingGenType.set()
+                # After incognito decision → ask what to generate (role-based series availability)
+                is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+                from .bot_commands import SUPER_ADMIN_ID
+                is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+                kb = build_gentype_keyboard(ui_lang, allow_series=bool(is_admin_local or is_superadmin))
+                await dp.bot.send_message(
+                    query.message.chat.id if query.message else query.from_user.id,
+                    ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"),
+                    reply_markup=kb,
+                )
+                await GenerateStates.ChoosingGenType.set()
 
     @dp.message_handler(commands=["refine"])  # type: ignore
     async def cmd_refine(message: types.Message, state: FSMContext):
@@ -1028,7 +1088,9 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=enabled; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
             msg = "Финальная редактура: включена." if (enabled and ui_lang=="ru") else ("Final refine: enabled." if enabled else ("Финальная редактура: отключена." if ui_lang=="ru" else "Final refine: disabled."))
@@ -1101,25 +1163,33 @@ def create_dispatcher() -> Dispatcher:
         await query.answer()
         onboarding = bool((await state.get_data()).get("onboarding"))
         if enabled:
-            prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
+            # Depth selection only for superadmin
+            from .bot_commands import SUPER_ADMIN_ID
+            if query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID):
+                prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
+            else:
+                await state.update_data(factcheck=True, research_iterations=2, fc_ready=True)
+                # Continue onboarding if applicable
+                onboarding2 = bool((await state.get_data()).get("onboarding"))
+                if onboarding2:
+                    kb = build_gentype_keyboard(ui_lang, allow_series=False)
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
+                    await GenerateStates.ChoosingGenType.set()
         else:
             # Mark FC decision as done in onboarding to avoid asking again on topic
             await state.update_data(factcheck=False, research_iterations=None, fc_ready=True)
             if onboarding:
-                # After disabling FC in onboarding → ask what to generate
-                kb = InlineKeyboardMarkup()
-                kb.add(
-                    InlineKeyboardButton(text=("Пост" if _is_ru(ui_lang) else "Post"), callback_data="set:gentype:post"),
-                    InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
-                )
+                # After disabling FC in onboarding → ask what to generate (series disabled)
+                kb = build_gentype_keyboard(ui_lang, allow_series=False)
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
                 # Ensure callback is routed correctly
                 await GenerateStates.ChoosingGenType.set()
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
-        if not query.from_user or query.from_user.id not in ADMIN_IDS:
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
             await query.answer()
             return
         val = (query.data or "").split(":")[-1]
@@ -1150,7 +1220,10 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=True; fc_depth=depth
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            from .bot_commands import SUPER_ADMIN_ID
+            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
             onboarding = bool(data.get("onboarding"))
@@ -1159,7 +1232,7 @@ def create_dispatcher() -> Dispatcher:
                 kb = InlineKeyboardMarkup()
                 kb.add(
                     InlineKeyboardButton(text=("Пост" if _is_ru(ui_lang) else "Post"), callback_data="set:gentype:post"),
-                    InlineKeyboardButton(text=("Серия" if _is_ru(ui_lang) else "Series"), callback_data="set:gentype:series"),
+                    InlineKeyboardButton(text=("Серия постов" if _is_ru(ui_lang) else "Series of posts"), callback_data="set:gentype:series"),
                 )
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
                 await GenerateStates.ChoosingGenType.set()
@@ -1203,7 +1276,10 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth = await get_factcheck_depth(user_id)
             except Exception:
                 prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=enabled; fc_depth=2
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth))
+            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+            from .bot_commands import SUPER_ADMIN_ID
+            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
             if enabled:
@@ -1216,6 +1292,10 @@ def create_dispatcher() -> Dispatcher:
     # ---- Dedicated depth command ----
     @dp.message_handler(commands=["depth"])  # type: ignore
     async def cmd_depth(message: types.Message, state: FSMContext):
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID)):
+            await message.answer("Недоступно." if ((await state.get_data()).get("ui_lang") or "ru") == "ru" else "Not available.")
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         prompt = "Глубина факт-чекинга (1–3):" if _is_ru(ui_lang) else "Fact-check depth (1–3):"
@@ -1351,6 +1431,14 @@ def create_dispatcher() -> Dispatcher:
                 try:
                     refine_flag = await get_refine_enabled(message.from_user.id) if message.from_user else False
                 except Exception:
+                    refine_flag = False
+                # Only superadmin can run article fact-check/refine
+                try:
+                    is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+                except Exception:
+                    is_superadmin = False
+                if not is_superadmin:
+                    fc_flag = False
                     refine_flag = False
 
                 fut = loop.run_in_executor(

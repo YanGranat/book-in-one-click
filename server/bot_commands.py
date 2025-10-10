@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import List
+from typing import List, Optional
 
 from aiogram import Dispatcher, types
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -12,12 +12,18 @@ from .credits import topup_credits, topup_credits_kv, get_balance_kv_only
 
 
 ADMIN_IDS: List[int] = []
+# Superadmin: full access. Read from SUPER_ADMIN_ID (preferred) or BOT_SUPER_ADMIN_ID (legacy)
+SUPER_ADMIN_ID_ENV = os.getenv("SUPER_ADMIN_ID", os.getenv("BOT_SUPER_ADMIN_ID", "")).strip()
+SUPER_ADMIN_ID: Optional[int] = int(SUPER_ADMIN_ID_ENV) if SUPER_ADMIN_ID_ENV.isdigit() else None
 _env = os.getenv("BOT_ADMIN_IDS", "")
 if _env:
     for tok in _env.replace(";", ",").split(","):
         tok = tok.strip()
         if tok.isdigit():
             ADMIN_IDS.append(int(tok))
+# Ensure superadmin is always included in ADMIN_IDS for free generation/bypass checks
+if SUPER_ADMIN_ID is not None and SUPER_ADMIN_ID not in ADMIN_IDS:
+    ADMIN_IDS.append(SUPER_ADMIN_ID)
 
 # Series-related defaults and limits (used by bot)
 SERIES_AUTO_MAX_DEFAULT = 30  # max posts in auto mode for non-admin
@@ -50,7 +56,8 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
 
     @dp.message_handler(commands=["topup"])  # type: ignore
     async def topup_cmd(message: types.Message):
-        if message.from_user is None or message.from_user.id not in ADMIN_IDS:
+        # Superadmin-only topup
+        if message.from_user is None or SUPER_ADMIN_ID is None or int(message.from_user.id) != int(SUPER_ADMIN_ID):
             await message.answer("Forbidden")
             return
         parts = (message.text or "").split()
