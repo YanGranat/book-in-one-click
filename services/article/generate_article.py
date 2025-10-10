@@ -37,8 +37,8 @@ def generate_article(
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
     return_log_path: bool = False,
-    enable_research: bool = True,
-    enable_refine: bool = True,
+    enable_research: bool = False,
+    enable_refine: bool = False,
     max_parallel: Optional[int] = None,
 ) -> Path | str:
     """
