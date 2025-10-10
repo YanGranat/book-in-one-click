@@ -134,19 +134,19 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPri
 
 def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
-    # Packs: 1, 3, 5, 10, 50 credits at 200 stars per credit
+    # Packs: 1, 3, 5, 10, 50 credits at 50 stars per credit
     if _is_ru(ui_lang):
-        kb.add(InlineKeyboardButton(text="Купить 1 кредит — 200⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Купить 30 кредитов — 6000⭐", callback_data="buy:stars:30"))
-        kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 1000⭐", callback_data="buy:stars:5"))
-        kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 2000⭐", callback_data="buy:stars:10"))
-        kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 10000⭐", callback_data="buy:stars:50"))
+        kb.add(InlineKeyboardButton(text="Купить 1 кредит — 50⭐", callback_data="buy:stars:1"))
+        kb.add(InlineKeyboardButton(text="Купить 30 кредитов — 1500⭐", callback_data="buy:stars:30"))
+        kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 250⭐", callback_data="buy:stars:5"))
+        kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 500⭐", callback_data="buy:stars:10"))
+        kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 2500⭐", callback_data="buy:stars:50"))
     else:
-        kb.add(InlineKeyboardButton(text="Buy 1 credit — 200⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Buy 30 credits — 6000⭐", callback_data="buy:stars:30"))
-        kb.add(InlineKeyboardButton(text="Buy 5 credits — 1000⭐", callback_data="buy:stars:5"))
-        kb.add(InlineKeyboardButton(text="Buy 10 credits — 2000⭐", callback_data="buy:stars:10"))
-        kb.add(InlineKeyboardButton(text="Buy 50 credits — 10000⭐", callback_data="buy:stars:50"))
+        kb.add(InlineKeyboardButton(text="Buy 1 credit — 50⭐", callback_data="buy:stars:1"))
+        kb.add(InlineKeyboardButton(text="Buy 30 credits — 1500⭐", callback_data="buy:stars:30"))
+        kb.add(InlineKeyboardButton(text="Buy 5 credits — 250⭐", callback_data="buy:stars:5"))
+        kb.add(InlineKeyboardButton(text="Buy 10 credits — 500⭐", callback_data="buy:stars:10"))
+        kb.add(InlineKeyboardButton(text="Buy 50 credits — 2500⭐", callback_data="buy:stars:50"))
     return kb
 
 
@@ -161,11 +161,11 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
             InlineKeyboardButton(text=("Gemini" + (" ✓" if provider == "gemini" else "")), callback_data="set:provider:gemini"),
             InlineKeyboardButton(text=("Claude" + (" ✓" if provider == "claude" else "")), callback_data="set:provider:claude"),
         )
-    # Generation language row
+    # Generation language row (order: Auto | EN | RU)
     kb.add(
-        InlineKeyboardButton(text=("RU" + (" ✓" if gen_lang == "ru" else "")), callback_data="set:gen_lang:ru"),
-        InlineKeyboardButton(text=("EN" + (" ✓" if gen_lang == "en" else "")), callback_data="set:gen_lang:en"),
         InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if gen_lang == "auto" else "")), callback_data="set:gen_lang:auto"),
+        InlineKeyboardButton(text=("EN" + (" ✓" if gen_lang == "en" else "")), callback_data="set:gen_lang:en"),
+        InlineKeyboardButton(text=("RU" + (" ✓" if gen_lang == "ru" else "")), callback_data="set:gen_lang:ru"),
     )
     # Refine row (superadmin only)
     if is_superadmin:
@@ -196,17 +196,18 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
 
 def build_genlang_inline(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
+    # Order: Auto | EN | RU
     if _is_ru(ui_lang):
         kb.add(
             InlineKeyboardButton(text="Авто", callback_data="set:gen_lang:auto"),
-            InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"),
             InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"),
+            InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"),
         )
     else:
         kb.add(
             InlineKeyboardButton(text="Auto", callback_data="set:gen_lang:auto"),
-            InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"),
             InlineKeyboardButton(text="EN", callback_data="set:gen_lang:en"),
+            InlineKeyboardButton(text="RU", callback_data="set:gen_lang:ru"),
         )
     return kb
 
@@ -332,7 +333,7 @@ def create_dispatcher() -> Dispatcher:
             series_count=None,
         )
         await message.answer(
-            "Выберите язык интерфейса / Choose interface language:",
+            "Choose interface language / Выберите язык интерфейса:",
             reply_markup=build_ui_lang_inline(),
         )
 
@@ -677,7 +678,7 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(commands=["lang"])  # type: ignore
     async def cmd_lang(message: types.Message, state: FSMContext):
         await message.answer(
-            "Выберите язык интерфейса / Choose interface language:",
+            "Choose interface language / Выберите язык интерфейса:",
             reply_markup=build_ui_lang_inline(),
         )
         # Inline only; no FSM step
@@ -2849,7 +2850,7 @@ def create_dispatcher() -> Dispatcher:
         if _stars_enabled():
             try:
                 await message.answer(
-                    txt + ("\nХотите купить кредиты за ⭐?" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐?"),
+                    txt + ("\nХотите купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐? (1 credit = 50⭐)"),
                     reply_markup=build_buy_keyboard(ui_lang),
                 )
             except Exception:
@@ -2863,7 +2864,7 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         if _stars_enabled():
             await message.answer(
-                ("Выберите пакет кредитов:" if _is_ru(ui_lang) else "Choose a credits pack:"),
+                (("Выберите пакет кредитов (1 кредит = 50⭐):" if _is_ru(ui_lang) else "Choose a credits pack (1 credit = 50⭐):")),
                 reply_markup=build_buy_keyboard(ui_lang),
             )
         else:
@@ -2918,8 +2919,8 @@ def create_dispatcher() -> Dispatcher:
             await query.answer("Not configured", show_alert=True)
             return
         try:
-            prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 200)]
-            payload = f"credits={pack}&stars={pack*200}"
+            prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 50)]
+            payload = f"credits={pack}&stars={pack*50}"
             title = f"Credits x{pack}"
             description = "Buy generation credits using Telegram Stars"
             await dp.bot.send_invoice(
