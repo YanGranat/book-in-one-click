@@ -982,7 +982,7 @@ def create_dispatcher() -> Dispatcher:
                 await dp.bot.send_message(
                     query.message.chat.id if query.message else query.from_user.id,
                     prompt,
-                    reply_markup=build_enable_disable_inline("incog", ui_lang),
+                    reply_markup=build_yesno_inline("incog", ui_lang),
                 )
 
     @dp.message_handler(commands=["public"])  # type: ignore
@@ -994,7 +994,7 @@ def create_dispatcher() -> Dispatcher:
             if ui_lang == "ru"
             else "Make results public?"
         )
-        await message.answer(prompt, reply_markup=build_enable_disable_inline("incog", ui_lang))
+        await message.answer(prompt, reply_markup=build_yesno_inline("incog", ui_lang))
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog:"))  # type: ignore
     async def cb_set_incog(query: types.CallbackQuery, state: FSMContext):
