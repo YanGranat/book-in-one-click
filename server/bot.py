@@ -468,64 +468,128 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
 
+        # Role flags
+        try:
+            from .bot_commands import SUPER_ADMIN_ID, ADMIN_IDS
+            is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and str(message.from_user.id) == str(SUPER_ADMIN_ID))
+            is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        except Exception:
+            is_superadmin = False
+            is_admin = False
+
+        # Intro paragraph
+        intro_ru = (
+            "<b>Bio1C Bot</b> — бот для генерации научно‑популярного контента: посты, статьи и серии. "
+            "Поддерживает выбор провайдера/языка, приватность, факт‑чек и финальную редактуру.\n\n"
+        )
+        intro_en = (
+            "<b>Bio1C Bot</b> — assistant for generating popular‑science content: posts, articles and series. "
+            "Supports provider/language selection, privacy, fact‑check and final refine.\n\n"
+        )
+
         if ui_lang == "ru":
-            text = (
-                "<b>Как пользоваться:</b>\n"
-                "- /generate — выбрать Пост, Серию или Статью; серия: пресеты 2/5/авто/кастом.\n"
-                "- /start — пройти настройку заново (язык интерфейса, язык генерации, публикация, факт‑чекинг).\n"
-                "- /history — показать историю генераций, выборочно удалить или очистить всё.\n"
-                "- /history_clear — очистить историю.\n"
-                "- /factcheck — задать дефолт факт‑чекинга (вкл/выкл).\n"
-                "- /refine — включить/выключить финальную редактуру.\n"
-                "- /lang, /lang_generate, /incognito — точечно поменять настройки.\n"
-                "- /chat, /endchat — чат с ИИ (для админов).\n\n"
+            # Commands by role
+            if is_superadmin:
+                commands_block = (
+                    "<b>Как пользоваться:</b>\n"
+                    "- /generate — выбрать Пост, Серию или Статью.\n"
+                    "- /start — пройти настройку заново.\n"
+                    "- /history — история; /history_clear — очистить.\n"
+                    "- /provider — выбрать провайдера.\n"
+                    "- /factcheck — дефолт факт‑чек; /depth — глубина; /refine — финальная редактура.\n"
+                    "- /lang, /lang_generate, /incognito — точечные настройки.\n"
+                    "- /chat, /endchat — чат с ИИ.\n\n"
+                )
+            elif is_admin:
+                commands_block = (
+                    "<b>Как пользоваться:</b>\n"
+                    "- /generate — выбрать Пост, Серию или Статью.\n"
+                    "- /start — пройти настройку заново.\n"
+                    "- /history — история; /history_clear — очистить.\n"
+                    "- /lang, /lang_generate, /incognito — точечные настройки.\n"
+                    "- /chat, /endchat — чат с ИИ.\n\n"
+                )
+            else:
+                commands_block = (
+                    "<b>Как пользоваться:</b>\n"
+                    "- /generate — выбрать Пост или Статью.\n"
+                    "- /start — пройти настройку заново.\n"
+                    "- /history — история; /history_clear — очистить.\n"
+                    "- /lang, /lang_generate, /incognito — точечные настройки.\n\n"
+                )
+
+            results_block = (
                 "<b>Результаты:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n"
-                "- Каждый результат — Markdown‑файл, который можно скачать и править; серия — один агрегатный .md.\n\n"
+                "- Каждый результат — Markdown‑файл; серия — один агрегатный .md.\n\n"
+            )
+            credits_block = (
                 "<b>Кредиты:</b>\n"
                 "- Пост: 1 кредит; факт‑чек +1 (лёгкий) или +3 (глубокий ≥3); редактура +1.\n"
-                "- Серия: предоплата min(30, баланс) в авто или N×стоимость в fixed; остаток возвращаем.\n"
-                "- Посмотреть баланс: /balance. Пополнить: /buy.\n"
-                "- /pricing — посмотреть цены по типам.\n\n"
-                ""
+                + ("- Серия: предоплата min(30, баланс) или N×стоимость (для админов).\n" if (is_admin or is_superadmin) else "")
+                + "- Посмотреть баланс: /balance. Пополнить: /buy.\n- /pricing — посмотреть цены.\n\n"
+            )
+            settings_block = (
                 "<b>Текущие настройки:</b>\n"
                 f"- Провайдер: {_prov_name(prov, True)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Публичные результаты: {'да' if not incognito else 'нет'}\n"
-                # logs removed from user info
                 f"- Финальная редактура: {'включена' if refine_enabled else 'отключена'}\n"
                 f"- Факт‑чекинг: {'включён' if fc_enabled else 'отключён'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
             )
+            text = intro_ru + commands_block + results_block + credits_block + settings_block
         else:
-            text = (
-                "<b>How to use:</b>\n"
-                "- /generate — choose Post, Series or Article; series: presets 2/5/auto/custom.\n"
-                "- /start — onboarding (UI lang, gen lang, publishing, fact‑check).\n"
-                "- /history — show history, delete selected or clear all.\n"
-                "- /history_clear — clear history.\n"
-                "- /factcheck — set default fact‑check (enable/disable).\n"
-                "- /refine — enable/disable final refine step.\n"
-                "- /lang, /lang_generate, /incognito — tweak settings individually.\n"
-                "- /chat, /endchat — chat with AI (admins).\n\n"
+            if is_superadmin:
+                commands_block = (
+                    "<b>How to use:</b>\n"
+                    "- /generate — choose Post, Series or Article.\n"
+                    "- /start — run onboarding again.\n"
+                    "- /history — history; /history_clear — clear.\n"
+                    "- /provider — choose provider.\n"
+                    "- /factcheck — default fact‑check; /depth — depth; /refine — final refine.\n"
+                    "- /lang, /lang_generate, /incognito — tweak settings.\n"
+                    "- /chat, /endchat — chat with AI.\n\n"
+                )
+            elif is_admin:
+                commands_block = (
+                    "<b>How to use:</b>\n"
+                    "- /generate — choose Post, Series or Article.\n"
+                    "- /start — run onboarding again.\n"
+                    "- /history — history; /history_clear — clear.\n"
+                    "- /lang, /lang_generate, /incognito — tweak settings.\n"
+                    "- /chat, /endchat — chat with AI.\n\n"
+                )
+            else:
+                commands_block = (
+                    "<b>How to use:</b>\n"
+                    "- /generate — choose Post or Article.\n"
+                    "- /start — run onboarding again.\n"
+                    "- /history — history; /history_clear — clear.\n"
+                    "- /lang, /lang_generate, /incognito — tweak settings.\n\n"
+                )
+
+            results_block = (
                 "<b>Results:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n"
-                "- Each result is a Markdown file; series arrive as one aggregate .md.\n\n"
+                "- Each result is a Markdown file; series arrives as one aggregate .md.\n\n"
+            )
+            credits_block = (
                 "<b>Credits:</b>\n"
                 "- Post: 1 credit; fact‑check +1 (light) or +3 (deep ≥3); refine +1.\n"
-                "- Series: prepay min(30, balance) in auto or N×price in fixed; refund remainder.\n"
-                "- Check balance: /balance. Buy: /buy.\n"
-                "- /pricing — see pricing per type.\n\n"
-                ""
+                + ("- Series: prepay min(30, balance) or N×price (admins only).\n" if (is_admin or is_superadmin) else "")
+                + "- Check balance: /balance. Buy: /buy.\n- /pricing — see pricing.\n\n"
+            )
+            settings_block = (
                 "<b>Current settings:</b>\n"
                 f"- Provider: {_prov_name(prov, False)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Public results: {'yes' if not incognito else 'no'}\n"
-                # logs removed from user info
                 f"- Final refine: {'enabled' if refine_enabled else 'disabled'}\n"
                 f"- Fact‑check: {'enabled' if fc_enabled else 'disabled'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
             )
+            text = intro_en + commands_block + results_block + credits_block + settings_block
         await message.answer(text, disable_web_page_preview=True, parse_mode=types.ParseMode.HTML)
 
 
@@ -1176,7 +1240,7 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"))  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc:"), state="*")  # type: ignore
     async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
         is_super = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
@@ -1252,7 +1316,7 @@ def create_dispatcher() -> Dispatcher:
                     # Ensure callback is routed correctly
                     await GenerateStates.ChoosingGenType.set()
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"))  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"), state="*")  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
         if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
@@ -1326,7 +1390,7 @@ def create_dispatcher() -> Dispatcher:
         prompt = "Факт-чекинг?" if _is_ru(ui_lang) else "Fact-check?"
         await message.answer(prompt, reply_markup=build_enable_disable_inline("fc_cmd", ui_lang))
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc_cmd:"))  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:fc_cmd:"), state="*")  # type: ignore
     async def cb_fc_cmd_toggle(query: types.CallbackQuery, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
         if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
