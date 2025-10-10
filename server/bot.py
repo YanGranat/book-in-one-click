@@ -374,11 +374,6 @@ def create_dispatcher() -> Dispatcher:
                     # For admins, expose /logs explicitly
                     base_ru.insert(9, types.BotCommand("logs", "Логи генерации"))
                     base_en.insert(9, types.BotCommand("logs", "Logs"))
-                    # Admin series shortcuts
-                    base_ru.append(types.BotCommand("series", "Серия (авто)"))
-                    base_ru.append(types.BotCommand("series_fixed", "Серия (фикс.)"))
-                    base_en.append(types.BotCommand("series", "Series (auto)"))
-                    base_en.append(types.BotCommand("series_fixed", "Series (fixed)"))
                     base_ru = base_ru + [
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
