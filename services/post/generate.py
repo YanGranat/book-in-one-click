@@ -24,6 +24,7 @@ from utils.web import build_search_context
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from pipelines.post.pipeline import build_instructions as build_post_instructions
 from utils.json_parse import parse_json_best_effort
+from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
 
 
 def _try_import_sdk():
@@ -494,7 +495,6 @@ def generate_post(
         else:
             from utils.config import load_config
             from pathlib import Path
-            from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
 
             _emit("factcheck:init")
             base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
