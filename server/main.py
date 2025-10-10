@@ -144,7 +144,7 @@ async def _startup():
         # Non-fatal: fallback to default executor
         pass
     # Register bot commands and enable command menu button
-        try:
+    try:
             await DP.bot.set_my_commands([
                 types.BotCommand(command="start", description="Start / Начать"),
                 types.BotCommand(command="generate", description="Generate / Сгенерировать"),
