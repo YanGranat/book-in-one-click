@@ -1356,21 +1356,18 @@ def create_dispatcher() -> Dispatcher:
                     await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
                     await GenerateStates.ChoosingGenType.set()
         else:
-            # Mark FC decision as done in onboarding to avoid asking again on topic
+            # Mark FC decision as done; continue flow if applicable
             await state.update_data(factcheck=False, research_iterations=None, fc_ready=True)
-            if onboarding:
-                sd = await state.get_data()
-                active_flow = (sd.get("active_flow") or "").strip().lower()
-                if active_flow in {"post", "series"}:
-                    # Proceed to refine question in flow
-                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
-                else:
-                    # After disabling FC in onboarding → ask what to generate (series disabled)
-                    kb = build_gentype_keyboard(ui_lang, allow_series=False)
-                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
-                    # Ensure callback is routed correctly
-                    await GenerateStates.ChoosingGenType.set()
+            sd2 = await state.get_data()
+            active_flow2 = (sd2.get("active_flow") or "").strip().lower()
+            if active_flow2 == "post":
+                prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
+            elif onboarding:
+                # Onboarding fallback: ask what to generate
+                kb = build_gentype_keyboard(ui_lang, allow_series=False)
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
+                await GenerateStates.ChoosingGenType.set()
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:depth:"), state="*")  # type: ignore
     async def cb_set_depth(query: types.CallbackQuery, state: FSMContext):
