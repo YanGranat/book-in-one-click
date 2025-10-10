@@ -1223,39 +1223,32 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 pass
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
-            # Continue onboarding flow if applicable
+            # Continue flow by active_flow regardless of onboarding flag (superadmin only)
             sd_all = await state.get_data()
-            onboarding = bool(sd_all.get("onboarding"))
-            if onboarding:
-                # For superadmin only we continue with flow; admins should not see refine/FC
-                from .bot_commands import SUPER_ADMIN_ID as _SA
-                if query.from_user and _SA is not None and int(query.from_user.id) == int(_SA):
-                    # Superadmin flow: refine → next step by active_flow
-                    active_flow = (sd_all.get("active_flow") or "").strip().lower()
-                    ru = _is_ru(ui_lang)
-                    if active_flow == "post":
-                        prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
-                        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
-                        await GenerateStates.WaitingTopic.set()
-                    elif active_flow == "series":
-                        kb = InlineKeyboardMarkup()
-                        kb.add(
-                            InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
-                            InlineKeyboardButton(text="5", callback_data="set:series_preset:5"),
-                        )
-                        kb.add(
-                            InlineKeyboardButton(text=("Авто" if ru else "Auto"), callback_data="set:series_preset:auto"),
-                            InlineKeyboardButton(text=("Кастом" if ru else "Custom"), callback_data="set:series_preset:custom"),
-                        )
-                        await dp.bot.send_message(
-                            query.message.chat.id if query.message else query.from_user.id,
-                            ("Сколько постов?" if ru else "How many posts?"),
-                            reply_markup=kb,
-                        )
-                        await GenerateStates.ChoosingSeriesPreset.set()
-                else:
-                    # Admin: nothing further here
-                    pass
+            from .bot_commands import SUPER_ADMIN_ID as _SA
+            if query.from_user and _SA is not None and int(query.from_user.id) == int(_SA):
+                active_flow = (sd_all.get("active_flow") or "").strip().lower()
+                ru = _is_ru(ui_lang)
+                if active_flow == "post":
+                    prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+                    await GenerateStates.WaitingTopic.set()
+                elif active_flow == "series":
+                    kb = InlineKeyboardMarkup()
+                    kb.add(
+                        InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
+                        InlineKeyboardButton(text="5", callback_data="set:series_preset:5"),
+                    )
+                    kb.add(
+                        InlineKeyboardButton(text=("Авто" if ru else "Auto"), callback_data="set:series_preset:auto"),
+                        InlineKeyboardButton(text=("Кастом" if ru else "Custom"), callback_data="set:series_preset:custom"),
+                    )
+                    await dp.bot.send_message(
+                        query.message.chat.id if query.message else query.from_user.id,
+                        ("Сколько постов?" if ru else "How many posts?"),
+                        reply_markup=kb,
+                    )
+                    await GenerateStates.ChoosingSeriesPreset.set()
 
     @dp.message_handler(lambda m: (m.text or "").strip().lower() in {"cancel","отмена"}, state="*")  # type: ignore
     @dp.message_handler(commands=["cancel"], state="*")  # type: ignore
@@ -3257,6 +3250,7 @@ def create_dispatcher() -> Dispatcher:
                 "history": cmd_history,
                 "history_clear": cmd_history_clear,
                 "interface_lang": cmd_lang,
+                "credits": cmd_credits,
                 "pricing": cmd_pricing,
                 "chat": cmd_chat,
                 "endchat": cmd_endchat,
@@ -3305,6 +3299,7 @@ def create_dispatcher() -> Dispatcher:
                 "history": cmd_history,
                 "history_clear": cmd_history_clear,
                 "interface_lang": cmd_lang,
+                "credits": cmd_credits,
                 "pricing": cmd_pricing,
                 "chat": cmd_chat,
                 "endchat": cmd_endchat,
