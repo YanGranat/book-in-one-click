@@ -1361,6 +1361,49 @@ def create_dispatcher() -> Dispatcher:
         text_raw = (message.text or "").strip()
         data = await state.get_data()
         ui_lang = data.get("ui_lang", "ru")
+        # If user typed a command while waiting for topic — treat it as a command, not a topic
+        if text_raw.startswith("/"):
+            # Finish topic-waiting state and re-dispatch the command to its handler
+            try:
+                await state.finish()
+            except Exception:
+                pass
+            try:
+                raw = (message.text or "").strip()
+                cmd = raw.split()[0].lstrip("/").split("@")[0].lower()
+                handlers = {
+                    "start": cmd_start,
+                    "info": cmd_info,
+                    "generate": cmd_generate,
+                    "series": cmd_series,
+                    "series_fixed": cmd_series_fixed,
+                    "settings": cmd_settings,
+                    "history": cmd_history,
+                    "history_clear": cmd_history_clear,
+                    "balance": cmd_balance,
+                    "buy": cmd_buy,
+                    "pricing": cmd_pricing,
+                    "lang": cmd_lang,
+                    "lang_generate": cmd_lang_generate,
+                    "provider": cmd_provider,
+                    "public": cmd_incognito,
+                    "refine": cmd_refine,
+                    "factcheck": cmd_factcheck,
+                    "depth": cmd_depth,
+                    "chat": cmd_chat,
+                    "endchat": cmd_endchat,
+                    "cancel": cmd_cancel,
+                    "logs": cmd_logs,
+                }
+                h = handlers.get(cmd)
+                if h is not None:
+                    try:
+                        await h(message, state)  # type: ignore[arg-type]
+                    except TypeError:
+                        await h(message)  # type: ignore[misc]
+            except Exception:
+                pass
+            return
         if text_raw.lower() in {"/cancel"}:
             try:
                 RUNNING_CHATS.discard(message.chat.id)
@@ -1405,13 +1448,8 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     persisted_gen_lang = None
                 gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-                eff_lang = gen_lang
-                if (gen_lang or "auto").strip().lower() == "auto":
-                    try:
-                        det = (detect_lang_from_text(topic) or "").lower()
-                        eff_lang = "en" if det.startswith("en") else "ru"
-                    except Exception:
-                        eff_lang = "ru"
+                # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
+                eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
 
                 # Create Job row (article)
                 job_id = 0
@@ -1575,13 +1613,8 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     persisted_gen_lang = None
                 gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-                eff_lang = gen_lang
-                if (gen_lang or "auto").strip().lower() == "auto":
-                    try:
-                        det = (detect_lang_from_text(topic) or "").lower()
-                        eff_lang = "en" if det.startswith("en") else "ru"
-                    except Exception:
-                        eff_lang = "ru"
+                # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
+                eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
 
                 # Preferences
                 try:
@@ -2007,23 +2040,10 @@ def create_dispatcher() -> Dispatcher:
 
         # Light progress notes before long run
         try:
-            notes = [
-                "Формирую план…" if _is_ru(ui_lang) else "Planning…",
-                "Пишу черновик…" if _is_ru(ui_lang) else "Drafting…",
-            ]
-            # If FC/refine are expected, inform once up-front
-            try:
-                ref_pref = await get_refine_enabled(message.from_user.id) if message.from_user else False
-            except Exception:
-                ref_pref = False
-            if bool(data.get("factcheck")):
-                notes.append("Проведу факт‑чекинг…" if _is_ru(ui_lang) else "Will run fact‑check…")
-            if ref_pref:
-                notes.append("Применю финальную редактуру…" if _is_ru(ui_lang) else "Will apply final refine…")
-            await message.answer("\n".join(notes), reply_markup=ReplyKeyboardRemove())
-        except Exception:
-            working = "Генерирую. Это может занять несколько минут..." if _is_ru(ui_lang) else "Working on it. This may take a few minutes..."
+            working = "Генерирую…" if _is_ru(ui_lang) else "Generating…"
             await message.answer(working, reply_markup=ReplyKeyboardRemove())
+        except Exception:
+            pass
 
         # Run generation
         import asyncio
@@ -2044,13 +2064,8 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 persisted_gen_lang = None
             gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-            eff_lang = gen_lang
-            if (gen_lang or "auto").strip().lower() == "auto":
-                try:
-                    det = (detect_lang_from_text(topic) or "").lower()
-                    eff_lang = "en" if det.startswith("en") else "ru"
-                except Exception:
-                    eff_lang = "ru"
+            # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
+            eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
 
             # Refine preference
             refine_enabled = False
