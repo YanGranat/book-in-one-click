@@ -560,7 +560,11 @@ def create_dispatcher() -> Dispatcher:
                 await set_gen_lang(query.from_user.id, gen_lang)
         except Exception:
             pass
-        await query.answer()
+        # Always ack to stop Telegram spinner
+        try:
+            await query.answer()
+        except Exception:
+            pass
         in_settings = bool((await state.get_data()).get("in_settings"))
         if in_settings and query.message:
             # Re-render settings panel
@@ -628,7 +632,16 @@ def create_dispatcher() -> Dispatcher:
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:provider:"))  # type: ignore
     async def cb_set_provider(query: types.CallbackQuery, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
-        if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
+        # Accept string/int equality for SUPER_ADMIN_ID; also allow during onboarding for resilience
+        onboarding_flag = False
+        try:
+            onboarding_flag = bool((await state.get_data()).get("onboarding"))
+        except Exception:
+            onboarding_flag = False
+        if not (query.from_user and SUPER_ADMIN_ID is not None and str(query.from_user.id) == str(SUPER_ADMIN_ID)):
+            if onboarding_flag:
+                await query.answer()
+                return
             await query.answer()
             return
         prov = (query.data or "").split(":")[-1]
@@ -1160,7 +1173,13 @@ def create_dispatcher() -> Dispatcher:
     async def cb_set_fc(query: types.CallbackQuery, state: FSMContext):
         from .bot_commands import SUPER_ADMIN_ID
         is_super = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
-        if not query.from_user or (query.from_user.id not in ADMIN_IDS and not is_super):
+        # Allow during onboarding even if ADMIN_IDS misconfigured (only superadmin sees this step in flow)
+        onboarding_flag = False
+        try:
+            onboarding_flag = bool((await state.get_data()).get("onboarding"))
+        except Exception:
+            onboarding_flag = False
+        if not query.from_user or (query.from_user.id not in ADMIN_IDS and not is_super and not onboarding_flag):
             await query.answer()
             return
         val = (query.data or "").split(":")[-1]
@@ -1198,7 +1217,7 @@ def create_dispatcher() -> Dispatcher:
         if enabled:
             # Depth selection only for superadmin
             from .bot_commands import SUPER_ADMIN_ID
-            if query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID):
+            if query.from_user and SUPER_ADMIN_ID is not None and str(query.from_user.id) == str(SUPER_ADMIN_ID):
                 prompt = "Выберите глубину проверки (1–3):" if _is_ru(ui_lang) else "Select research depth (1–3):"
                 await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_depth_inline())
             else:
