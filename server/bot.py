@@ -347,6 +347,7 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("generate", "Сгенерировать"),
                     types.BotCommand("settings", "Настройки"),
                     types.BotCommand("balance", "Баланс"),
+                    types.BotCommand("buy", "Купить кредиты"),
                     types.BotCommand("pricing", "Цены"),
                     types.BotCommand("history", "История"),
                     types.BotCommand("info", "Инфо"),
@@ -360,6 +361,7 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("generate", "Generate"),
                     types.BotCommand("settings", "Settings"),
                     types.BotCommand("balance", "Balance"),
+                    types.BotCommand("buy", "Buy credits"),
                     types.BotCommand("pricing", "Pricing"),
                     types.BotCommand("history", "History"),
                     types.BotCommand("info", "Info"),
@@ -372,6 +374,11 @@ def create_dispatcher() -> Dispatcher:
                     # For admins, expose /logs explicitly
                     base_ru.insert(9, types.BotCommand("logs", "Логи генерации"))
                     base_en.insert(9, types.BotCommand("logs", "Logs"))
+                    # Admin series shortcuts
+                    base_ru.append(types.BotCommand("series", "Серия (авто)"))
+                    base_ru.append(types.BotCommand("series_fixed", "Серия (фикс.)"))
+                    base_en.append(types.BotCommand("series", "Series (auto)"))
+                    base_en.append(types.BotCommand("series_fixed", "Series (fixed)"))
                     base_ru = base_ru + [
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
