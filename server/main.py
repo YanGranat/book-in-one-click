@@ -145,7 +145,7 @@ async def _startup():
         pass
     # Register bot commands and enable command menu button
     try:
-            await DP.bot.set_my_commands([
+        await DP.bot.set_my_commands([
                 types.BotCommand(command="start", description="Start / Начать"),
                 types.BotCommand(command="generate", description="Generate / Сгенерировать"),
                 types.BotCommand(command="settings", description="Settings / Настройки"),
@@ -161,10 +161,10 @@ async def _startup():
                 types.BotCommand(command="depth", description="Depth / Глубина"),
                 types.BotCommand(command="refine", description="Refine Step / Финальная редактура"),
                 types.BotCommand(command="cancel", description="Cancel / Отмена"),
-            ])
-            # RU-localized menu
-            try:
-                await DP.bot.set_my_commands([
+        ])
+        # RU-localized menu
+        try:
+            await DP.bot.set_my_commands([
                     types.BotCommand(command="start", description="Начать"),
                     types.BotCommand(command="generate", description="Сгенерировать"),
                     types.BotCommand(command="settings", description="Настройки"),
@@ -180,9 +180,9 @@ async def _startup():
                     types.BotCommand(command="depth", description="Глубина"),
                     types.BotCommand(command="refine", description="Финальная редактура"),
                     types.BotCommand(command="cancel", description="Отмена"),
-                ], language_code="ru")
-            except Exception:
-                pass
+            ], language_code="ru")
+        except Exception:
+            pass
         try:
             await DP.bot.set_chat_menu_button(menu_button=types.MenuButtonCommands())
         except Exception:
