@@ -1409,27 +1409,21 @@ def create_dispatcher() -> Dispatcher:
             kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
             await query.message.edit_reply_markup(reply_markup=kb)
         else:
-            onboarding = bool(data.get("onboarding"))
-            if onboarding:
-                sd = await state.get_data()
-                active_flow = (sd.get("active_flow") or "").strip().lower()
-                if active_flow == "post":
-                    # Next ask refine for post
-                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
-                elif active_flow == "series":
-                    # Next ask refine for series, then proceed to count
-                    prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
-                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
-                else:
-                    # Fallback: what to generate
+            # Continue flow regardless of onboarding flag
+            sd = await state.get_data()
+            active_flow = (sd.get("active_flow") or "").strip().lower()
+            if active_flow == "post":
+                prompt = "Финальная редактура?" if _is_ru(ui_lang) else "Final refine?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("refine", ui_lang))
+            else:
+                # If onboarding is active, fallback to choose what to generate; else just acknowledge
+                if bool(sd.get("onboarding")):
                     kb = build_gentype_keyboard(ui_lang, allow_series=False)
                     await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Что генерировать?" if _is_ru(ui_lang) else "What to generate?"), reply_markup=kb)
                     await GenerateStates.ChoosingGenType.set()
-            else:
-                # Standalone /factcheck flow: confirm and stay
-                msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+                else:
+                    msg = "Глубина факт-чекинга сохранена." if _is_ru(ui_lang) else "Fact-check depth saved."
+                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
 
     # ---- Fact-check settings command ----
     @dp.message_handler(commands=["factcheck"])  # type: ignore
