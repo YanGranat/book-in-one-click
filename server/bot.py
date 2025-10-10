@@ -2236,9 +2236,17 @@ def create_dispatcher() -> Dispatcher:
     async def cb_confirm_charge(query: types.CallbackQuery, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        if query.data.endswith(":no"):
+        # Always ack and try to remove inline keyboard to avoid hanging spinner
+        try:
             await query.answer()
-            await query.message.edit_reply_markup() if query.message else None
+        except Exception:
+            pass
+        try:
+            if query.message:
+                await query.message.edit_reply_markup()
+        except Exception:
+            pass
+        if query.data.endswith(":no"):
             chat_id = query.message.chat.id if query.message else (query.from_user.id if query.from_user else 0)
             try:
                 RUNNING_CHATS.discard(chat_id)
@@ -2258,7 +2266,6 @@ def create_dispatcher() -> Dispatcher:
         # proceed and charge then run generation using saved topic
         topic = (data.get("pending_topic") or "").strip()
         if not topic:
-            await query.answer()
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, "Тема не найдена, отправьте заново /generate" if _is_ru(ui_lang) else "Topic missing, send /generate again")
             await state.finish()
             return
