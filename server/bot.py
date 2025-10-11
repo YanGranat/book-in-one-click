@@ -924,7 +924,8 @@ def create_dispatcher() -> Dispatcher:
             await GenerateStates.WaitingTopic.set()
             return
         if kind == "article":
-            await state.update_data(series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None)
+            # Articles only support OpenAI for now (due to OpenAI Agents SDK dependency)
+            await state.update_data(series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
             prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
             await GenerateStates.WaitingTopic.set()
