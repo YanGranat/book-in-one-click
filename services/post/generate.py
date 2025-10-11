@@ -673,7 +673,8 @@ def generate_post(
             else:
                 verdict = "fail"
             reason = getattr(r, "explanation", "") or ""
-            supporting_facts = " \n".join(getattr(n, "findings", "") for n in (notes or []))
+            # Take only the last (most complete) findings instead of concatenating all iterations
+            supporting_facts = getattr(notes[-1], "findings", "") if notes else ""
             simple_items.append(_SimpleItem(p.text, verdict, reason, supporting_facts))
 
         class _SimpleReport:
