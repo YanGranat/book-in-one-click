@@ -29,102 +29,114 @@ class ProviderRunner:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
-        from agents import Agent, Runner  # type: ignore
-        model = get_model("openai", tier)
-        tools = []
         try:
-            from agents import WebSearchTool  # type: ignore
-            tools = [WebSearchTool()]
-        except Exception:
+            from agents import Agent, Runner  # type: ignore
+            model = get_model("openai", tier)
             tools = []
-        agent = Agent(name="Agent", instructions=system, model=model, tools=tools)
-        res = Runner.run_sync(agent, user_message)
-        return getattr(res, "final_output", "")
+            try:
+                from agents import WebSearchTool  # type: ignore
+                tools = [WebSearchTool()]
+            except Exception:
+                tools = []
+            agent = Agent(name="Agent", instructions=system, model=model, tools=tools)
+            res = Runner.run_sync(agent, user_message)
+            return getattr(res, "final_output", "")
+        except Exception as e:
+            print(f"❌ OpenAI API error (tier={tier}, model={get_model('openai', tier)}): {type(e).__name__}: {str(e)[:300]}")
+            raise
 
     # --- Gemini ---
     def _gemini_text(self, system: str, user_message: str, *, tier: str = "heavy", json_mode: bool = False) -> str:
         _ensure_loop()
-        import google.generativeai as genai  # type: ignore
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("Gemini API key not found. Set GOOGLE_API_KEY or GEMINI_API_KEY environment variable.")
-        genai.configure(api_key=api_key)
-        mname = get_model("gemini", tier)
-        # Try to enable Google Search grounding when SDK supports it; otherwise fall back gracefully
-        tools = None
         try:
-            # Prefer typed Tool/GoogleSearch if available (newer SDKs)
-            from google.generativeai.types import Tool as _Tool, GoogleSearch as _GoogleSearch  # type: ignore
-            tools = [_Tool(google_search=_GoogleSearch())]
-        except Exception:
+            import google.generativeai as genai  # type: ignore
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                raise ValueError("Gemini API key not found. Set GOOGLE_API_KEY or GEMINI_API_KEY environment variable.")
+            genai.configure(api_key=api_key)
+            mname = get_model("gemini", tier)
+            # Try to enable Google Search grounding when SDK supports it; otherwise fall back gracefully
+            tools = None
             try:
-                # Older SDKs sometimes accept dict shape
-                tools = [{"google_search": {}}]
+                # Prefer typed Tool/GoogleSearch if available (newer SDKs)
+                from google.generativeai.types import Tool as _Tool, GoogleSearch as _GoogleSearch  # type: ignore
+                tools = [_Tool(google_search=_GoogleSearch())]
             except Exception:
-                tools = None
-        gen_cfg = {"max_output_tokens": 8192}
-        if json_mode and is_json_supported("gemini"):
-            jm = get_json_mode("gemini")
-            mime = jm.get("response_mime_type") or "application/json"
-            gen_cfg["response_mime_type"] = mime
-        # Create model; if tools are not recognized by SDK or backend, retry without tools
-        try:
-            model = genai.GenerativeModel(
-                model_name=mname,
-                system_instruction=system,
-                tools=tools if tools else None,
-                generation_config=gen_cfg or None,
-            )
-            resp = model.generate_content(user_message)
-        except Exception:
-            # Retry without tools to avoid "Unknown field for FunctionDeclaration: google_search"
-            model = genai.GenerativeModel(
-                model_name=mname,
-                system_instruction=system,
-                generation_config=gen_cfg or None,
-            )
-            resp = model.generate_content(user_message)
-        txt = (getattr(resp, "text", None) or "").strip()
-        if not txt:
-            parts: List[str] = []
+                try:
+                    # Older SDKs sometimes accept dict shape
+                    tools = [{"google_search": {}}]
+                except Exception:
+                    tools = None
+            gen_cfg = {"max_output_tokens": 8192}
+            if json_mode and is_json_supported("gemini"):
+                jm = get_json_mode("gemini")
+                mime = jm.get("response_mime_type") or "application/json"
+                gen_cfg["response_mime_type"] = mime
+            # Create model; if tools are not recognized by SDK or backend, retry without tools
             try:
-                for c in getattr(resp, "candidates", []) or []:
-                    for part in getattr(getattr(c, "content", None), "parts", []) or []:
-                        t = getattr(part, "text", None)
-                        if t:
-                            parts.append(t)
+                model = genai.GenerativeModel(
+                    model_name=mname,
+                    system_instruction=system,
+                    tools=tools if tools else None,
+                    generation_config=gen_cfg or None,
+                )
+                resp = model.generate_content(user_message)
             except Exception:
-                pass
-            txt = ("\n".join(parts)).strip()
-        return txt
+                # Retry without tools to avoid "Unknown field for FunctionDeclaration: google_search"
+                model = genai.GenerativeModel(
+                    model_name=mname,
+                    system_instruction=system,
+                    generation_config=gen_cfg or None,
+                )
+                resp = model.generate_content(user_message)
+            txt = (getattr(resp, "text", None) or "").strip()
+            if not txt:
+                parts: List[str] = []
+                try:
+                    for c in getattr(resp, "candidates", []) or []:
+                        for part in getattr(getattr(c, "content", None), "parts", []) or []:
+                            t = getattr(part, "text", None)
+                            if t:
+                                parts.append(t)
+                except Exception:
+                    pass
+                txt = ("\n".join(parts)).strip()
+            return txt
+        except Exception as e:
+            print(f"❌ Gemini API error (tier={tier}, model={get_model('gemini', tier)}, json_mode={json_mode}): {type(e).__name__}: {str(e)[:300]}")
+            raise
 
     # --- Claude ---
     def _claude_text(self, system: str, user_message: str, *, tier: str = "heavy", json_mode: bool = False) -> str:
         _ensure_loop()
-        import anthropic  # type: ignore
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("Claude API key not found. Set ANTHROPIC_API_KEY environment variable.")
-        client = anthropic.Anthropic(api_key=api_key)
-        mname = get_model("claude", tier)
-        # Claude relies on prompt instructions for JSON output, not response_format parameter
-        # If JSON mode is requested, augment system prompt
-        system_augmented = system
-        if json_mode:
-            system_augmented = f"{system}\n\nIMPORTANT: You MUST respond with valid JSON only. No explanations, no markdown fences, just pure JSON."
-        kwargs: Dict[str, Any] = {
-            "model": mname,
-            "max_tokens": 8192,
-            "system": system_augmented,
-            "messages": [{"role": "user", "content": user_message}]
-        }
-        msg = client.messages.create(**kwargs)
-        parts: List[str] = []
-        for blk in getattr(msg, "content", []) or []:
-            txt = getattr(blk, "text", None)
-            if txt:
-                parts.append(txt)
-        return ("\n\n".join(parts)).strip()
+        try:
+            import anthropic  # type: ignore
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError("Claude API key not found. Set ANTHROPIC_API_KEY environment variable.")
+            client = anthropic.Anthropic(api_key=api_key)
+            mname = get_model("claude", tier)
+            # Claude relies on prompt instructions for JSON output, not response_format parameter
+            # If JSON mode is requested, augment system prompt
+            system_augmented = system
+            if json_mode:
+                system_augmented = f"{system}\n\nIMPORTANT: You MUST respond with valid JSON only. No explanations, no markdown fences, just pure JSON."
+            kwargs: Dict[str, Any] = {
+                "model": mname,
+                "max_tokens": 8192,
+                "system": system_augmented,
+                "messages": [{"role": "user", "content": user_message}]
+            }
+            msg = client.messages.create(**kwargs)
+            parts: List[str] = []
+            for blk in getattr(msg, "content", []) or []:
+                txt = getattr(blk, "text", None)
+                if txt:
+                    parts.append(txt)
+            return ("\n\n".join(parts)).strip()
+        except Exception as e:
+            print(f"❌ Claude API error (tier={tier}, model={get_model('claude', tier)}, json_mode={json_mode}): {type(e).__name__}: {str(e)[:300]}")
+            raise
 
     # --- Public API ---
     def run_text(self, system: str, user_message: str, *, speed: str = "heavy") -> str:
