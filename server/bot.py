@@ -275,6 +275,19 @@ def build_enable_disable_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
+def build_enable_disable_inline_with_check(current: bool, ui_lang: str) -> InlineKeyboardMarkup:
+    """Build enable/disable keyboard with checkmark on current selection and Back button."""
+    kb = InlineKeyboardMarkup()
+    if _is_ru(ui_lang):
+        kb.add(InlineKeyboardButton(text="Включить" + (" ✓" if current else ""), callback_data="set:logs:enable"))
+        kb.add(InlineKeyboardButton(text="Отключить" + (" ✓" if not current else ""), callback_data="set:logs:disable"))
+    else:
+        kb.add(InlineKeyboardButton(text="Enable" + (" ✓" if current else ""), callback_data="set:logs:enable"))
+        kb.add(InlineKeyboardButton(text="Disable" + (" ✓" if not current else ""), callback_data="set:logs:disable"))
+    kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
+    return kb
+
+
 def build_yesno_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     if _is_ru(ui_lang):
@@ -286,11 +299,34 @@ def build_yesno_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
+def build_yesno_inline_with_check(current: bool, ui_lang: str) -> InlineKeyboardMarkup:
+    """Build yes/no keyboard with checkmark on current selection and Back button."""
+    kb = InlineKeyboardMarkup()
+    if _is_ru(ui_lang):
+        kb.add(InlineKeyboardButton(text="Да" + (" ✓" if current else ""), callback_data="set:incognito:yes"))
+        kb.add(InlineKeyboardButton(text="Нет" + (" ✓" if not current else ""), callback_data="set:incognito:no"))
+    else:
+        kb.add(InlineKeyboardButton(text="Yes" + (" ✓" if current else ""), callback_data="set:incognito:yes"))
+        kb.add(InlineKeyboardButton(text="No" + (" ✓" if not current else ""), callback_data="set:incognito:no"))
+    kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
+    return kb
+
+
 def build_depth_inline() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton(text="1", callback_data="set:depth:1"))
     kb.add(InlineKeyboardButton(text="2", callback_data="set:depth:2"))
     kb.add(InlineKeyboardButton(text="3", callback_data="set:depth:3"))
+    return kb
+
+
+def build_depth_inline_with_check(current: int, ui_lang: str) -> InlineKeyboardMarkup:
+    """Build depth keyboard with checkmark on current selection and Back button."""
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text="1" + (" ✓" if current == 1 else ""), callback_data="set:depth:1"))
+    kb.add(InlineKeyboardButton(text="2" + (" ✓" if current == 2 else ""), callback_data="set:depth:2"))
+    kb.add(InlineKeyboardButton(text="3" + (" ✓" if current == 3 else ""), callback_data="set:depth:3"))
+    kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
     return kb
 
 
@@ -1112,28 +1148,24 @@ def create_dispatcher() -> Dispatcher:
                 await query.message.edit_text(("Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"), reply_markup=kb)
             return
         if section == "logs":
-            kb = build_enable_disable_inline("logs", ui_lang)
-            # Add back button
-            back = build_back_only(ui_lang)
+            # Get current logs setting to show checkmark
             try:
-                for row in back.inline_keyboard:
-                    for b in row:
-                        kb.add(b)
+                current_logs = await get_logs_enabled(query.from_user.id) if query.from_user else False
             except Exception:
-                pass
+                current_logs = False
+            kb = build_enable_disable_inline_with_check(current_logs, ui_lang)
             await state.update_data(settings_view="logs")
             if query.message:
                 await query.message.edit_text(("Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"), reply_markup=kb)
             return
         if section == "public":
-            kb = build_yesno_inline("incog", ui_lang)
-            back = build_back_only(ui_lang)
+            # Get current incognito setting to show checkmark
             try:
-                for row in back.inline_keyboard:
-                    for b in row:
-                        kb.add(b)
+                current_incog = await get_incognito(query.from_user.id) if query.from_user else False
             except Exception:
-                pass
+                current_incog = False
+            # Note: incognito=True means private, so we invert for "public yes/no" question
+            kb = build_yesno_inline_with_check(not current_incog, ui_lang)
             await state.update_data(settings_view="public")
             if query.message:
                 await query.message.edit_text(("Сделать результаты публичными?" if _is_ru(ui_lang) else "Make results public?"), reply_markup=kb)
@@ -1181,10 +1213,11 @@ def create_dispatcher() -> Dispatcher:
         in_settings = bool(cur.get("in_settings"))
         settings_view = cur.get("settings_view")
         if in_settings and query.message:
-            # If inside new logs submenu, show back button
+            # If inside new logs submenu, show updated keyboard with checkmark
             if settings_view == "logs":
                 try:
-                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                    kb = build_enable_disable_inline_with_check(enabled, ui_lang)
+                    await query.message.edit_reply_markup(reply_markup=kb)
                 except Exception:
                     pass
             else:
@@ -1250,7 +1283,9 @@ def create_dispatcher() -> Dispatcher:
         if in_settings and query.message:
             if settings_view == "public":
                 try:
-                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                    # Note: incognito=True means private, so we invert for "public yes/no"
+                    kb = build_yesno_inline_with_check(not enabled, ui_lang)
+                    await query.message.edit_reply_markup(reply_markup=kb)
                 except Exception:
                     pass
             else:
