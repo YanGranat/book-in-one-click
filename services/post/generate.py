@@ -444,7 +444,22 @@ def generate_post(
                     results.append(await t)
                 return results
 
-            results = asyncio.run(process_all(points)) if points else []
+            def _run_in_fresh_loop(factory):
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(factory())
+                finally:
+                    try:
+                        asyncio.set_event_loop(None)
+                    except Exception:
+                        pass
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+
+            results = _run_in_fresh_loop(lambda: process_all(points)) if points else []
 
             class _SimpleItem:
                 def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
@@ -636,11 +651,11 @@ def generate_post(
 
         # For non-openai providers concurrency brings little benefit; run sequentially
         if _prov == "openai":
-            results = asyncio.run(process_all(points)) if points else []
+            results = _run_in_fresh_loop(lambda: process_all(points)) if points else []
         else:
             seq_results = []
             for p in points or []:
-                seq_results.append(asyncio.run(process_point_async(p)))
+                seq_results.append(_run_in_fresh_loop(lambda p=p: process_point_async(p)))
             results = seq_results
 
         class _SimpleItem:
