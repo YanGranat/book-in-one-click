@@ -2551,20 +2551,19 @@ def create_dispatcher() -> Dispatcher:
                 fc_enabled_state = False
                 depth = None
 
-            async with GLOBAL_SEMAPHORE:
-                # Prepare job metadata for logging
-                job_meta = {
-                    "user_id": message.from_user.id if message.from_user else 0,  # telegram_id for backward compat
-                    "db_user_id": db_user_id,  # User.id for accurate fallback Job creation
-                    "chat_id": message.chat.id,
-                    "topic": topic,
-                    "provider": prov or "openai",
-                    "lang": eff_lang,
-                    "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
-                    "refine": refine_enabled,
-                }
-                if job_id:
-                    job_meta["job_id"] = job_id
+            # Prepare job metadata for logging (removed GLOBAL_SEMAPHORE to prevent blocking)
+            job_meta = {
+                "user_id": message.from_user.id if message.from_user else 0,  # telegram_id for backward compat
+                "db_user_id": db_user_id,  # User.id for accurate fallback Job creation
+                "chat_id": message.chat.id,
+                "topic": topic,
+                "provider": prov or "openai",
+                "lang": eff_lang,
+                "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
+                "refine": refine_enabled,
+            }
+            if job_id:
+                job_meta["job_id"] = job_id
             stages = []
             def _on_progress(stage: str) -> None:
                 stages.append(stage)
