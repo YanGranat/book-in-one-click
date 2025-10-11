@@ -26,6 +26,9 @@ class ProviderRunner:
     # --- OpenAI ---
     def _openai_text(self, system: str, user_message: str, *, tier: str = "heavy") -> str:
         _ensure_loop()
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
         from agents import Agent, Runner  # type: ignore
         model = get_model("openai", tier)
         tools = []
@@ -43,6 +46,8 @@ class ProviderRunner:
         _ensure_loop()
         import google.generativeai as genai  # type: ignore
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("Gemini API key not found. Set GOOGLE_API_KEY or GEMINI_API_KEY environment variable.")
         genai.configure(api_key=api_key)
         mname = get_model("gemini", tier)
         # Try to enable Google Search grounding when SDK supports it; otherwise fall back gracefully
@@ -97,7 +102,10 @@ class ProviderRunner:
     def _claude_text(self, system: str, user_message: str, *, tier: str = "heavy", json_mode: bool = False) -> str:
         _ensure_loop()
         import anthropic  # type: ignore
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("Claude API key not found. Set ANTHROPIC_API_KEY environment variable.")
+        client = anthropic.Anthropic(api_key=api_key)
         mname = get_model("claude", tier)
         kwargs: Dict[str, Any] = {
             "model": mname,
