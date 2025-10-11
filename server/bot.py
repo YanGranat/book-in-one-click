@@ -3038,7 +3038,11 @@ def create_dispatcher() -> Dispatcher:
                         items = []
                     else:
                         jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
-                        cond = Job.user_id == db_uid
+                        # Support BOTH schemas:
+                        # NEW: Job.user_id = User.id (normalized)
+                        # OLD: Job.user_id = telegram_id (legacy, before migration)
+                        telegram_id = int(message.from_user.id)
+                        cond = _or(Job.user_id == db_uid, Job.user_id == telegram_id)
                         res = await _s.execute(
                             _select(ResultDoc, Job.user_id)
                             .select_from(jn)
@@ -3838,12 +3842,14 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     db_uid = None
                 
-                # Job.user_id ALWAYS stores User.id, not telegram_id
+                # Support BOTH schemas: NEW (Job.user_id = User.id) and OLD (Job.user_id = telegram_id)
                 if db_uid is None:
                     await message.answer("Нет результатов для контекста чата. Сначала сгенерируйте пост.")
                     return
                 
-                cond = (Job.user_id == db_uid)
+                from sqlalchemy import or_ as _or
+                telegram_id = int(message.from_user.id)
+                cond = _or(Job.user_id == db_uid, Job.user_id == telegram_id)
                 q = await s.execute(
                     select(ResultDoc, Job.user_id)
                     .select_from(ResultDoc.__table__.join(Job.__table__, ResultDoc.job_id == Job.id))
