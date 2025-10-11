@@ -2367,6 +2367,7 @@ def create_dispatcher() -> Dispatcher:
                     import json as _json
                     db_user = await _get_or_create_user(session, message.from_user.id)
                     db_user_id = int(db_user.id)  # Capture User.id
+                    print(f"[DEBUG] User resolved: telegram_id={message.from_user.id}, User.id={db_user_id}")
                     params = {
                         "topic": topic,
                         "lang": (data.get("gen_lang") or "auto"),
@@ -2380,7 +2381,9 @@ def create_dispatcher() -> Dispatcher:
                     await session.flush()
                     job_id = int(j.id)
                     await session.commit()
-        except Exception:
+                    print(f"[DEBUG] Job created: Job.id={job_id}, User.id={db_user_id}")
+        except Exception as e:
+            print(f"[ERROR] Job creation FAILED for telegram_id={message.from_user.id if message.from_user else 'N/A'}, User.id={db_user_id}: {type(e).__name__}: {str(e)[:300]}")
             job_id = 0
 
         # Light progress notes before long run

@@ -805,7 +805,9 @@ def generate_post(
                         if not result_job_id or int(result_job_id) <= 0:
                             # Prefer db_user_id (User.id) from job_meta if available; else resolve by telegram_id
                             from server.db import User, Job as _Job
+                            tg_uid_meta = int((job_meta or {}).get("user_id", 0) or 0)
                             db_user_id = (job_meta or {}).get("db_user_id")  # Try User.id first
+                            print(f"[DEBUG] Fallback triggered: telegram_id={tg_uid_meta}, db_user_id from meta={db_user_id}")
                             if db_user_id is None or int(db_user_id or 0) <= 0:
                                 # Fallback: resolve User by telegram_id
                                 tg_uid = int((job_meta or {}).get("user_id", 0) or 0)
@@ -815,18 +817,24 @@ def generate_post(
                                     except Exception:
                                         urow = None
                                     if urow is None:
+                                        from sqlalchemy.exc import IntegrityError as _IntegrityError
                                         try:
                                             urow = User(telegram_id=tg_uid, credits=0)
                                             s.add(urow)
                                             s.flush()
                                             s.commit()  # Commit User creation immediately
-                                        except Exception as _create_err:
+                                        except _IntegrityError:
+                                            # Race condition: another request created this user
                                             s.rollback()
-                                            # Try one more time to find in case of race condition
                                             try:
                                                 urow = s.query(User).filter(User.telegram_id == tg_uid).first()
                                             except Exception:
                                                 urow = None
+                                        except Exception as other_err:
+                                            # Other DB errors
+                                            print(f"[ERROR] Fallback User create failed (non-IntegrityError) for telegram_id={tg_uid}: {type(other_err).__name__}: {str(other_err)[:200]}")
+                                            s.rollback()
+                                            urow = None
                                     if urow is not None:
                                         db_user_id = int(getattr(urow, "id", 0) or 0)
                             else:
