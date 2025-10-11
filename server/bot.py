@@ -457,23 +457,28 @@ def create_dispatcher() -> Dispatcher:
                 if (not is_admin):
                     base_ru = base_ru + [types.BotCommand("credits", "Кредиты")]
                     base_en = base_en + [types.BotCommand("credits", "Credits")]
-                # Superadmin extras: pricing + chat
+                # Superadmin extras: ensure pricing/chat/endchat/meme_extract present
                 from .bot_commands import SUPER_ADMIN_ID
                 is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
-                if is_superadmin and ("chat" not in [c.command for c in base_ru]):
-                    # Ensure chat commands and pricing visible for superadmin as well
-                    base_ru = base_ru + [
-                        types.BotCommand("pricing", "Цены"),
-                        types.BotCommand("chat", "Чат с ИИ"),
-                        types.BotCommand("endchat", "Завершить чат"),
-                        types.BotCommand("meme_extract", "Экстракция мемов"),
-                    ]
-                    base_en = base_en + [
-                        types.BotCommand("pricing", "Pricing"),
-                        types.BotCommand("chat", "Chat with AI"),
-                        types.BotCommand("endchat", "End chat"),
-                        types.BotCommand("meme_extract", "Meme extraction"),
-                    ]
+                if is_superadmin:
+                    ru_cmds = {c.command for c in base_ru}
+                    en_cmds = {c.command for c in base_en}
+                    if "pricing" not in ru_cmds:
+                        base_ru.append(types.BotCommand("pricing", "Цены"))
+                    if "chat" not in ru_cmds:
+                        base_ru.append(types.BotCommand("chat", "Чат с ИИ"))
+                    if "endchat" not in ru_cmds:
+                        base_ru.append(types.BotCommand("endchat", "Завершить чат"))
+                    if "meme_extract" not in ru_cmds:
+                        base_ru.append(types.BotCommand("meme_extract", "Экстракция мемов"))
+                    if "pricing" not in en_cmds:
+                        base_en.append(types.BotCommand("pricing", "Pricing"))
+                    if "chat" not in en_cmds:
+                        base_en.append(types.BotCommand("chat", "Chat with AI"))
+                    if "endchat" not in en_cmds:
+                        base_en.append(types.BotCommand("endchat", "End chat"))
+                    if "meme_extract" not in en_cmds:
+                        base_en.append(types.BotCommand("meme_extract", "Meme extraction"))
                 # Cancel at the very bottom
                 base_ru.append(types.BotCommand("cancel", "Отмена"))
                 base_en.append(types.BotCommand("cancel", "Cancel"))
@@ -603,11 +608,17 @@ def create_dispatcher() -> Dispatcher:
                     "- /interface_lang — язык интерфейса.\n\n"
                 )
 
-            results_block = (
-                "<b>Результаты:</b>\n"
-                f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n"
-                f"- <a href='{RESULTS_ORIGIN}/memes-ui'>Экстракции мемов</a>\n\n"
-            )
+            if is_superadmin or is_admin:
+                results_block = (
+                    "<b>Результаты:</b>\n"
+                    f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n"
+                    f"- <a href='{RESULTS_ORIGIN}/memes-ui'>Экстракции мемов</a>\n\n"
+                )
+            else:
+                results_block = (
+                    "<b>Результаты:</b>\n"
+                    f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n\n"
+                )
             provider_line_ru = (f"- Провайдер: {_prov_name(prov, True)}\n" if is_superadmin else "")
             logs_line_ru = (f"- Логи генерации: {'вкл' if logs_enabled else 'выкл'}\n" if (is_superadmin or is_admin) else "")
             settings_block = (
@@ -655,11 +666,17 @@ def create_dispatcher() -> Dispatcher:
                     "- /interface_lang — interface language.\n\n"
                 )
 
-            results_block = (
-                "<b>Results:</b>\n"
-                f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n"
-                f"- <a href='{RESULTS_ORIGIN}/memes-ui'>Meme extractions</a>\n\n"
-            )
+            if is_superadmin or is_admin:
+                results_block = (
+                    "<b>Results:</b>\n"
+                    f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n"
+                    f"- <a href='{RESULTS_ORIGIN}/memes-ui'>Meme extractions</a>\n\n"
+                )
+            else:
+                results_block = (
+                    "<b>Results:</b>\n"
+                    f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n\n"
+                )
             provider_line_en = (f"- Provider: {_prov_name(prov, False)}\n" if is_superadmin else "")
             logs_line_en = (f"- Generation logs: {'on' if logs_enabled else 'off'}\n" if (is_superadmin or is_admin) else "")
             settings_block = (
@@ -1872,7 +1889,7 @@ def create_dispatcher() -> Dispatcher:
                     "chat": cmd_chat,
                     "endchat": cmd_endchat,
                     "cancel": cmd_cancel,
-                # Meme extraction will be handled below once implemented
+                "meme_extract": cmd_meme_extract,
                 }
                 h = handlers.get(cmd)
                 if h is not None:
@@ -3464,6 +3481,7 @@ def create_dispatcher() -> Dispatcher:
                     "chat": cmd_chat,
                     "endchat": cmd_endchat,
                     "cancel": cmd_cancel,
+                    "meme_extract": cmd_meme_extract,
                 }
                 h = handlers.get(cmd)
                 if h is not None:
