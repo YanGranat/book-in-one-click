@@ -1104,6 +1104,7 @@ async def memes_ui(_: bool = Depends(require_admin)):
         "<input id='q' type='text' placeholder='Search source...'>"
         "<select id='lang'><option value=''>All languages</option><option>ru</option><option>en</option></select>"
         "<select id='theme'><option value='dark' selected>Dark</option><option value='light'>Light</option></select>"
+        "<button id='backfill' style='background:#f59e0b;border-color:#f59e0b;'>Backfill Empty Content</button>"
         "<button id='refresh'>Refresh</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
@@ -1191,6 +1192,10 @@ async def meme_result_view_ui_id(res_id: int, _: bool = Depends(require_admin)):
     if isinstance(data, dict) and data.get("error"):
         return HTMLResponse("<h1>Not found</h1>", status_code=404)
     content = data.get("content", "") if isinstance(data, dict) else ""
+    # Debug: log if content is empty
+    if not content or not content.strip():
+        import sys
+        print(f"[DEBUG] Meme result #{res_id} has empty content. Data keys: {list(data.keys()) if isinstance(data, dict) else 'not dict'}", file=sys.stderr)
     title = f"Meme Result #{res_id}"
     from html import escape as _esc
     _raw = (_esc(content or "").replace("</textarea>", "&lt;/textarea&gt;") if content else "")
@@ -1216,8 +1221,9 @@ async def meme_result_view_ui_id(res_id: int, _: bool = Depends(require_admin)):
         "<script>(function(){const t=localStorage.getItem('ui_theme');if(t==='light'){document.documentElement.setAttribute('data-theme','light');}else{document.documentElement.removeAttribute('data-theme');}})();"
         f"const RES_ID={res_id};"
         "let text=(document.getElementById('raw')?document.getElementById('raw').value:'');let showRaw=false;"
+        "console.log('[DEBUG] Initial text length:',text.length,'chars');"
         "function render(md){let html='';const trimmed=(md||'').trim();try{html=(window.marked?window.marked.parse(md):'');}catch(e){html='';}if(!trimmed){html='<pre>(no content)</pre>';}else if(!html||html.trim()===''){const safe=md.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>';}document.getElementById('content').innerHTML=showRaw?('<pre>'+ (trimmed?md.replace(/</g,'&lt;').replace(/>/g,'&gt;') : '(no content)') +'</pre>'):html;}"
-        "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&(j.content||j.path)){if(j.content)text=j.content;const meta=document.getElementById('meta');if(meta){meta.textContent=`provider=${j.provider||'?'} | lang=${j.lang||'?'} | source=${j.topic||'?'} | id=${RES_ID}`;}render(text);}}catch(_){}}refresh();"
+        "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();console.log('[DEBUG] Fetched data for meme #'+RES_ID+':',j);if(j&&(j.content||j.path)){if(j.content)text=j.content;else console.warn('[DEBUG] j.content is empty');const meta=document.getElementById('meta');if(meta){meta.textContent=`provider=${j.provider||'?'} | lang=${j.lang||'?'} | source=${j.topic||'?'} | id=${RES_ID}`;}render(text);}else{console.error('[DEBUG] No content or path in response');}}catch(e){console.error('[DEBUG] Fetch failed:',e);}}refresh();"
         "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
         "document.getElementById('download').onclick=async()=>{try{const ip=(await (await fetch('/ip',{cache:'no-store'})).json()).ip||'unknown';const key='res-meme-'+RES_ID;const ok=await (await fetch(`/allow-download?key=${key}&ip=${encodeURIComponent(ip)}`,{cache:'no-store'})).json();if(!(ok&&ok.allow)){alert('Rate limit exceeded. Try later.');return;}const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'meme-result')+'.md';a.click();}catch(_){};"
         "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}"
