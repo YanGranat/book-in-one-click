@@ -2386,6 +2386,7 @@ def create_dispatcher() -> Dispatcher:
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         factcheck=True,
+                        factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "8")),
                         research_iterations=int(depth or 2),
                         job_meta=job_meta,
                         on_progress=_on_progress,
@@ -2477,8 +2478,15 @@ def create_dispatcher() -> Dispatcher:
                     await push_history(message.from_user.id, payload)
             except Exception:
                 pass
+        except asyncio.TimeoutError:
+            warn = (
+                "Превышено время ожидания генерации. Уменьшите глубину факт-чекинга, отключите финальную редактуру или попробуйте позже."
+                if _is_ru(ui_lang) else
+                "Generation timed out. Reduce fact-check depth, disable final refine, or try again later."
+            )
+            await message.answer(warn)
         except Exception as e:
-            err = f"Ошибка: {e}" if ui_lang == "ru" else f"Error: {e}"
+            err = f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"
             await message.answer(err)
             # Mark job error
             try:
@@ -2697,7 +2705,7 @@ def create_dispatcher() -> Dispatcher:
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
-                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
+                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "8")), research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
             else:
