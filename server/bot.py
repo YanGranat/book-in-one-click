@@ -244,84 +244,6 @@ def build_enable_disable_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
         kb.add(InlineKeyboardButton(text="Disable", callback_data=f"set:{tag}:disable"))
     return kb
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("settings:open:"))  # type: ignore
-    async def cb_settings_open(query: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        ui_lang = (data.get("ui_lang") or "ru").strip()
-        section = (query.data or "").split(":")[-1]
-        await query.answer()
-        # Open submenus with a Back button; actual toggles reuse existing callbacks
-        if section == "provider":
-            from .bot_commands import SUPER_ADMIN_ID
-            if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
-                return
-            kb = InlineKeyboardMarkup()
-            for row in build_provider_inline().inline_keyboard:
-                try:
-                    kb.row(*row)
-                except Exception:
-                    for b in row:
-                        kb.add(b)
-            kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
-            await state.update_data(settings_view="provider")
-            if query.message:
-                await query.message.edit_text(("Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"), reply_markup=kb)
-            return
-        if section == "gen_lang":
-            kb = build_genlang_inline(ui_lang)
-            # Add back button below
-            back = build_back_only(ui_lang)
-            try:
-                for row in back.inline_keyboard:
-                    for b in row:
-                        kb.add(b)
-            except Exception:
-                pass
-            await state.update_data(settings_view="gen_lang")
-            if query.message:
-                await query.message.edit_text(("Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"), reply_markup=kb)
-            return
-        if section == "logs":
-            kb = build_enable_disable_inline("logs", ui_lang)
-            # Add back button
-            back = build_back_only(ui_lang)
-            try:
-                for row in back.inline_keyboard:
-                    for b in row:
-                        kb.add(b)
-            except Exception:
-                pass
-            await state.update_data(settings_view="logs")
-            if query.message:
-                await query.message.edit_text(("Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"), reply_markup=kb)
-            return
-        if section == "public":
-            kb = build_yesno_inline("incog", ui_lang)
-            back = build_back_only(ui_lang)
-            try:
-                for row in back.inline_keyboard:
-                    for b in row:
-                        kb.add(b)
-            except Exception:
-                pass
-            await state.update_data(settings_view="public")
-            if query.message:
-                await query.message.edit_text(("Сделать результаты публичными?" if _is_ru(ui_lang) else "Make results public?"), reply_markup=kb)
-            return
-
-    @dp.callback_query_handler(lambda c: c.data == "settings:back")  # type: ignore
-    async def cb_settings_back(query: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        ui_lang = (data.get("ui_lang") or "ru").strip()
-        from .bot_commands import SUPER_ADMIN_ID
-        is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
-        is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
-        await state.update_data(settings_view="main")
-        kb = build_settings_main_menu(ui_lang, is_admin=is_admin, is_superadmin=is_superadmin)
-        await query.answer()
-        if query.message:
-            await query.message.edit_text(("Настройки" if _is_ru(ui_lang) else "Settings"), reply_markup=kb)
-
 
 def build_yesno_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
@@ -1121,6 +1043,84 @@ def create_dispatcher() -> Dispatcher:
         # Button-based settings main menu
         kb = build_settings_main_menu(ui_lang, is_admin=is_admin, is_superadmin=is_superadmin)
         await message.answer(("Настройки" if ru else "Settings"), reply_markup=kb)
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("settings:open:"))  # type: ignore
+    async def cb_settings_open(query: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        section = (query.data or "").split(":")[-1]
+        await query.answer()
+        # Open submenus with a Back button; actual toggles reuse existing callbacks
+        if section == "provider":
+            from .bot_commands import SUPER_ADMIN_ID
+            if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
+                return
+            kb = InlineKeyboardMarkup()
+            for row in build_provider_inline().inline_keyboard:
+                try:
+                    kb.row(*row)
+                except Exception:
+                    for b in row:
+                        kb.add(b)
+            kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
+            await state.update_data(settings_view="provider")
+            if query.message:
+                await query.message.edit_text(("Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"), reply_markup=kb)
+            return
+        if section == "gen_lang":
+            kb = build_genlang_inline(ui_lang)
+            # Add back button below
+            back = build_back_only(ui_lang)
+            try:
+                for row in back.inline_keyboard:
+                    for b in row:
+                        kb.add(b)
+            except Exception:
+                pass
+            await state.update_data(settings_view="gen_lang")
+            if query.message:
+                await query.message.edit_text(("Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"), reply_markup=kb)
+            return
+        if section == "logs":
+            kb = build_enable_disable_inline("logs", ui_lang)
+            # Add back button
+            back = build_back_only(ui_lang)
+            try:
+                for row in back.inline_keyboard:
+                    for b in row:
+                        kb.add(b)
+            except Exception:
+                pass
+            await state.update_data(settings_view="logs")
+            if query.message:
+                await query.message.edit_text(("Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"), reply_markup=kb)
+            return
+        if section == "public":
+            kb = build_yesno_inline("incog", ui_lang)
+            back = build_back_only(ui_lang)
+            try:
+                for row in back.inline_keyboard:
+                    for b in row:
+                        kb.add(b)
+            except Exception:
+                pass
+            await state.update_data(settings_view="public")
+            if query.message:
+                await query.message.edit_text(("Сделать результаты публичными?" if _is_ru(ui_lang) else "Make results public?"), reply_markup=kb)
+            return
+
+    @dp.callback_query_handler(lambda c: c.data == "settings:back")  # type: ignore
+    async def cb_settings_back(query: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+        is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+        await state.update_data(settings_view="main")
+        kb = build_settings_main_menu(ui_lang, is_admin=is_admin, is_superadmin=is_superadmin)
+        await query.answer()
+        if query.message:
+            await query.message.edit_text(("Настройки" if _is_ru(ui_lang) else "Settings"), reply_markup=kb)
 
     @dp.message_handler(commands=["logs"])  # type: ignore
     async def cmd_logs(message: types.Message, state: FSMContext):
