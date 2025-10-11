@@ -817,33 +817,40 @@ def generate_post(
                                         urow = User(telegram_id=tg_uid, credits=0)
                                         s.add(urow)
                                         s.flush()
-                                    except Exception:
+                                        s.commit()  # Commit User creation immediately
+                                    except Exception as _create_err:
                                         s.rollback()
-                                        urow = None
+                                        # Try one more time to find in case of race condition
+                                        try:
+                                            urow = s.query(User).filter(User.telegram_id == tg_uid).first()
+                                        except Exception:
+                                            urow = None
                                 if urow is not None:
                                     db_user_id = int(getattr(urow, "id", 0) or 0)
-                            # Create a Job row linked to this user
-                            try:
-                                import json as __json
-                                params = {
-                                    "topic": topic,
-                                    "lang": lang,
-                                    "provider": _prov,
-                                    "factcheck": bool(factcheck),
-                                    "refine": bool(use_refine),
-                                }
-                                # Use db_user_id if available, otherwise fallback to telegram_id for legacy history compatibility
-                                jrow = _Job(user_id=(db_user_id or tg_uid or 0), type="post", status="done", params_json=__json.dumps(params, ensure_ascii=False), cost=1, file_path=str(filepath) if filepath else None)
-                                s.add(jrow)
-                                s.flush()
-                                result_job_id = int(getattr(jrow, "id", 0) or 0)
-                                s.commit()
-                            except Exception as _e:
-                                s.rollback()
-                                print(f"[ERROR] Fallback Job create failed: {_e}")
-                    except Exception:
+                            # Create a Job row linked to this user (ALWAYS use User.id, never telegram_id directly)
+                            if db_user_id:
+                                try:
+                                    import json as __json
+                                    params = {
+                                        "topic": topic,
+                                        "lang": lang,
+                                        "provider": _prov,
+                                        "factcheck": bool(factcheck),
+                                        "refine": bool(use_refine),
+                                    }
+                                    jrow = _Job(user_id=db_user_id, type="post", status="done", params_json=__json.dumps(params, ensure_ascii=False), cost=1, file_path=str(filepath) if filepath else None)
+                                    s.add(jrow)
+                                    s.flush()
+                                    result_job_id = int(getattr(jrow, "id", 0) or 0)
+                                    s.commit()
+                                except Exception as _e:
+                                    s.rollback()
+                                    print(f"[ERROR] Fallback Job create failed: {_e}")
+                            else:
+                                print(f"[WARN] Cannot create fallback Job: User not found/created for telegram_id {tg_uid}")
+                    except Exception as outer_e:
                         # Non-fatal: keep result_job_id as-is
-                        pass
+                        print(f"[ERROR] Fallback Job creation outer exception: {outer_e}")
                     # 2) Persist final ResultDoc independently (even if JobLog failed)
                     if filepath is not None:
                         try:
