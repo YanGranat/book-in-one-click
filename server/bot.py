@@ -2959,7 +2959,7 @@ def create_dispatcher() -> Dispatcher:
         from sqlalchemy import join as _join
         async with SessionLocal() as _s:
             from .db import ResultDoc, Job, User
-            # Map telegram -> DB user.id when possible
+            # Map telegram -> DB user.id (Job.user_id always stores User.id)
             db_uid: Optional[int] = None
             try:
                 uq = await _s.execute(_select(User).where(User.telegram_id == int(telegram_user_id)))
@@ -2968,11 +2968,10 @@ def create_dispatcher() -> Dispatcher:
                     db_uid = int(urow.id)
             except Exception:
                 db_uid = None
-            cond = Job.user_id == int(telegram_user_id)
-            if db_uid is not None:
-                cond = _or(cond, Job.user_id == db_uid)
+            if db_uid is None:
+                return []
             jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
-            sel = _select(ResultDoc.id).select_from(jn).where(cond)
+            sel = _select(ResultDoc.id).select_from(jn).where(Job.user_id == db_uid)
             if ids:
                 try:
                     _ids = [int(x) for x in ids if isinstance(x, int)]
@@ -3051,15 +3050,11 @@ def create_dispatcher() -> Dispatcher:
                         items = []
                     else:
                         jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
-                        # Support BOTH schemas:
-                        # NEW: Job.user_id = User.id (normalized)
-                        # OLD: Job.user_id = telegram_id (legacy, before migration)
-                        telegram_id = int(message.from_user.id)
-                        cond = _or(Job.user_id == db_uid, Job.user_id == telegram_id)
+                        # Job.user_id always stores User.id (normalized schema)
                         res = await _s.execute(
                             _select(ResultDoc, Job.user_id)
                             .select_from(jn)
-                            .where(cond)
+                            .where(Job.user_id == db_uid)
                             .order_by(ResultDoc.created_at.desc())
                             .limit(50)
                         )
@@ -3855,18 +3850,15 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     db_uid = None
                 
-                # Support BOTH schemas: NEW (Job.user_id = User.id) and OLD (Job.user_id = telegram_id)
+                # Job.user_id always stores User.id (normalized schema)
                 if db_uid is None:
                     await message.answer("Нет результатов для контекста чата. Сначала сгенерируйте пост.")
                     return
                 
-                from sqlalchemy import or_ as _or
-                telegram_id = int(message.from_user.id)
-                cond = _or(Job.user_id == db_uid, Job.user_id == telegram_id)
                 q = await s.execute(
                     select(ResultDoc, Job.user_id)
                     .select_from(ResultDoc.__table__.join(Job.__table__, ResultDoc.job_id == Job.id))
-                    .where(cond)
+                    .where(Job.user_id == db_uid)
                     .order_by(ResultDoc.created_at.desc())
                     .limit(1)
                 )
