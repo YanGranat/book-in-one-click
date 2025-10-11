@@ -1049,6 +1049,7 @@ def create_dispatcher() -> Dispatcher:
         from sqlalchemy.exc import SQLAlchemyError
         try:
             charged = False
+            chat_id_series = query.message.chat.id if query.message else query.from_user.id
             if SessionLocal is not None and query.from_user:
                 async with SessionLocal() as session:
                     user = await ensure_user_with_credits(session, query.from_user.id)
@@ -1056,11 +1057,31 @@ def create_dispatcher() -> Dispatcher:
                     if ok:
                         await session.commit()
                         charged = True
+                    else:
+                        # Not enough credits in DB
+                        need = max(0, int(total) - int(remaining))
+                        warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if ru else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                        await query.answer()
+                        await dp.bot.send_message(chat_id_series, warn)
+                        if _stars_enabled():
+                            try:
+                                await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if ru else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
+                            except Exception:
+                                pass
+                        await state.finish()
+                        return
             if not charged and query.from_user:
                 ok, remaining = await charge_credits_kv(query.from_user.id, int(total))
                 if not ok:
+                    need = max(0, int(total) - int(remaining))
+                    warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if ru else f"Insufficient credits. Need: {need}. Use /credits to top up.")
                     await query.answer()
-                    await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Недостаточно кредитов" if ru else "Insufficient credits"))
+                    await dp.bot.send_message(chat_id_series, warn)
+                    if _stars_enabled():
+                        try:
+                            await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if ru else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
+                        except Exception:
+                            pass
                     await state.finish()
                     return
         except SQLAlchemyError:
@@ -1823,12 +1844,30 @@ def create_dispatcher() -> Dispatcher:
                                 if ok:
                                     await session.commit()
                                     charged = True
+                                else:
+                                    # Not enough credits in DB
+                                    need = max(0, 100 - int(remaining))
+                                    warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                                    await message.answer(warn)
+                                    if _stars_enabled():
+                                        try:
+                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                        except Exception:
+                                            pass
+                                    await state.finish()
+                                    RUNNING_CHATS.discard(chat_id)
+                                    return
                         if not charged and message.from_user:
                             ok, remaining = await charge_credits_kv(message.from_user.id, 100)  # type: ignore
                             if not ok:
                                 need = max(0, 100 - int(remaining))
-                                warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /buy для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /buy to top up.")
+                                warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
                                 await message.answer(warn)
+                                if _stars_enabled():
+                                    try:
+                                        await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                    except Exception:
+                                        pass
                                 await state.finish()
                                 RUNNING_CHATS.discard(chat_id)
                                 return
@@ -2000,7 +2039,14 @@ def create_dispatcher() -> Dispatcher:
                                     user = await ensure_user_with_credits(session, message.from_user.id)
                                     ok, remaining = await charge_credits(session, user, int(total_cost), reason="post_series_fixed_prepay")
                                     if not ok:
-                                        await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
+                                        need = max(0, int(total_cost) - int(remaining))
+                                        warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                                        await message.answer(warn)
+                                        if _stars_enabled():
+                                            try:
+                                                await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                            except Exception:
+                                                pass
                                         await state.finish()
                                         RUNNING_CHATS.discard(chat_id)
                                         return
@@ -2009,7 +2055,14 @@ def create_dispatcher() -> Dispatcher:
                             else:
                                 ok, remaining = await charge_credits_kv(message.from_user.id, int(total_cost))  # type: ignore
                                 if not ok:
-                                    await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
+                                    need = max(0, int(total_cost) - int(remaining))
+                                    warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                                    await message.answer(warn)
+                                    if _stars_enabled():
+                                        try:
+                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                        except Exception:
+                                            pass
                                     await state.finish()
                                     RUNNING_CHATS.discard(chat_id)
                                     return
@@ -2040,7 +2093,12 @@ def create_dispatcher() -> Dispatcher:
                                 balance = 0
                         prepay_budget = min(30, balance)
                         if prepay_budget <= 0:
-                            await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
+                            await message.answer(("Недостаточно кредитов. Используйте /credits для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /credits to top up."))
+                            if _stars_enabled():
+                                try:
+                                    await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                except Exception:
+                                    pass
                             await state.finish()
                             RUNNING_CHATS.discard(chat_id)
                             return
@@ -2050,10 +2108,15 @@ def create_dispatcher() -> Dispatcher:
                         target_count = prepay_budget // unit_cost
                         if target_count <= 0:
                             await message.answer(
-                                ("Недостаточно кредитов для текущих настроек (стоимость поста слишком высока). Отключите факт‑чек/редактуру или пополните баланс."
+                                ("Недостаточно кредитов для текущих настроек (стоимость поста слишком высока). Отключите факт‑чек/редактуру или пополните баланс через /credits."
                                  if _is_ru(ui_lang) else
-                                 "Insufficient credits for current settings (post cost too high). Disable fact‑check/refine or top up.")
+                                 "Insufficient credits for current settings (post cost too high). Disable fact‑check/refine or top up via /credits.")
                             )
+                            if _stars_enabled():
+                                try:
+                                    await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                except Exception:
+                                    pass
                             await state.finish()
                             RUNNING_CHATS.discard(chat_id)
                             return
@@ -2066,7 +2129,14 @@ def create_dispatcher() -> Dispatcher:
                                     user = await get_or_create_user(session, message.from_user.id)
                                     ok, remaining = await charge_credits(session, user, int(prepay_budget), reason="post_series_auto_prepay")
                                     if not ok:
-                                        await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
+                                        need = max(0, int(prepay_budget) - int(remaining))
+                                        warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                                        await message.answer(warn)
+                                        if _stars_enabled():
+                                            try:
+                                                await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                            except Exception:
+                                                pass
                                         await state.finish()
                                         RUNNING_CHATS.discard(chat_id)
                                         return
@@ -2075,7 +2145,14 @@ def create_dispatcher() -> Dispatcher:
                             else:
                                 ok, remaining = await charge_credits_kv(message.from_user.id, int(prepay_budget))  # type: ignore
                                 if not ok:
-                                    await message.answer(("Недостаточно кредитов. Используйте /buy для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /buy to top up."))
+                                    need = max(0, int(prepay_budget) - int(remaining))
+                                    warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                                    await message.answer(warn)
+                                    if _stars_enabled():
+                                        try:
+                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                        except Exception:
+                                            pass
                                     await state.finish()
                                     RUNNING_CHATS.discard(chat_id)
                                     return
@@ -2331,20 +2408,38 @@ def create_dispatcher() -> Dispatcher:
                     if ok:
                         await session.commit()
                         charged = True
+                    else:
+                        # Not enough credits in DB
+                        need = max(0, int(unit_cost) - int(remaining))
+                        warn = (
+                            f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения."
+                            if _is_ru(ui_lang)
+                            else f"Insufficient credits. Need: {need}. Use /credits to top up."
+                        )
+                        await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
+                        if _stars_enabled():
+                            try:
+                                await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                            except Exception:
+                                pass
+                        await state.finish()
+                        RUNNING_CHATS.discard(chat_id)
+                        return
             if not charged and message.from_user:
                 ok, remaining = await charge_credits_kv(message.from_user.id, unit_cost)
                 if not ok:
                     need = max(0, int(unit_cost) - int(remaining))
                     warn = (
-                        f"Недостаточно кредитов. Не хватает: {need}. Используйте /buy для пополнения."
+                        f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения."
                         if _is_ru(ui_lang)
-                        else f"Insufficient credits. Need: {need}. Use /buy to top up."
+                        else f"Insufficient credits. Need: {need}. Use /credits to top up."
                     )
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
-                    try:
-                        await dp.bot.send_message(("Купить кредиты за ⭐? Один кредит = 50⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 50⭐"), reply_markup=build_buy_keyboard(ui_lang))
-                    except Exception:
-                        pass
+                    if _stars_enabled():
+                        try:
+                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                        except Exception:
+                            pass
                     await state.finish()
                     RUNNING_CHATS.discard(chat_id)
                     return
@@ -2747,6 +2842,23 @@ def create_dispatcher() -> Dispatcher:
                     if ok:
                         await session.commit()
                         charged = True
+                    else:
+                        # Not enough credits in DB
+                        need = max(0, int(unit_cost) - int(remaining))
+                        warn = (
+                            f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения."
+                            if _is_ru(ui_lang)
+                            else f"Insufficient credits. Need: {need}. Use /credits to top up."
+                        )
+                        await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
+                        if _stars_enabled():
+                            try:
+                                await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                            except Exception:
+                                pass
+                        await state.finish()
+                        RUNNING_CHATS.discard(chat_id)
+                        return
             if not charged and query.from_user:
                 # KV fallback (respect superadmin-only features)
                 refine_pref = False
@@ -2771,15 +2883,16 @@ def create_dispatcher() -> Dispatcher:
                 if not ok:
                     need = max(0, int(unit_cost) - int(remaining))
                     warn = (
-                        f"Недостаточно кредитов. Не хватает: {need}. Используйте /buy для пополнения."
+                        f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения."
                         if _is_ru(ui_lang)
-                        else f"Insufficient credits. Need: {need}. Use /buy to top up."
+                        else f"Insufficient credits. Need: {need}. Use /credits to top up."
                     )
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
-                    try:
-                        await dp.bot.send_message(("Купить кредиты за ⭐? Один кредит = 50⭐" if _is_ru(ui_lang) else "Buy credits with ⭐? One credit = 50⭐"), reply_markup=build_buy_keyboard(ui_lang))
-                    except Exception:
-                        pass
+                    if _stars_enabled():
+                        try:
+                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                        except Exception:
+                            pass
                     await state.finish()
                     RUNNING_CHATS.discard(chat_id)
                     return
