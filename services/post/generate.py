@@ -15,6 +15,7 @@ from typing import Callable, Optional, Type, Any
 import os
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.models import get_model
@@ -433,8 +434,19 @@ def generate_post(
                 rec = rec_res.final_output  # type: ignore
                 return p, rec, notes
 
-            # Sequential processing to avoid nested event loop conflicts
-            results = [process_point_sync(p) for p in (points or [])]
+            # Parallelize across points using threads (Runner.run_sync is synchronous)
+            # Bound concurrency by research_concurrency to avoid provider rate limits
+            results = []
+            if points:
+                max_workers = max(1, int(research_concurrency))
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    future_map = {pool.submit(process_point_sync, p): p for p in points}
+                    for fut in as_completed(list(future_map.keys())):
+                        try:
+                            results.append(fut.result())
+                        except Exception:
+                            # Skip failed point; continue others
+                            pass
 
             class _SimpleItem:
                 def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
