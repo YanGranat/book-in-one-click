@@ -619,28 +619,22 @@ def generate_post(
             )
             return p, rec, notes
 
-        async def process_all(points_list):
-            sem = asyncio.Semaphore(max(1, int(research_concurrency)))
-
-            async def worker(p):
-                async with sem:
-                    return await process_point_async(p)
-
-            tasks = [asyncio.create_task(worker(p)) for p in points_list]
-            results = []
-            for t in asyncio.as_completed(tasks):
-                results.append(await t)
-            return results
-
-        # For non-openai providers concurrency brings little benefit; run sequentially
-        if _prov == "openai":
-            results = [process_point_sync(p) for p in (points or [])]
-            results = [process_point_sync(p) for p in (points or [])]
-        else:
-            seq_results = []
-            for p in points or []:
-                seq_results.append(process_point_sync(p))
-            results = seq_results
+        # Process all points sequentially for non-OpenAI providers (with DuckDuckGo)
+        results = []
+        # Ensure we have an event loop for async operations
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        for p in points or []:
+            try:
+                result = loop.run_until_complete(process_point_async(p))
+                results.append(result)
+            except Exception:
+                # Skip failed point; continue others
+                pass
 
         class _SimpleItem:
             def __init__(self, claim_text: str, verdict: str, reason: str):
