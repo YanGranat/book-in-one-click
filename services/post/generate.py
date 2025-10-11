@@ -365,23 +365,25 @@ def generate_post(
             rec_agent = build_recommendation_agent()
             synth_agent = build_query_synthesizer_agent()
 
-            async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+            def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
                 for i in range(attempts):
                     try:
-                        return await Runner.run(agent, inp)
+                        return Runner.run_sync(agent, inp)
                     except Exception:
                         if i == attempts - 1:
                             raise
-                        await asyncio.sleep(base_delay * (2 ** i))
+                        time.sleep(base_delay * (2 ** i))
 
-            async def process_point_async(p):
-                # Query synthesis
+            def process_point_sync(p):
+                # Query synthesis (best-effort, result is not used directly beyond validation)
                 cfg_pref = ",".join(pref)
-                qp_res = await _run_with_retries(
-                    synth_agent,
-                    f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
-                )  # type: ignore
-                _ = qp_res.final_output
+                try:
+                    _ = _run_sync_with_retries(
+                        synth_agent,
+                        f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
+                    ).final_output  # type: ignore
+                except Exception:
+                    _ = None
 
                 notes = []
                 for step in range(1, max(1, int(research_iterations)) + 1):
@@ -391,8 +393,8 @@ def generate_post(
                         f"<step>{step}</step>\n"
                         "</input>"
                     )
-                    note_res = await _run_with_retries(research_agent, rr_input)  # type: ignore
-                    note = note_res.final_output
+                    note_res = _run_sync_with_retries(research_agent, rr_input)
+                    note = note_res.final_output  # type: ignore
                     notes.append(note)
 
                     suff_input = (
@@ -401,8 +403,8 @@ def generate_post(
                         f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
                         "</input>"
                     )
-                    decision_res = await _run_with_retries(suff_agent, suff_input)  # type: ignore
-                    decision = decision_res.final_output
+                    decision_res = _run_sync_with_retries(suff_agent, suff_input)
+                    decision = decision_res.final_output  # type: ignore
                     if decision.done:
                         break
 
@@ -424,31 +426,15 @@ def generate_post(
                         )
 
                 rr = _TmpReport(p.id, notes)
-                rec_res = await _run_with_retries(
+                rec_res = _run_sync_with_retries(
                     rec_agent,
                     f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
-                )  # type: ignore
-                rec = rec_res.final_output
+                )
+                rec = rec_res.final_output  # type: ignore
                 return p, rec, notes
 
-            async def process_all(points_list):
-                sem = asyncio.Semaphore(max(1, int(research_concurrency)))
-
-                async def worker(p):
-                    async with sem:
-                        return await process_point_async(p)
-
-                tasks = [asyncio.create_task(worker(p)) for p in points_list]
-                results = []
-                for t in asyncio.as_completed(tasks):
-                    results.append(await t)
-                return results
-
-            def _run_in_current_loop(factory):
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(factory())
-
-            results = _run_in_current_loop(lambda: process_all(points)) if points else []
+            # Sequential processing to avoid nested event loop conflicts
+            results = [process_point_sync(p) for p in (points or [])]
 
             class _SimpleItem:
                 def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
@@ -640,11 +626,12 @@ def generate_post(
 
         # For non-openai providers concurrency brings little benefit; run sequentially
         if _prov == "openai":
-            results = _run_in_current_loop(lambda: process_all(points)) if points else []
+            results = [process_point_sync(p) for p in (points or [])]
+            results = [process_point_sync(p) for p in (points or [])]
         else:
             seq_results = []
             for p in points or []:
-                seq_results.append(_run_in_current_loop(lambda p=p: process_point_async(p)))
+                seq_results.append(process_point_sync(p))
             results = seq_results
 
         class _SimpleItem:

@@ -2367,8 +2367,13 @@ def create_dispatcher() -> Dispatcher:
                             "done": "Готово." if _is_ru(ui_lang) else "Done.",
                         }.get(stage)
                         if txt:
-                            # Fire-and-forget
-                            asyncio.create_task(message.answer(txt))
+                            # Schedule send on main loop safely from executor thread
+                            try:
+                                import asyncio as _aio
+                                loop_main = _aio.get_running_loop()
+                                loop_main.create_task(message.answer(txt))
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
