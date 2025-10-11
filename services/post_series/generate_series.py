@@ -189,7 +189,7 @@ def generate_series(
     iterations = max(0, int(max_iterations))
     for i in range(iterations):
         p_suff = _load_prompt("module_01_planning/sufficiency.md")
-        suff_user = f"<input>\n<topic>{topic}</topic>\n<ideas_json>{PostIdeaList(items=ideas).model_dump_json()}</ideas_json>\n</input>"
+        suff_user = f"<input>\n<topic>{topic}</topic>\n<ideas_json>{PostIdeaList(items=ideas).model_dump_json()}</ideas_json>\n<lang>{(lang or 'auto').strip()}</lang>\n</input>"
         speed = "heavy" if i + 1 > int(sufficiency_heavy_after) else "fast"
         suff = pr.run_json(p_suff, suff_user, ListSufficiency, speed=speed)
         log("🧪 Sufficiency", f"```json\n{suff.model_dump_json()}\n```")
@@ -204,6 +204,7 @@ def generate_series(
             f"<ideas_json>{PostIdeaList(items=ideas).model_dump_json()}</ideas_json>\n"
             f"<missing_areas_json>{json.dumps(missing, ensure_ascii=False)}</missing_areas_json>\n"
             f"<needed>{needed}</needed>\n"
+            f"<lang>{(lang or 'auto').strip()}</lang>\n"
             "</input>"
         )
         ext = pr.run_json(p_ext, ext_user, ExtendResponse, speed="fast")

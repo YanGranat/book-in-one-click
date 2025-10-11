@@ -7,12 +7,14 @@
 - ideas: PostIdeaList.items[]
 - missing_areas[]
 - needed: целое число (опционально) — сколько минимум новых уникальных идей требуется добавить
+- lang: ru|en|auto
 </input>
 
 <guidelines>
 - Новые идеи должны быть интересными, уникальными по title/angle/tags.
 - Отдавай предпочтение покрытию missing_areas; при недостатке — добавляй новые достойные углы.
 - Соблюдай стиль id: tNN, начиная с следующего номера без пропусков.
+- Если lang=auto — используй язык topic для генерации title/angle/tags.
 </guidelines>
 
 <output>
