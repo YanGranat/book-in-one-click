@@ -134,7 +134,7 @@ async def _startup():
     import asyncio
     import concurrent.futures
     try:
-        max_workers = int(os.getenv("BOT_WORKERS", "16"))
+        max_workers = int(os.getenv("BOT_WORKERS", "32"))
     except Exception:
         max_workers = 16
     try:

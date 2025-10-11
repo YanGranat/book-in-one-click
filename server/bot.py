@@ -15,6 +15,7 @@ except Exception:
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardRemove
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 
 from utils.env import load_env_from_root
 # i18n and language detection
@@ -151,9 +152,9 @@ def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
 
 
 def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: bool, logs_enabled: bool, incognito: bool, fc_enabled: bool, fc_depth: int, *, is_admin: bool = True, is_superadmin: bool = False) -> InlineKeyboardMarkup:
+    # Legacy builder kept for compatibility; not used by new menu
     kb = InlineKeyboardMarkup()
     ru = _is_ru(ui_lang)
-    # Provider row (superadmin only)
     if is_superadmin:
         kb.add(
             InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if provider == "auto" else "")), callback_data="set:provider:auto"),
@@ -161,25 +162,40 @@ def build_settings_keyboard(ui_lang: str, provider: str, gen_lang: str, refine: 
             InlineKeyboardButton(text=("Gemini" + (" ✓" if provider == "gemini" else "")), callback_data="set:provider:gemini"),
             InlineKeyboardButton(text=("Claude" + (" ✓" if provider == "claude" else "")), callback_data="set:provider:claude"),
         )
-    # Generation language row (order: Auto | EN | RU)
     kb.add(
         InlineKeyboardButton(text=(("Авто" if ru else "Auto") + (" ✓" if gen_lang == "auto" else "")), callback_data="set:gen_lang:auto"),
         InlineKeyboardButton(text=("EN" + (" ✓" if gen_lang == "en" else "")), callback_data="set:gen_lang:en"),
         InlineKeyboardButton(text=("RU" + (" ✓" if gen_lang == "ru" else "")), callback_data="set:gen_lang:ru"),
     )
-    # Refine controls removed from settings (handled during generation)
-    # Logs row (admins/superadmins only)
     if is_admin or is_superadmin:
         kb.add(
             InlineKeyboardButton(text=(("Логи: вкл" if ru else "Logs: on") + (" ✓" if logs_enabled else "")), callback_data="set:logs:enable"),
             InlineKeyboardButton(text=(("Логи: выкл" if ru else "Logs: off") + (" ✓" if not logs_enabled else "")), callback_data="set:logs:disable"),
         )
-    # Public results row
     kb.add(
         InlineKeyboardButton(text=(("Публично: да" if ru else "Public: yes") + (" ✓" if not incognito else "")), callback_data="set:incog:disable"),
         InlineKeyboardButton(text=(("Публично: нет" if ru else "Public: no") + (" ✓" if incognito else "")), callback_data="set:incog:enable"),
     )
-    # Fact-check controls removed from settings (handled during generation)
+    return kb
+
+def build_settings_main_menu(ui_lang: str, *, is_admin: bool, is_superadmin: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    ru = _is_ru(ui_lang)
+    # Generation language for all
+    kb.add(InlineKeyboardButton(text=("Язык генерации" if ru else "Generation language"), callback_data="settings:open:gen_lang"))
+    # Logs for admins/superadmins
+    if is_admin or is_superadmin:
+        kb.add(InlineKeyboardButton(text=("Логи генерации" if ru else "Generation logs"), callback_data="settings:open:logs"))
+    # Public results for all
+    kb.add(InlineKeyboardButton(text=("Публичные результаты" if ru else "Public results"), callback_data="settings:open:public"))
+    # Provider only for superadmin
+    if is_superadmin:
+        kb.add(InlineKeyboardButton(text=("Провайдер" if ru else "Provider"), callback_data="settings:open:provider"))
+    return kb
+
+def build_back_only(ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
     return kb
 
 
@@ -227,6 +243,84 @@ def build_enable_disable_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
         kb.add(InlineKeyboardButton(text="Enable", callback_data=f"set:{tag}:enable"))
         kb.add(InlineKeyboardButton(text="Disable", callback_data=f"set:{tag}:disable"))
     return kb
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("settings:open:"))  # type: ignore
+    async def cb_settings_open(query: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        section = (query.data or "").split(":")[-1]
+        await query.answer()
+        # Open submenus with a Back button; actual toggles reuse existing callbacks
+        if section == "provider":
+            from .bot_commands import SUPER_ADMIN_ID
+            if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
+                return
+            kb = InlineKeyboardMarkup()
+            for row in build_provider_inline().inline_keyboard:
+                try:
+                    kb.row(*row)
+                except Exception:
+                    for b in row:
+                        kb.add(b)
+            kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
+            await state.update_data(settings_view="provider")
+            if query.message:
+                await query.message.edit_text(("Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"), reply_markup=kb)
+            return
+        if section == "gen_lang":
+            kb = build_genlang_inline(ui_lang)
+            # Add back button below
+            back = build_back_only(ui_lang)
+            try:
+                for row in back.inline_keyboard:
+                    for b in row:
+                        kb.add(b)
+            except Exception:
+                pass
+            await state.update_data(settings_view="gen_lang")
+            if query.message:
+                await query.message.edit_text(("Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"), reply_markup=kb)
+            return
+        if section == "logs":
+            kb = build_enable_disable_inline("logs", ui_lang)
+            # Add back button
+            back = build_back_only(ui_lang)
+            try:
+                for row in back.inline_keyboard:
+                    for b in row:
+                        kb.add(b)
+            except Exception:
+                pass
+            await state.update_data(settings_view="logs")
+            if query.message:
+                await query.message.edit_text(("Отправлять логи генерации?" if _is_ru(ui_lang) else "Send generation logs?"), reply_markup=kb)
+            return
+        if section == "public":
+            kb = build_yesno_inline("incog", ui_lang)
+            back = build_back_only(ui_lang)
+            try:
+                for row in back.inline_keyboard:
+                    for b in row:
+                        kb.add(b)
+            except Exception:
+                pass
+            await state.update_data(settings_view="public")
+            if query.message:
+                await query.message.edit_text(("Сделать результаты публичными?" if _is_ru(ui_lang) else "Make results public?"), reply_markup=kb)
+            return
+
+    @dp.callback_query_handler(lambda c: c.data == "settings:back")  # type: ignore
+    async def cb_settings_back(query: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+        is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+        await state.update_data(settings_view="main")
+        kb = build_settings_main_menu(ui_lang, is_admin=is_admin, is_superadmin=is_superadmin)
+        await query.answer()
+        if query.message:
+            await query.message.edit_text(("Настройки" if _is_ru(ui_lang) else "Settings"), reply_markup=kb)
 
 
 def build_yesno_inline(tag: str, ui_lang: str) -> InlineKeyboardMarkup:
@@ -308,7 +402,7 @@ def create_dispatcher() -> Dispatcher:
     RUNNING_CHATS: Set[int] = set()
     # Optional global concurrency limit (5–10 parallel jobs target)
     import asyncio
-    _sem_capacity = int(os.getenv("BOT_PARALLEL_LIMIT", "12"))
+    _sem_capacity = int(os.getenv("BOT_PARALLEL_LIMIT", "24"))
     GLOBAL_SEMAPHORE = asyncio.Semaphore(max(1, _sem_capacity))
 
     @dp.message_handler(commands=["start"])  # type: ignore
@@ -459,11 +553,13 @@ def create_dispatcher() -> Dispatcher:
             is_superadmin = False
             is_admin = False
 
-        # Intro paragraph (simplified)
+        # Intro with title
         intro_ru = (
+            "<b>Добро пожаловать в Book in one click!</b>\n\n"
             "Это бот для генерации научно‑популярного контента.\n\n"
         )
         intro_en = (
+            "<b>Welcome to Book in one click!</b>\n\n"
             "This bot generates popular‑science content.\n\n"
         )
 
@@ -508,11 +604,13 @@ def create_dispatcher() -> Dispatcher:
                 "<b>Результаты:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n\n"
             )
+            logs_line_ru = (f"\n- Логи генерации: {'вкл' if logs_enabled else 'выкл'}" if (is_superadmin or is_admin) else "")
             settings_block = (
                 "<b>Текущие настройки:</b>\n"
                 f"- Провайдер: {_prov_name(prov, True)}\n"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Публичные результаты: {'да' if not incognito else 'нет'}"
+                f"{logs_line_ru}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
             )
             text = intro_ru + commands_block + results_block + settings_block
@@ -556,11 +654,13 @@ def create_dispatcher() -> Dispatcher:
                 "<b>Results:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n\n"
             )
+            logs_line_en = (f"\n- Generation logs: {'on' if logs_enabled else 'off'}" if (is_superadmin or is_admin) else "")
             settings_block = (
                 "<b>Current settings:</b>\n"
                 f"- Provider: {_prov_name(prov, False)}\n"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Public results: {'yes' if not incognito else 'no'}"
+                f"{logs_line_en}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
             )
             text = intro_en + commands_block + results_block + settings_block
@@ -610,9 +710,18 @@ def create_dispatcher() -> Dispatcher:
             await query.answer()
         except Exception:
             pass
-        in_settings = bool((await state.get_data()).get("in_settings"))
+        cur = await state.get_data()
+        in_settings = bool(cur.get("in_settings"))
+        settings_view = cur.get("settings_view")
         if in_settings and query.message:
-            # Re-render settings keyboard in-place to reflect selection
+            # When in new settings UI, show back button only for gen_lang
+            if settings_view == "gen_lang":
+                try:
+                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                except Exception:
+                    pass
+                return
+            # Legacy inline panel refresh fallback
             try:
                 user_id = query.from_user.id
                 prov_cur = await get_provider(user_id)
@@ -675,7 +784,16 @@ def create_dispatcher() -> Dispatcher:
             await message.answer("Недоступно." if ui_lang == "ru" else "Not available.")
             return
         prompt = "Выберите провайдера:" if ui_lang == "ru" else "Choose provider:"
-        await message.answer(prompt, reply_markup=build_provider_inline())
+        kb = InlineKeyboardMarkup()
+        for row in build_provider_inline().inline_keyboard:
+            try:
+                kb.row(*row)
+            except Exception:
+                for b in row:
+                    kb.add(b)
+        kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
+        await state.update_data(settings_view="provider")
+        await message.answer(prompt, reply_markup=kb)
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:provider:"))  # type: ignore
     async def cb_set_provider(query: types.CallbackQuery, state: FSMContext):
@@ -706,25 +824,32 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await query.answer()
-        in_settings = bool((await state.get_data()).get("in_settings"))
+        cur = await state.get_data()
+        in_settings = bool(cur.get("in_settings"))
+        settings_view = cur.get("settings_view")
         if in_settings and query.message:
-            # Re-render settings panel in-place
-            try:
-                user_id = query.from_user.id
-                prov_cur = await get_provider(user_id)
-                gen_lang = await get_gen_lang(user_id)
-                refine = await get_refine_enabled(user_id)
-                logs_enabled = await get_logs_enabled(user_id)
-                incognito = await get_incognito(user_id)
-                fc_enabled = await get_factcheck_enabled(user_id)
-                fc_depth = await get_factcheck_depth(user_id)
-            except Exception:
-                prov_cur = prov; gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
-            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
-            from .bot_commands import SUPER_ADMIN_ID
-            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
-            await query.message.edit_reply_markup(reply_markup=kb)
+            if settings_view == "provider":
+                try:
+                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                except Exception:
+                    pass
+            else:
+                try:
+                    user_id = query.from_user.id
+                    prov_cur = await get_provider(user_id)
+                    gen_lang = await get_gen_lang(user_id)
+                    refine = await get_refine_enabled(user_id)
+                    logs_enabled = await get_logs_enabled(user_id)
+                    incognito = await get_incognito(user_id)
+                    fc_enabled = await get_factcheck_enabled(user_id)
+                    fc_depth = await get_factcheck_depth(user_id)
+                except Exception:
+                    prov_cur = prov; gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=False; fc_enabled=False; fc_depth=2
+                is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+                from .bot_commands import SUPER_ADMIN_ID
+                is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+                kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
+                await query.message.edit_reply_markup(reply_markup=kb)
         else:
             # Onboarding continues after provider
             await query.message.edit_reply_markup() if query.message else None
@@ -988,40 +1113,14 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_settings(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        prov = (data.get("provider") or "openai").strip().lower()
-        gen_lang = (data.get("gen_lang") or "auto").strip().lower()
-        try:
-            if message.from_user:
-                prov = await get_provider(message.from_user.id)
-                gen_lang = await get_gen_lang(message.from_user.id)
-                logs_enabled = await get_logs_enabled(message.from_user.id)
-                incognito = await get_incognito(message.from_user.id)
-                # Superadmin-only flags still loaded to mark current state, but not shown as controls
-                refine = await get_refine_enabled(message.from_user.id)
-                fc_enabled = await get_factcheck_enabled(message.from_user.id)
-                fc_depth = await get_factcheck_depth(message.from_user.id)
-            else:
-                refine = False; logs_enabled = False; incognito = False; fc_enabled = False; fc_depth = 2
-        except Exception:
-            refine = False; logs_enabled = False; incognito = False; fc_enabled = False; fc_depth = 2
-        await state.update_data(in_settings=True)
+        await state.update_data(in_settings=True, settings_view="main")
         from .bot_commands import SUPER_ADMIN_ID
         is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         ru = _is_ru(ui_lang)
-        # Build descriptive header text
-        header_lines = []
-        header_lines.append("Настройки" if ru else "Settings")
-        header_lines.append("")
-        header_lines.append("Язык генерации:" if ru else "Generation language:")
-        if is_superadmin:
-            header_lines.append("Провайдер:" if ru else "Provider:")
-        if is_admin or is_superadmin:
-            header_lines.append("Логи генерации:" if ru else "Generation logs:")
-        header_lines.append("Публичность результатов:" if ru else "Public results:")
-        # Send single message with labels and full keyboard
-        kb = build_settings_keyboard(ui_lang, prov, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin, is_superadmin=is_superadmin)
-        await message.answer("\n".join(header_lines), reply_markup=kb)
+        # Button-based settings main menu
+        kb = build_settings_main_menu(ui_lang, is_admin=is_admin, is_superadmin=is_superadmin)
+        await message.answer(("Настройки" if ru else "Settings"), reply_markup=kb)
 
     @dp.message_handler(commands=["logs"])  # type: ignore
     async def cmd_logs(message: types.Message, state: FSMContext):
@@ -1048,25 +1147,32 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await query.answer()
-        in_settings = bool((await state.get_data()).get("in_settings"))
+        cur = await state.get_data()
+        in_settings = bool(cur.get("in_settings"))
+        settings_view = cur.get("settings_view")
         if in_settings and query.message:
-            # Re-render settings panel
-            try:
-                user_id = query.from_user.id
-                prov_cur = await get_provider(user_id)
-                gen_lang = await get_gen_lang(user_id)
-                refine = await get_refine_enabled(user_id)
-                logs_enabled = await get_logs_enabled(user_id)
-                incognito = await get_incognito(user_id)
-                fc_enabled = await get_factcheck_enabled(user_id)
-                fc_depth = await get_factcheck_depth(user_id)
-            except Exception:
-                prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=enabled; incognito=False; fc_enabled=False; fc_depth=2
-            # Role flags not needed for rendering; provide false for admin and compute superadmin flag for provider/refine visibility
-            from .bot_commands import SUPER_ADMIN_ID
-            is_superadmin_local = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=False, is_superadmin=is_superadmin_local)
-            await query.message.edit_reply_markup(reply_markup=kb)
+            # If inside new logs submenu, show back button
+            if settings_view == "logs":
+                try:
+                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                except Exception:
+                    pass
+            else:
+                try:
+                    user_id = query.from_user.id
+                    prov_cur = await get_provider(user_id)
+                    gen_lang = await get_gen_lang(user_id)
+                    refine = await get_refine_enabled(user_id)
+                    logs_enabled = await get_logs_enabled(user_id)
+                    incognito = await get_incognito(user_id)
+                    fc_enabled = await get_factcheck_enabled(user_id)
+                    fc_depth = await get_factcheck_depth(user_id)
+                except Exception:
+                    prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=enabled; incognito=False; fc_enabled=False; fc_depth=2
+                from .bot_commands import SUPER_ADMIN_ID
+                is_superadmin_local = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+                kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=False, is_superadmin=is_superadmin_local)
+                await query.message.edit_reply_markup(reply_markup=kb)
         else:
             # Onboarding continues: after logs → incognito toggle
             msg = "Логи включены." if (enabled and ui_lang=="ru") else ("Logs enabled." if enabled else ("Логи отключены." if ui_lang=="ru" else "Logs disabled."))
@@ -1108,24 +1214,31 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await query.answer()
-        in_settings = bool((await state.get_data()).get("in_settings"))
+        cur = await state.get_data()
+        in_settings = bool(cur.get("in_settings"))
+        settings_view = cur.get("settings_view")
         if in_settings and query.message:
-            try:
-                user_id = query.from_user.id
-                prov_cur = await get_provider(user_id)
-                gen_lang = await get_gen_lang(user_id)
-                refine = await get_refine_enabled(user_id)
-                logs_enabled = await get_logs_enabled(user_id)
-                incognito = await get_incognito(user_id)
-                fc_enabled = await get_factcheck_enabled(user_id)
-                fc_depth = await get_factcheck_depth(user_id)
-            except Exception:
-                prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=enabled; fc_enabled=False; fc_depth=2
-            is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
-            is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
-            is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
-            kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
-            await query.message.edit_reply_markup(reply_markup=kb)
+            if settings_view == "public":
+                try:
+                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                except Exception:
+                    pass
+            else:
+                try:
+                    user_id = query.from_user.id
+                    prov_cur = await get_provider(user_id)
+                    gen_lang = await get_gen_lang(user_id)
+                    refine = await get_refine_enabled(user_id)
+                    logs_enabled = await get_logs_enabled(user_id)
+                    incognito = await get_incognito(user_id)
+                    fc_enabled = await get_factcheck_enabled(user_id)
+                    fc_depth = await get_factcheck_depth(user_id)
+                except Exception:
+                    prov_cur = (data.get("provider") or "openai"); gen_lang = (data.get("gen_lang") or "auto"); refine=False; logs_enabled=False; incognito=enabled; fc_enabled=False; fc_depth=2
+                is_admin_local = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+                is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+                kb = build_settings_keyboard(ui_lang, prov_cur, gen_lang, refine, logs_enabled, incognito, fc_enabled, int(fc_depth), is_admin=is_admin_local, is_superadmin=is_superadmin)
+                await query.message.edit_reply_markup(reply_markup=kb)
         else:
             # Affirmative/negative public state
             msg = (
