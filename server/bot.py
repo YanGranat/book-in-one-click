@@ -3022,7 +3022,8 @@ def create_dispatcher() -> Dispatcher:
                 async with SessionLocal() as _s:
                     from sqlalchemy import or_ as _or
                     from .db import ResultDoc, Job, User
-                    # Resolve both legacy (Job.user_id == telegram_id) and normalized (Job.user_id == User.id)
+                    # Job.user_id ALWAYS stores User.id, not telegram_id directly
+                    # So we MUST resolve telegram_id -> User.id first
                     db_uid = None
                     try:
                         uq = await _s.execute(_select(User).where(User.telegram_id == int(message.from_user.id)))
@@ -3031,41 +3032,45 @@ def create_dispatcher() -> Dispatcher:
                             db_uid = int(urow.id)
                     except Exception:
                         db_uid = None
-                    jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
-                    cond = Job.user_id == int(message.from_user.id)
-                    if db_uid is not None:
-                        cond = _or(cond, Job.user_id == db_uid)
-                    res = await _s.execute(
-                        _select(ResultDoc, Job.user_id)
-                        .select_from(jn)
-                        .where(cond)
-                        .order_by(ResultDoc.created_at.desc())
-                        .limit(50)
-                    )
-                    rows = res.fetchall()
-                    # Filter by last clear ts if exists
-                    cleared_ts = None
-                    try:
-                        from .kv import get_history_cleared_at
-                        cleared_ts = await get_history_cleared_at(message.from_user.id)
-                    except Exception:
+                    
+                    # If User not found, history will be empty (as it should be - no generations yet)
+                    if db_uid is None:
+                        items = []
+                    else:
+                        jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
+                        cond = Job.user_id == db_uid
+                        res = await _s.execute(
+                            _select(ResultDoc, Job.user_id)
+                            .select_from(jn)
+                            .where(cond)
+                            .order_by(ResultDoc.created_at.desc())
+                            .limit(50)
+                        )
+                        rows = res.fetchall()
+                        # Filter by last clear ts if exists
                         cleared_ts = None
-                    for rdoc, _uid in rows:
                         try:
-                            if cleared_ts is not None:
-                                # Skip results created before clear mark
-                                if getattr(rdoc, "created_at", None) is not None and float(cleared_ts) > 0:
-                                    if rdoc.created_at.timestamp() < float(cleared_ts):
-                                        continue
+                            from .kv import get_history_cleared_at
+                            cleared_ts = await get_history_cleared_at(message.from_user.id)
                         except Exception:
-                            pass
-                        items.append({
-                            "id": int(rdoc.id),
-                            "kind": getattr(rdoc, "kind", "") or "",
-                            "topic": getattr(rdoc, "topic", "") or "",
-                            "hidden": int(getattr(rdoc, "hidden", 0) or 0),
-                        })
-        except Exception:
+                            cleared_ts = None
+                        for rdoc, _uid in rows:
+                            try:
+                                if cleared_ts is not None:
+                                    # Skip results created before clear mark
+                                    if getattr(rdoc, "created_at", None) is not None and float(cleared_ts) > 0:
+                                        if rdoc.created_at.timestamp() < float(cleared_ts):
+                                            continue
+                            except Exception:
+                                pass
+                            items.append({
+                                "id": int(rdoc.id),
+                                "kind": getattr(rdoc, "kind", "") or "",
+                                "topic": getattr(rdoc, "topic", "") or "",
+                                "hidden": int(getattr(rdoc, "hidden", 0) or 0),
+                            })
+        except Exception as e:
+            print(f"[ERROR] History fetch failed: {e}")
             items = []
         if not items:
             await message.answer("История пуста." if _is_ru(ui_lang) else "No history yet.")
@@ -3832,10 +3837,13 @@ def create_dispatcher() -> Dispatcher:
                         db_uid = int(urow.id)
                 except Exception:
                     db_uid = None
-                from sqlalchemy import or_ as _or
-                cond = (Job.user_id == int(message.from_user.id))
-                if db_uid is not None:
-                    cond = _or(cond, Job.user_id == db_uid)
+                
+                # Job.user_id ALWAYS stores User.id, not telegram_id
+                if db_uid is None:
+                    await message.answer("Нет результатов для контекста чата. Сначала сгенерируйте пост.")
+                    return
+                
+                cond = (Job.user_id == db_uid)
                 q = await s.execute(
                     select(ResultDoc, Job.user_id)
                     .select_from(ResultDoc.__table__.join(Job.__table__, ResultDoc.job_id == Job.id))
