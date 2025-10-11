@@ -193,14 +193,6 @@ async def init_db() -> None:
         except Exception:
             # Old table may not exist; ignore
             pass
-        # Migrate telegram_id from INTEGER to BIGINT to support large Telegram IDs
-        try:
-            await conn.execute(text(f"ALTER TABLE {_t('users')} ALTER COLUMN telegram_id TYPE BIGINT USING telegram_id::BIGINT"))
-            print("[INFO] Migrated telegram_id column to BIGINT")
-        except Exception as e:
-            # Already BIGINT or other error
-            print(f"[WARN] Could not migrate telegram_id to BIGINT: {type(e).__name__}: {str(e)[:200]}")
-            pass
 
 
 async def get_or_create_user(session: AsyncSession, telegram_id: int) -> User:

@@ -690,10 +690,6 @@ def generate_post(
             log("⬇️ Rewrite · Input", rw_input)
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
             log("🛠️ Rewrite · Output", final_content)
-        else:
-            log("✅ Rewrite skipped", "needs_rewrite=False, all items passed fact-check")
-    else:
-        log("✅ Rewrite skipped", "report=None, no fact-check issues found")
 
     from pathlib import Path
     if use_refine:
