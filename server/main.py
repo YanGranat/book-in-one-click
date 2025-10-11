@@ -1064,7 +1064,7 @@ async def list_meme_results():
 
 
 @app.get("/memes-ui", response_class=HTMLResponse)
-async def memes_ui(_: bool = Depends(require_admin)):
+async def memes_ui():
     items = await _list_meme_results()
     for it in items:
         try:
@@ -1235,7 +1235,7 @@ async def get_meme_result(res_id: int, _: bool = Depends(require_admin)):
 
 
 @app.get("/memes-ui/id/{res_id}", response_class=HTMLResponse)
-async def meme_result_view_ui_id(res_id: int, _: bool = Depends(require_admin)):
+async def meme_result_view_ui_id(res_id: int):
     # Reuse generic get_result to avoid divergence with results UI rendering
     data = await get_result(res_id)
     if isinstance(data, dict) and data.get("error"):
