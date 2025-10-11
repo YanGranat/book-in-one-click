@@ -660,9 +660,7 @@ def generate_post(
 
     # Rewrite and refine
     final_content = content
-    log("🔍 DEBUG report", f"report={'exists' if report is not None else 'None'}, type={type(report)}")
     if report is not None:
-        log("🔍 DEBUG items", f"items count={len(report.items)}, verdicts={[i.verdict for i in report.items]}")
         needs_rewrite = any(i.verdict != "pass" for i in report.items)
         if needs_rewrite:
             _emit("rewrite:init")
