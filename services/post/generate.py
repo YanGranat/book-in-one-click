@@ -47,7 +47,7 @@ def generate_post(
     factcheck: bool = True,
     factcheck_max_items: int = 0,
     research_iterations: int = 2,
-    research_concurrency: int = 4,  # Reduced from 6 to 4 for better multi-user stability
+    research_concurrency: int = 6,  # Parallel workers for fact-checking
     output_subdir: str = "post",
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
@@ -832,7 +832,8 @@ def generate_post(
                                     "factcheck": bool(factcheck),
                                     "refine": bool(use_refine),
                                 }
-                                jrow = _Job(user_id=(db_user_id or 0), type="post", status="done", params_json=__json.dumps(params, ensure_ascii=False), cost=1, file_path=str(filepath) if filepath else None)
+                                # Use db_user_id if available, otherwise fallback to telegram_id for legacy history compatibility
+                                jrow = _Job(user_id=(db_user_id or tg_uid or 0), type="post", status="done", params_json=__json.dumps(params, ensure_ascii=False), cost=1, file_path=str(filepath) if filepath else None)
                                 s.add(jrow)
                                 s.flush()
                                 result_job_id = int(getattr(jrow, "id", 0) or 0)
