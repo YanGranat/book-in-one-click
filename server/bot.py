@@ -2377,7 +2377,7 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     pass
 
-            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "900"))
+            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "1800"))
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
@@ -2386,7 +2386,7 @@ def create_dispatcher() -> Dispatcher:
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         factcheck=True,
-                        factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "8")),
+                        factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "16")),
                         research_iterations=int(depth or 2),
                         job_meta=job_meta,
                         on_progress=_on_progress,
@@ -2701,11 +2701,11 @@ def create_dispatcher() -> Dispatcher:
             if job_id:
                 job_meta["job_id"] = job_id
             await dp.bot.send_message(chat_id, "Генерирую…" if _is_ru(ui_lang) else "Working…")
-            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "900"))
+            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "1800"))
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
-                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "8")), research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
+                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "16")), research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
             else:
