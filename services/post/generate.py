@@ -344,7 +344,6 @@ def generate_post(
             from llm_agents.post.module_02_review.iterative_research import build_iterative_research_agent
             from llm_agents.post.module_02_review.recommendation import build_recommendation_agent
             from llm_agents.post.module_02_review.sufficiency import build_sufficiency_agent
-            from llm_agents.post.module_02_review.query_synthesizer import build_query_synthesizer_agent
             from utils.config import load_config
 
             _emit("factcheck:init")
@@ -359,12 +358,9 @@ def generate_post(
             except Exception:
                 pass
 
-            cfg = load_config(__file__)
-            pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
             research_agent = build_iterative_research_agent()
             suff_agent = build_sufficiency_agent()
             rec_agent = build_recommendation_agent()
-            synth_agent = build_query_synthesizer_agent()
 
             def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
                 for i in range(attempts):
@@ -376,15 +372,8 @@ def generate_post(
                         time.sleep(base_delay * (2 ** i))
 
             def process_point_sync(p):
-                # Query synthesis (best-effort, result is not used directly beyond validation)
-                cfg_pref = ",".join(pref)
-                try:
-                    _ = _run_sync_with_retries(
-                        synth_agent,
-                        f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
-                    ).final_output  # type: ignore
-                except Exception:
-                    _ = None
+                # Skip query synthesis for OpenAI - WebSearchTool handles this internally
+                # The agent will autonomously decide what to search for
 
                 notes = []
                 for step in range(1, max(1, int(research_iterations)) + 1):

@@ -2458,7 +2458,7 @@ def create_dispatcher() -> Dispatcher:
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         factcheck=True,
-                        factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "8")),
+                        factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "5")),
                         research_iterations=int(depth or 2),
                         job_meta=job_meta,
                         on_progress=_on_progress,
@@ -2843,7 +2843,7 @@ def create_dispatcher() -> Dispatcher:
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
-                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "16")), research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
+                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "5")), research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
             else:
