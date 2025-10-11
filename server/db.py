@@ -195,10 +195,11 @@ async def init_db() -> None:
             pass
         # Migrate telegram_id from INTEGER to BIGINT to support large Telegram IDs
         try:
-            await conn.execute(text(f"ALTER TABLE {_t('users')} ALTER COLUMN telegram_id TYPE BIGINT"))
+            await conn.execute(text(f"ALTER TABLE {_t('users')} ALTER COLUMN telegram_id TYPE BIGINT USING telegram_id::BIGINT"))
             print("[INFO] Migrated telegram_id column to BIGINT")
-        except Exception:
-            # Already BIGINT or other error - that's fine
+        except Exception as e:
+            # Already BIGINT or other error
+            print(f"[WARN] Could not migrate telegram_id to BIGINT: {type(e).__name__}: {str(e)[:200]}")
             pass
 
 
