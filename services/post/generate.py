@@ -562,129 +562,129 @@ def generate_post(
             p_rec = (base / "recommendation.md").read_text(encoding="utf-8")
             p_qs = (base / "query_synthesizer.md").read_text(encoding="utf-8")
 
-        async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
-            for i in range(attempts):
+            async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+                for i in range(attempts):
+                    try:
+                        return await Runner.run(agent, inp)
+                    except Exception:
+                        if i == attempts - 1:
+                            raise
+                        await asyncio.sleep(base_delay * (2 ** i))
+
+            async def process_point_async(p):
+                # Query synthesis
+                cfg_pref = ",".join(pref)
+                qp = run_json_with_provider(
+                    p_qs,
+                    f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
+                    QueryPack,
+                    speed="fast",
+                )
+                # Web context build (provider-agnostic)
+                queries = getattr(qp, "queries", []) or []
+                # Reduce external fetch workload to improve latency under rate limits
                 try:
-                    return await Runner.run(agent, inp)
+                    _per_q = int(os.getenv("FC_WEB_PER_QUERY", "1"))
                 except Exception:
-                    if i == attempts - 1:
-                        raise
-                    await asyncio.sleep(base_delay * (2 ** i))
+                    _per_q = 1
+                try:
+                    _max_chars = int(os.getenv("FC_WEB_MAX_CHARS", "1600"))
+                except Exception:
+                    _max_chars = 1600
+                web_ctx = build_search_context(queries, per_query=max(1, _per_q), max_chars=max(200, _max_chars))
+                if queries:
+                    log("🌐 Web · Queries", "\n".join([f"- {q}" for q in queries]))
+                # Extract sources (best-effort)
+                try:
+                    import re as _re
+                    urls = _re.findall(r"url=\"([^\"]+)\"", web_ctx)
+                    if urls:
+                        log("🌐 Web · Sources", "\n".join([f"- {u}" for u in urls[:20]]))
+                except Exception:
+                    pass
 
-        async def process_point_async(p):
-            # Query synthesis
-            cfg_pref = ",".join(pref)
-            qp = run_json_with_provider(
-                p_qs,
-                f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
-                QueryPack,
-                speed="fast",
-            )
-            # Web context build (provider-agnostic)
-            queries = getattr(qp, "queries", []) or []
-            # Reduce external fetch workload to improve latency under rate limits
-            try:
-                _per_q = int(os.getenv("FC_WEB_PER_QUERY", "1"))
-            except Exception:
-                _per_q = 1
-            try:
-                _max_chars = int(os.getenv("FC_WEB_MAX_CHARS", "1600"))
-            except Exception:
-                _max_chars = 1600
-            web_ctx = build_search_context(queries, per_query=max(1, _per_q), max_chars=max(200, _max_chars))
-            if queries:
-                log("🌐 Web · Queries", "\n".join([f"- {q}" for q in queries]))
-            # Extract sources (best-effort)
-            try:
-                import re as _re
-                urls = _re.findall(r"url=\"([^\"]+)\"", web_ctx)
-                if urls:
-                    log("🌐 Web · Sources", "\n".join([f"- {u}" for u in urls[:20]]))
-            except Exception:
-                pass
+                notes = []
+                for step in range(1, max(1, int(research_iterations)) + 1):
+                    rr_input = (
+                        "<input>\n"
+                        f"<point>{p.model_dump_json()}</point>\n"
+                        f"<step>{step}</step>\n"
+                        f"<web_context>\n{web_ctx}\n</web_context>\n"
+                        "</input>"
+                    )
+                    note = run_json_with_provider(p_iter or "", rr_input, ResearchIterationNote, speed="fast")
+                    notes.append(note)
 
-            notes = []
-            for step in range(1, max(1, int(research_iterations)) + 1):
-                rr_input = (
-                    "<input>\n"
-                    f"<point>{p.model_dump_json()}</point>\n"
-                    f"<step>{step}</step>\n"
-                    f"<web_context>\n{web_ctx}\n</web_context>\n"
-                    "</input>"
+                    suff_input = (
+                        "<input>\n"
+                        f"<point>{p.model_dump_json()}</point>\n"
+                        f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
+                        f"<lang>{lang}</lang>\n"
+                        "</input>"
+                    )
+                    decision = run_json_with_provider(p_suff or "", suff_input, SufficiencyDecision, speed="fast")
+                    if decision.done:
+                        break
+
+                rr = _TmpReport(p.id, notes)
+                rec = run_json_with_provider(
+                    p_rec or "",
+                    f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n<lang>{lang}</lang>\n</input>",
+                    Recommendation,
+                    speed="fast",
                 )
-                note = run_json_with_provider(p_iter or "", rr_input, ResearchIterationNote, speed="fast")
-                notes.append(note)
+                return p, rec, notes
 
-                suff_input = (
-                    "<input>\n"
-                    f"<point>{p.model_dump_json()}</point>\n"
-                    f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
-                    f"<lang>{lang}</lang>\n"
-                    "</input>"
-                )
-                decision = run_json_with_provider(p_suff or "", suff_input, SufficiencyDecision, speed="fast")
-                if decision.done:
-                    break
-
-            rr = _TmpReport(p.id, notes)
-            rec = run_json_with_provider(
-                p_rec or "",
-                f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n<lang>{lang}</lang>\n</input>",
-                Recommendation,
-                speed="fast",
-            )
-            return p, rec, notes
-
-        # Process all points sequentially for non-OpenAI providers (with DuckDuckGo)
-        results = []
-        # Ensure we have an event loop for async operations
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        log("🔍 DEBUG non-OpenAI", f"Processing {len(points or [])} points")
-        for p in points or []:
+            # Process all points sequentially for non-OpenAI providers (with DuckDuckGo)
+            results = []
+            # Ensure we have an event loop for async operations
             try:
-                result = loop.run_until_complete(process_point_async(p))
-                results.append(result)
-                log("✓ Point processed", f"{p.id}: {p.text[:60]}...")
-            except Exception as e:
-                log("✗ Point failed", f"{p.id}: {str(e)[:200]}")
-                pass
-
-        log("🔍 Processing complete", f"successful={len(results)}/{len(points or [])}")
-
-        simple_items = []
-        kept_count = 0
-        log("🔍 DEBUG results", f"Processing {len(results)} results")
-        for (p, r, notes) in results:
-            action = getattr(r, "action", "keep")
-            log("🔍 DEBUG result", f"point_id={p.id}, action={action}")
-            if action == "keep":
-                kept_count += 1
-                continue  # confirmed parts не передаём в переписывание
-            if r.action == "clarify":
-                verdict = "uncertain"
-            elif r.action == "rewrite" or r.action == "remove":
-                verdict = "fail"
-            else:
-                verdict = "fail"
-            reason = getattr(r, "explanation", "") or ""
-            simple_items.append(_SimpleItem(p.text, verdict, reason))
-
-        log("🔍 DEBUG summary", f"kept_count={kept_count}, simple_items_count={len(simple_items)}")
-        if kept_count > 0:
-            log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
         
-        log("🔍 DEBUG creating report", f"simple_items={len(simple_items)} items")
-        report = _SimpleReport(simple_items) if simple_items else None
-        log("🔍 DEBUG report created", f"report={'exists' if report is not None else 'None'}, type={type(report).__name__}")
+            log("🔍 DEBUG non-OpenAI", f"Processing {len(points or [])} points")
+            for p in points or []:
+                try:
+                    result = loop.run_until_complete(process_point_async(p))
+                    results.append(result)
+                    log("✓ Point processed", f"{p.id}: {p.text[:60]}...")
+                except Exception as e:
+                    log("✗ Point failed", f"{p.id}: {str(e)[:200]}")
+                    pass
+
+            log("🔍 Processing complete", f"successful={len(results)}/{len(points or [])}")
+
+            simple_items = []
+            kept_count = 0
+            log("🔍 DEBUG results", f"Processing {len(results)} results")
+            for (p, r, notes) in results:
+                action = getattr(r, "action", "keep")
+                log("🔍 DEBUG result", f"point_id={p.id}, action={action}")
+                if action == "keep":
+                    kept_count += 1
+                    continue  # confirmed parts не передаём в переписывание
+                if r.action == "clarify":
+                    verdict = "uncertain"
+                elif r.action == "rewrite" or r.action == "remove":
+                    verdict = "fail"
+                else:
+                    verdict = "fail"
+                reason = getattr(r, "explanation", "") or ""
+                simple_items.append(_SimpleItem(p.text, verdict, reason))
+
+            log("🔍 DEBUG summary", f"kept_count={kept_count}, simple_items_count={len(simple_items)}")
+            if kept_count > 0:
+                log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
         
-        if report is not None:
-            log("🔍 DEBUG report items", f"report.items count={len(report.items)}")
-            log("factcheck_summary", report.model_dump_json())
+            log("🔍 DEBUG creating report", f"simple_items={len(simple_items)} items")
+            report = _SimpleReport(simple_items) if simple_items else None
+            log("🔍 DEBUG report created", f"report={'exists' if report is not None else 'None'}, type={type(report).__name__}")
+        
+            if report is not None:
+                log("🔍 DEBUG report items", f"report.items count={len(report.items)}")
+                log("factcheck_summary", report.model_dump_json())
 
     # Rewrite and refine
     final_content = content
