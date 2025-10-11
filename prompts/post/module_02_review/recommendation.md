@@ -5,6 +5,7 @@
 <input>
 - point: {id, text}
 - report: ResearchReport
+- lang: язык (ru/en/auto)
 </input>
 
 <guidelines>
@@ -14,6 +15,7 @@
 - "remove" если утверждение ошибочно/недостоверно/без опоры или сильно вводит в заблуждение.
 - Допустимы только эти 4 значения action: keep | clarify | rewrite | remove.
 - **explanation должен быть лаконичным (2-3 предложения, максимум 100-150 слов)**: только суть проблемы и что нужно исправить, без пространных рассуждений.
+- **explanation пиши на языке из параметра lang. Если lang=auto, используй язык point.text.**
 </guidelines>
 
 <output>

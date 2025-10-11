@@ -349,7 +349,7 @@ def generate_post(
 
             _emit("factcheck:init")
             identify_agent = build_identify_points_agent()
-            identify_result = Runner.run_sync(identify_agent, f"<post>\n{content}\n</post>")
+            identify_result = Runner.run_sync(identify_agent, f"<post>\n{content}\n</post>\n<lang>{lang}</lang>")
             plan = identify_result.final_output  # type: ignore
             points = plan.points or []
             if factcheck_max_items and factcheck_max_items > 0:
@@ -504,7 +504,7 @@ def generate_post(
             plan = run_json_with_provider(
                 p_ident
                 + "\n\n<format>\nВерни строго JSON-объект ResearchPlan без пояснений.\n</format>\n",
-                f"<post>\n{content}\n</post>",
+                f"<post>\n{content}\n</post>\n<lang>{lang}</lang>",
                 ResearchPlan,
                 speed="fast",
             )
@@ -520,7 +520,7 @@ def generate_post(
                         + "- Пункты атомарные, конкретные (факт/цифра/датировка/причинно-следственная связь).\n"
                         + "</requirements>\n"
                     )
-                    plan_heavy = run_json_with_provider(strict_ident, f"<post>\n{content}\n</post>", ResearchPlan, speed="heavy")
+                    plan_heavy = run_json_with_provider(strict_ident, f"<post>\n{content}\n</post>\n<lang>{lang}</lang>", ResearchPlan, speed="heavy")
                     points = plan_heavy.points or []
                     try:
                         log("🔎 Fact-check · Plan (fallback)", f"points={len(points)}")
@@ -600,6 +600,7 @@ def generate_post(
                     "<input>\n"
                     f"<point>{p.model_dump_json()}</point>\n"
                     f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
+                    f"<lang>{lang}</lang>\n"
                     "</input>"
                 )
                 decision = run_json_with_provider(p_suff or "", suff_input, SufficiencyDecision, speed="fast")
@@ -626,7 +627,7 @@ def generate_post(
             rr = _TmpReport(p.id, notes)
             rec = run_json_with_provider(
                 p_rec or "",
-                f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
+                f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n<lang>{lang}</lang>\n</input>",
                 Recommendation,
                 speed="fast",
             )
