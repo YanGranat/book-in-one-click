@@ -1094,6 +1094,48 @@ async def memes_ui(_: bool = Depends(require_admin)):
     return HTMLResponse(content=html)
 
 
+@app.post("/memes-admin/backfill")
+async def memes_backfill(_: bool = Depends(require_admin)):
+    """
+    One-time/maintenance endpoint: backfill DB content for meme_extract results
+    that have empty content but still have a filesystem path. This unblocks
+    blank detail pages created before DB-content persistence was added.
+    """
+    if SessionLocal is None:
+        return {"ok": False, "error": "db not configured"}
+    fixed = 0
+    skipped = 0
+    try:
+        async with SessionLocal() as s:
+            from sqlalchemy import select, update
+            res = await s.execute(select(ResultDoc).where(ResultDoc.kind == "meme_extract"))
+            rows = res.scalars().all()
+            for r in rows:
+                try:
+                    cur = getattr(r, "content", None) or ""
+                    if cur.strip():
+                        skipped += 1
+                        continue
+                    p = Path(getattr(r, "path", "") or "")
+                    if not str(p):
+                        skipped += 1
+                        continue
+                    if not p.is_absolute():
+                        p = Path.cwd() / p
+                    if not p.exists():
+                        skipped += 1
+                        continue
+                    txt = p.read_text(encoding="utf-8")
+                    await s.execute(update(ResultDoc).where(ResultDoc.id == int(r.id)).values(content=txt))
+                    fixed += 1
+                except Exception:
+                    continue
+            await s.commit()
+        return {"ok": True, "fixed": int(fixed), "skipped": int(skipped)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/memes/{res_id}")
 async def get_meme_result(res_id: int, _: bool = Depends(require_admin)):
     if SessionLocal is None:
