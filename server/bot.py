@@ -2374,8 +2374,11 @@ def create_dispatcher() -> Dispatcher:
                     await session.flush()
                     job_id = int(j.id)
                     await session.commit()
-        except Exception:
+                    print(f"[Job created] telegram_id={message.from_user.id}, User.id={db_user.id}, Job.id={job_id}")
+        except Exception as _job_err:
+            print(f"[Job FAILED] telegram_id={message.from_user.id if message.from_user else 'N/A'}, error={type(_job_err).__name__}: {str(_job_err)[:200]}")
             job_id = 0
+        print(f"[Job status] telegram_id={message.from_user.id if message.from_user else 'N/A'}, final job_id={job_id}")
 
         # Light progress notes before long run
         try:
@@ -2855,8 +2858,11 @@ def create_dispatcher() -> Dispatcher:
                         await session.flush()
                         job_id = int(j.id)
                         await session.commit()
-            except Exception:
+                        print(f"[Job created] telegram_id={query.from_user.id}, User.id={db_user.id}, Job.id={job_id}")
+            except Exception as _job_err:
+                print(f"[Job FAILED] telegram_id={query.from_user.id if query.from_user else 'N/A'}, error={type(_job_err).__name__}: {str(_job_err)[:200]}")
                 job_id = 0
+            print(f"[Job status] telegram_id={query.from_user.id if query.from_user else 'N/A'}, final job_id={job_id}")
 
             job_meta = {
                 "user_id": query.from_user.id if query.from_user else 0,

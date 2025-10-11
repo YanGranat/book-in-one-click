@@ -857,8 +857,9 @@ def generate_post(
                             rel_doc = str(filepath.relative_to(Path.cwd())) if filepath.is_absolute() else str(filepath)
                         except ValueError:
                             rel_doc = str(filepath)
+                        final_job_id = int(result_job_id or 0)
                         rd = ResultDoc(
-                            job_id=int(result_job_id or 0),
+                            job_id=final_job_id,
                             kind=output_subdir,
                             path=rel_doc,
                             topic=topic,
