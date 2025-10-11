@@ -827,28 +827,16 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_generate(message: types.Message, state: FSMContext):
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        # Reset transient mode flags to avoid leakage from previous flows
+        # Reset transient mode flags to avoid leakage from previous flows (including in_settings!)
         try:
-            await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow=None, next_after_fc=None)
+            await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow=None, next_after_fc=None, in_settings=False, settings_view=None)
         except Exception:
             pass
-        # Preload default fact-check preferences from KV for /generate flow (superadmin only)
-        from .bot_commands import SUPER_ADMIN_ID
-        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
-        if is_superadmin:
-            try:
-                fc_enabled = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
-            except Exception:
-                fc_enabled = False
-            try:
-                fc_depth = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
-            except Exception:
-                fc_depth = 2
-            await state.update_data(factcheck=bool(fc_enabled), research_iterations=(int(fc_depth) if fc_enabled else None), fc_ready=True)
-        else:
-            await state.update_data(factcheck=False, research_iterations=None, fc_ready=True)
+        # Note: FC/refine will be asked through flow for superadmin (not preloaded from KV)
         # Ask what to generate; users cannot generate series
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
         allow_series = bool(is_admin or is_superadmin)
         ru = _is_ru(ui_lang)
         kb = build_gentype_keyboard(ui_lang, allow_series=allow_series)
@@ -870,7 +858,13 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Недоступно." if ru else "Not available."))
             return
         if kind == "post":
-            # All users: ask topic directly (FC/refine preferences already loaded from KV in cmd_generate)
+            # Superadmin: ask FC, then depth, then refine, then topic
+            if is_superadmin:
+                await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="post", next_after_fc="post")
+                prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+                return
+            # Admins/users: ask topic directly
             await state.update_data(gen_article=False, series_mode=None, series_count=None)
             prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
