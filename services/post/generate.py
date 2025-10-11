@@ -369,16 +369,11 @@ def generate_post(
                 log("✓ Agents ready", "All agents initialized")
 
                 def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
-                    # Ensure event loop exists in thread
-                    try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                    
+                    # In ThreadPoolExecutor threads, asyncio.run() will create and manage its own event loop
                     for i in range(attempts):
                         try:
-                            return Runner.run_sync(agent, inp)
+                            # Use asyncio.run() to run async Runner.run() in thread context
+                            return asyncio.run(Runner.run(agent, inp))
                         except Exception:
                             if i == attempts - 1:
                                 raise
@@ -387,13 +382,6 @@ def generate_post(
                 def process_point_sync(p):
                     # Skip query synthesis for OpenAI - WebSearchTool handles this internally
                     # The agent will autonomously decide what to search for
-                    
-                    # Ensure event loop exists in this thread
-                    try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
 
                     notes = []
                     for step in range(1, max(1, int(research_iterations)) + 1):
