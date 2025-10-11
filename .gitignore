@@ -232,3 +232,6 @@ venv/
 
 # Generated content
 output/
+ 
+# Temp compare/diff artifacts
+tmp_cmp/
