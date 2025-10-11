@@ -32,6 +32,7 @@ from .kv import set_gen_lang, get_gen_lang
 from .kv import set_refine_enabled, get_refine_enabled
 from .kv import push_history, get_history, clear_history, rate_allow
 from .kv import chat_clear
+from .kv import is_chat_running, mark_chat_running, unmark_chat_running
 # Chat runner
 from services.chat.run import run_chat_message, build_system_prompt
 # Fact-check settings (KV). Use robust import with fallbacks for older deployments
@@ -388,8 +389,7 @@ def create_dispatcher() -> Dispatcher:
     storage = _try_build_redis_storage() or MemoryStorage()
     dp = Dispatcher(bot, storage=storage)
 
-    # Simple in-memory guard to avoid duplicate generation per chat
-    RUNNING_CHATS: Set[int] = set()
+    # Running chats are now tracked in Redis for multi-worker coordination
     # Global concurrency limit: increased to 30 for better multi-user performance
     # Each user generation may spawn up to ~6 parallel workers, so 30 allows ~5 concurrent users
     import asyncio
@@ -399,7 +399,7 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(commands=["start"])  # type: ignore
     async def cmd_start(message: types.Message):
         # Prevent starting onboarding during active generation
-        if message.chat.id in RUNNING_CHATS:
+        if await is_chat_running(message.chat.id):
             state = dp.current_state(user=message.from_user.id, chat=message.chat.id)
             data = await state.get_data()
             ui_lang = (data.get("ui_lang") or "ru").strip()
@@ -875,7 +875,7 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(commands=["generate"])  # type: ignore
     async def cmd_generate(message: types.Message, state: FSMContext):
         # Prevent starting new generation during active generation
-        if message.chat.id in RUNNING_CHATS:
+        if await is_chat_running(message.chat.id):
             data = await state.get_data()
             ui_lang = (data.get("ui_lang") or "ru").strip()
             warn = "⏳ Генерация уже выполняется. Дождитесь завершения или используйте /cancel." if _is_ru(ui_lang) else "⏳ Generation in progress. Wait for completion or use /cancel."
@@ -1108,7 +1108,7 @@ def create_dispatcher() -> Dispatcher:
         if not (is_admin or is_superadmin):
             return
         # Prevent starting new generation during active generation
-        if message.chat.id in RUNNING_CHATS:
+        if await is_chat_running(message.chat.id):
             data = await state.get_data()
             ui_lang = (data.get("ui_lang") or "ru").strip()
             warn = "⏳ Генерация уже выполняется. Дождитесь завершения или используйте /cancel." if _is_ru(ui_lang) else "⏳ Generation in progress. Wait for completion or use /cancel."
@@ -1135,7 +1135,7 @@ def create_dispatcher() -> Dispatcher:
         if not (is_admin or is_superadmin):
             return
         # Prevent starting new generation during active generation
-        if message.chat.id in RUNNING_CHATS:
+        if await is_chat_running(message.chat.id):
             data = await state.get_data()
             ui_lang = (data.get("ui_lang") or "ru").strip()
             warn = "⏳ Генерация уже выполняется. Дождитесь завершения или используйте /cancel." if _is_ru(ui_lang) else "⏳ Generation in progress. Wait for completion or use /cancel."
@@ -1492,7 +1492,7 @@ def create_dispatcher() -> Dispatcher:
         # Silent cancel: no message text
         try:
             # Ensure any running job gates are released for this chat
-            RUNNING_CHATS.discard(message.chat.id)
+            await unmark_chat_running(message.chat.id)
         except Exception:
             pass
         # Reset transient flags
@@ -1767,7 +1767,7 @@ def create_dispatcher() -> Dispatcher:
             return
         if text_raw.lower() in {"/cancel"}:
             try:
-                RUNNING_CHATS.discard(message.chat.id)
+                await unmark_chat_running(message.chat.id)
             except Exception:
                 pass
             try:
@@ -1796,9 +1796,9 @@ def create_dispatcher() -> Dispatcher:
         # If article mode is active, branch into article generation flow
         if bool(data.get("gen_article")):
             chat_id = message.chat.id
-            if chat_id in RUNNING_CHATS:
+            if await is_chat_running(chat_id):
                 return
-            RUNNING_CHATS.add(chat_id)
+            await mark_chat_running(chat_id)
             try:
                 # Resolve provider/lang
                 prov = (data.get("provider") or "openai").strip().lower()
@@ -1857,7 +1857,7 @@ def create_dispatcher() -> Dispatcher:
                                         except Exception:
                                             pass
                                     await state.finish()
-                                    RUNNING_CHATS.discard(chat_id)
+                                    await unmark_chat_running(chat_id)
                                     return
                         if not charged and message.from_user:
                             ok, remaining = await charge_credits_kv(message.from_user.id, 100)  # type: ignore
@@ -1871,12 +1871,12 @@ def create_dispatcher() -> Dispatcher:
                                     except Exception:
                                         pass
                                 await state.finish()
-                                RUNNING_CHATS.discard(chat_id)
+                                await unmark_chat_running(chat_id)
                                 return
                     except SQLAlchemyError:
                         await message.answer("Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later.")
                         await state.finish()
-                        RUNNING_CHATS.discard(chat_id)
+                        await unmark_chat_running(chat_id)
                         return
 
                 await message.answer("Генерирую…" if _is_ru(ui_lang) else "Generating…")
@@ -1925,7 +1925,7 @@ def create_dispatcher() -> Dispatcher:
                     )
                     await message.answer(warn)
                     await state.finish()
-                    RUNNING_CHATS.discard(chat_id)
+                    await unmark_chat_running(chat_id)
                     return
                 # Send main result
                 try:
@@ -1964,16 +1964,16 @@ def create_dispatcher() -> Dispatcher:
                 await message.answer((f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"))
             finally:
                 await state.finish()
-                RUNNING_CHATS.discard(chat_id)
+                await unmark_chat_running(chat_id)
             return
 
         # If series mode is active, branch into series generation flow
         series_mode = (data.get("series_mode") or "").strip().lower()
         if series_mode in {"auto", "fixed"}:
             chat_id = message.chat.id
-            if chat_id in RUNNING_CHATS:
+            if await is_chat_running(chat_id):
                 return
-            RUNNING_CHATS.add(chat_id)
+            await mark_chat_running(chat_id)
             try:
                 # Resolve provider and language
                 prov = (data.get("provider") or "").strip().lower()
@@ -2028,7 +2028,7 @@ def create_dispatcher() -> Dispatcher:
                     if series_count <= 0:
                         await message.answer("Некорректное число постов." if _is_ru(ui_lang) else "Invalid posts count.")
                         await state.finish()
-                        RUNNING_CHATS.discard(chat_id)
+                        await unmark_chat_running(chat_id)
                         return
                     target_count = series_count
                     total_cost = 0 if is_admin else series_count * unit_cost
@@ -2050,7 +2050,7 @@ def create_dispatcher() -> Dispatcher:
                                             except Exception:
                                                 pass
                                         await state.finish()
-                                        RUNNING_CHATS.discard(chat_id)
+                                        await unmark_chat_running(chat_id)
                                         return
                                     await session.commit()
                                     precharged = int(total_cost)
@@ -2066,13 +2066,13 @@ def create_dispatcher() -> Dispatcher:
                                         except Exception:
                                             pass
                                     await state.finish()
-                                    RUNNING_CHATS.discard(chat_id)
+                                    await unmark_chat_running(chat_id)
                                     return
                                 precharged = int(total_cost)
                         except SQLAlchemyError:
                             await message.answer("Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later.")
                             await state.finish()
-                            RUNNING_CHATS.discard(chat_id)
+                            await unmark_chat_running(chat_id)
                             return
                 else:  # auto
                     if is_admin:
@@ -2102,7 +2102,7 @@ def create_dispatcher() -> Dispatcher:
                                 except Exception:
                                     pass
                             await state.finish()
-                            RUNNING_CHATS.discard(chat_id)
+                            await unmark_chat_running(chat_id)
                             return
                         # Compute max posts affordable with current options
                         if unit_cost <= 0:
@@ -2120,7 +2120,7 @@ def create_dispatcher() -> Dispatcher:
                                 except Exception:
                                     pass
                             await state.finish()
-                            RUNNING_CHATS.discard(chat_id)
+                            await unmark_chat_running(chat_id)
                             return
                         # Precharge full budget (30 or balance)
                         from sqlalchemy.exc import SQLAlchemyError
@@ -2140,7 +2140,7 @@ def create_dispatcher() -> Dispatcher:
                                             except Exception:
                                                 pass
                                         await state.finish()
-                                        RUNNING_CHATS.discard(chat_id)
+                                        await unmark_chat_running(chat_id)
                                         return
                                     await session.commit()
                                     precharged = int(prepay_budget)
@@ -2156,13 +2156,13 @@ def create_dispatcher() -> Dispatcher:
                                         except Exception:
                                             pass
                                     await state.finish()
-                                    RUNNING_CHATS.discard(chat_id)
+                                    await unmark_chat_running(chat_id)
                                     return
                                 precharged = int(prepay_budget)
                         except SQLAlchemyError:
                             await message.answer("Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later.")
                             await state.finish()
-                            RUNNING_CHATS.discard(chat_id)
+                            await unmark_chat_running(chat_id)
                             return
 
                 # Create Job row (series)
@@ -2298,7 +2298,7 @@ def create_dispatcher() -> Dispatcher:
                 await message.answer((f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"))
             finally:
                 await state.finish()
-                RUNNING_CHATS.discard(chat_id)
+                await unmark_chat_running(chat_id)
             return
         # Decide whether to ask fact-check during onboarding only; otherwise use defaults and start
         onboarding = bool(data.get("onboarding"))
@@ -2341,9 +2341,9 @@ def create_dispatcher() -> Dispatcher:
         # Use current state (or KV defaults) to start generation immediately
         # Resolve provider, language, refine, incognito
         chat_id = message.chat.id
-        if chat_id in RUNNING_CHATS:
+        if await is_chat_running(chat_id):
             return
-        RUNNING_CHATS.add(chat_id)
+        await mark_chat_running(chat_id)
 
         # Optional confirmation with price (skip for admins)
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
@@ -2425,7 +2425,7 @@ def create_dispatcher() -> Dispatcher:
                             except Exception:
                                 pass
                         await state.finish()
-                        RUNNING_CHATS.discard(chat_id)
+                        await unmark_chat_running(chat_id)
                         return
             if not charged and message.from_user:
                 ok, remaining = await charge_credits_kv(message.from_user.id, unit_cost)
@@ -2443,14 +2443,14 @@ def create_dispatcher() -> Dispatcher:
                         except Exception:
                             pass
                     await state.finish()
-                    RUNNING_CHATS.discard(chat_id)
+                    await unmark_chat_running(chat_id)
                     return
         except SQLAlchemyError:
             # For admin path we do not attempt DB charge; this error indicates a true DB failure for non-admin charge
             warn = "Временная ошибка БД. Попробуйте позже." if ui_lang == "ru" else "Temporary DB error. Try later."
             await message.answer(warn, reply_markup=ReplyKeyboardRemove())
             await state.finish()
-            RUNNING_CHATS.discard(chat_id)
+            await unmark_chat_running(chat_id)
             return
 
         # Create Job row (running) and ensure User exists
@@ -2767,7 +2767,7 @@ def create_dispatcher() -> Dispatcher:
                 pass
 
         await state.finish()
-        RUNNING_CHATS.discard(chat_id)
+        await unmark_chat_running(chat_id)
 
     @dp.callback_query_handler(lambda c: c.data in {"confirm:charge:yes","confirm:charge:no"}, state="*")  # type: ignore
     async def cb_confirm_charge(query: types.CallbackQuery, state: FSMContext):
@@ -2786,7 +2786,7 @@ def create_dispatcher() -> Dispatcher:
         if query.data.endswith(":no"):
             chat_id = query.message.chat.id if query.message else (query.from_user.id if query.from_user else 0)
             try:
-                RUNNING_CHATS.discard(chat_id)
+                await unmark_chat_running(chat_id)
             except Exception:
                 pass
             try:
@@ -2807,10 +2807,10 @@ def create_dispatcher() -> Dispatcher:
             await state.finish()
             return
         chat_id = query.message.chat.id if query.message else query.from_user.id
-        if chat_id in RUNNING_CHATS:
+        if await is_chat_running(chat_id):
             await query.answer()
             return
-        RUNNING_CHATS.add(chat_id)
+        await mark_chat_running(chat_id)
         # Charge
         from sqlalchemy.exc import SQLAlchemyError
         # Only superadmin may use fact-check/refine; verify before computing price
@@ -2859,7 +2859,7 @@ def create_dispatcher() -> Dispatcher:
                             except Exception:
                                 pass
                         await state.finish()
-                        RUNNING_CHATS.discard(chat_id)
+                        await unmark_chat_running(chat_id)
                         return
             if not charged and query.from_user:
                 # KV fallback (respect superadmin-only features)
@@ -2896,12 +2896,12 @@ def create_dispatcher() -> Dispatcher:
                         except Exception:
                             pass
                     await state.finish()
-                    RUNNING_CHATS.discard(chat_id)
+                    await unmark_chat_running(chat_id)
                     return
         except SQLAlchemyError:
             warn = "Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later."
             await dp.bot.send_message(chat_id, warn)
-            RUNNING_CHATS.discard(chat_id)
+            await unmark_chat_running(chat_id)
             await state.finish()
             await query.answer()
             return
@@ -3060,7 +3060,7 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 pass
         await state.finish()
-        RUNNING_CHATS.discard(chat_id)
+        await unmark_chat_running(chat_id)
 
     # ---- History command ----
     async def _list_deletable_ids_for_user(telegram_user_id: int, ids: Optional[list[int]] | None = None, *, only_visible: bool = False) -> list[int]:
@@ -3893,7 +3893,7 @@ def create_dispatcher() -> Dispatcher:
             return
         # Block while generation is running or pending (race-safe)
         try:
-            if message.chat and message.chat.id in RUNNING_CHATS:
+            if message.chat and await is_chat_running(message.chat.id):
                 return
         except Exception:
             pass

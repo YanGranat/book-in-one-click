@@ -438,3 +438,39 @@ async def get_factcheck_depth(telegram_id: int) -> int:
         d = 2
     return 2 if d not in (1, 2, 3) else d
 
+
+# ===== Running Chats (for multi-worker coordination) =====
+
+async def is_chat_running(chat_id: int) -> bool:
+    """Check if a chat has an active generation running."""
+    r = get_redis()
+    key = f"{kv_prefix()}:running_chat:{chat_id}"
+    val = await r.get(key)
+    return bool(val)
+
+
+async def mark_chat_running(chat_id: int, ttl_seconds: int = 7200) -> bool:
+    """Mark chat as running. Returns True if successfully marked, False if already running."""
+    r = get_redis()
+    key = f"{kv_prefix()}:running_chat:{chat_id}"
+    # Use SET with NX (only set if not exists) and EX (expire time)
+    # Returns True if key was set, False if key already existed
+    try:
+        result = await r.set(key, "1", nx=True, ex=ttl_seconds)
+        return bool(result)
+    except AttributeError:
+        # In-memory fallback doesn't support nx parameter
+        val = await r.get(key)
+        if val:
+            return False
+        await r.set(key, "1")
+        await r.expire(key, ttl_seconds)
+        return True
+
+
+async def unmark_chat_running(chat_id: int) -> None:
+    """Remove running mark from chat."""
+    r = get_redis()
+    key = f"{kv_prefix()}:running_chat:{chat_id}"
+    await r.delete(key)
+
