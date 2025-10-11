@@ -11,6 +11,7 @@ from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from utils.slug import safe_filename_base
 from utils.lang import detect_lang_from_text
 from services.providers.runner import ProviderRunner
+from llm_agents.memom.extractor import build_meme_extractor_agent
 
 
 def _load_system_prompt() -> str:
@@ -63,8 +64,23 @@ def extract_memes(
     system = f"{sys_prompt}{hardening}{lang_clause}"
 
     # Run model
-    runner = ProviderRunner(provider)
-    final_content = runner.run_text(system, text, speed="heavy") or ""
+    # Prefer explicit agent for OpenAI to keep symmetry with other agents folder
+    final_content = ""
+    pnorm = (provider or "openai").strip().lower()
+    if pnorm == "openai":
+        try:
+            from agents import Runner  # type: ignore
+            agent = build_meme_extractor_agent(model=os.getenv("OPENAI_MODEL") or "gpt-5")
+            # Inject hardening/language at call time
+            agent.instructions = system
+            final_content = getattr(Runner.run_sync(agent, text), "final_output", "")
+        except Exception:
+            # Fallback to provider runner
+            runner = ProviderRunner(provider)
+            final_content = runner.run_text(system, text, speed="heavy") or ""
+    else:
+        runner = ProviderRunner(provider)
+        final_content = runner.run_text(system, text, speed="heavy") or ""
     # Guarantee non-empty content stored in DB/UI even if model returned empty
     if not final_content.strip():
         final_content = "(no memes extracted)"
