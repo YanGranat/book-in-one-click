@@ -290,10 +290,10 @@ def generate_post(
             data_obj = _unwrap(data_obj)
             data_obj = _normalize(data_obj)
             return cls.model_validate(data_obj)
-        except Exception:
-            if _prov in {"gemini", "google"} and speed != "heavy":
+        except Exception as e:
+            if _prov in {"gemini", "google", "claude"} and speed != "heavy":
                 return run_json_with_provider(system, user_inp, cls, speed="heavy")
-            raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
+            raise RuntimeError(f"Failed to parse JSON for {cls.__name__}: {str(e)[:200]}")
 
     import json as _json
     series_block = ""

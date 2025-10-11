@@ -107,14 +107,17 @@ class ProviderRunner:
             raise ValueError("Claude API key not found. Set ANTHROPIC_API_KEY environment variable.")
         client = anthropic.Anthropic(api_key=api_key)
         mname = get_model("claude", tier)
+        # Claude relies on prompt instructions for JSON output, not response_format parameter
+        # If JSON mode is requested, augment system prompt
+        system_augmented = system
+        if json_mode:
+            system_augmented = f"{system}\n\nIMPORTANT: You MUST respond with valid JSON only. No explanations, no markdown fences, just pure JSON."
         kwargs: Dict[str, Any] = {
             "model": mname,
             "max_tokens": 8192,
-            "system": system,
+            "system": system_augmented,
             "messages": [{"role": "user", "content": user_message}]
         }
-        if json_mode and is_json_supported("claude"):
-            kwargs["response_format"] = get_json_mode("claude").get("response_format", {"type": "json_object"})
         msg = client.messages.create(**kwargs)
         parts: List[str] = []
         for blk in getattr(msg, "content", []) or []:

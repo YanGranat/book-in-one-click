@@ -68,13 +68,13 @@ class _ProviderAdapter:
 
         try:
             data = _json.loads(txt)
-        except Exception:
+        except Exception as e:
             import re as _re
             m = _re.search(r"\{[\s\S]*\}\s*$", txt)
             if not m:
                 if speed != "heavy":
                     return self.run_json(system, user_message, cls, speed="heavy")
-                raise RuntimeError(f"Failed to parse JSON for {cls.__name__}")
+                raise RuntimeError(f"Failed to parse JSON for {cls.__name__}: {str(e)[:200]}")
             data = _json.loads(m.group(0))
         data = _normalize(data)
         return cls.model_validate(data)
