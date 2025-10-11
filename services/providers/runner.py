@@ -57,11 +57,11 @@ class ProviderRunner:
                 tools = [{"google_search": {}}]
             except Exception:
                 tools = None
-        gen_cfg = {}
+        gen_cfg = {"max_output_tokens": 8192}
         if json_mode and is_json_supported("gemini"):
             jm = get_json_mode("gemini")
             mime = jm.get("response_mime_type") or "application/json"
-            gen_cfg = {"response_mime_type": mime}
+            gen_cfg["response_mime_type"] = mime
         # Create model; if tools are not recognized by SDK or backend, retry without tools
         try:
             model = genai.GenerativeModel(
@@ -99,7 +99,12 @@ class ProviderRunner:
         import anthropic  # type: ignore
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         mname = get_model("claude", tier)
-        kwargs: Dict[str, Any] = {"model": mname, "system": system, "messages": [{"role": "user", "content": user_message}]}
+        kwargs: Dict[str, Any] = {
+            "model": mname,
+            "max_tokens": 8192,
+            "system": system,
+            "messages": [{"role": "user", "content": user_message}]
+        }
         if json_mode and is_json_supported("claude"):
             kwargs["response_format"] = get_json_mode("claude").get("response_format", {"type": "json_object"})
         msg = client.messages.create(**kwargs)
