@@ -594,13 +594,14 @@ def create_dispatcher() -> Dispatcher:
                 "<b>Результаты:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n\n"
             )
-            logs_line_ru = (f"\n- Логи генерации: {'вкл' if logs_enabled else 'выкл'}" if (is_superadmin or is_admin) else "")
+            provider_line_ru = (f"- Провайдер: {_prov_name(prov, True)}\n" if is_superadmin else "")
+            logs_line_ru = (f"- Логи генерации: {'вкл' if logs_enabled else 'выкл'}\n" if (is_superadmin or is_admin) else "")
             settings_block = (
                 "<b>Текущие настройки:</b>\n"
-                f"- Провайдер: {_prov_name(prov, True)}\n"
+                f"{provider_line_ru}"
+                f"{logs_line_ru}"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Публичные результаты: {'да' if not incognito else 'нет'}"
-                f"{logs_line_ru}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
             )
             text = intro_ru + commands_block + results_block + settings_block
@@ -644,13 +645,14 @@ def create_dispatcher() -> Dispatcher:
                 "<b>Results:</b>\n"
                 f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n\n"
             )
-            logs_line_en = (f"\n- Generation logs: {'on' if logs_enabled else 'off'}" if (is_superadmin or is_admin) else "")
+            provider_line_en = (f"- Provider: {_prov_name(prov, False)}\n" if is_superadmin else "")
+            logs_line_en = (f"- Generation logs: {'on' if logs_enabled else 'off'}\n" if (is_superadmin or is_admin) else "")
             settings_block = (
                 "<b>Current settings:</b>\n"
-                f"- Provider: {_prov_name(prov, False)}\n"
+                f"{provider_line_en}"
+                f"{logs_line_en}"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Public results: {'yes' if not incognito else 'no'}"
-                f"{logs_line_en}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
             )
             text = intro_en + commands_block + results_block + settings_block
