@@ -355,9 +355,11 @@ def generate_post(
                 points = points[: factcheck_max_items]
             try:
                 log("🔎 Fact-check · Plan (OpenAI)", f"points={len(points)}")
-            except Exception:
-                pass
+                log("DEBUG", f"points type={type(points)}, bool={bool(points)}, content={points[:1] if points else 'EMPTY'}")
+            except Exception as e:
+                log("ERROR in logging", str(e))
             
+            log("DEBUG check", f"Checking if points empty: not points = {not points}")
             if not points:
                 log("ℹ️ Fact-check skipped", "No risky points identified")
                 report = None
