@@ -135,19 +135,21 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPri
 
 def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
-    # Packs: 1, 3, 5, 10, 50 credits at 50 stars per credit
+    # Packs: 1, 5, 10, 50, 100, 500 credits at 50 stars per credit
     if _is_ru(ui_lang):
         kb.add(InlineKeyboardButton(text="Купить 1 кредит — 50⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Купить 30 кредитов — 1500⭐", callback_data="buy:stars:30"))
         kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 250⭐", callback_data="buy:stars:5"))
         kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 500⭐", callback_data="buy:stars:10"))
         kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 2500⭐", callback_data="buy:stars:50"))
+        kb.add(InlineKeyboardButton(text="Купить 100 кредитов — 5000⭐", callback_data="buy:stars:100"))
+        kb.add(InlineKeyboardButton(text="Купить 500 кредитов — 25000⭐", callback_data="buy:stars:500"))
     else:
         kb.add(InlineKeyboardButton(text="Buy 1 credit — 50⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Buy 30 credits — 1500⭐", callback_data="buy:stars:30"))
         kb.add(InlineKeyboardButton(text="Buy 5 credits — 250⭐", callback_data="buy:stars:5"))
         kb.add(InlineKeyboardButton(text="Buy 10 credits — 500⭐", callback_data="buy:stars:10"))
         kb.add(InlineKeyboardButton(text="Buy 50 credits — 2500⭐", callback_data="buy:stars:50"))
+        kb.add(InlineKeyboardButton(text="Buy 100 credits — 5000⭐", callback_data="buy:stars:100"))
+        kb.add(InlineKeyboardButton(text="Buy 500 credits — 25000⭐", callback_data="buy:stars:500"))
     return kb
 
 
@@ -3515,7 +3517,7 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
     async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
-        credits_map = {"1": 1, "3": 3, "5": 5, "10": 10, "30": 30, "50": 50}
+        credits_map = {"1": 1, "5": 5, "10": 10, "50": 50, "100": 100, "500": 500}
         parts = (query.data or "").split(":")
         pack = credits_map.get(parts[-1], 1)
         user_id = query.from_user.id
