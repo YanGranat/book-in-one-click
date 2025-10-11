@@ -909,6 +909,9 @@ async def result_view_ui_id(res_id: int):
     except Exception:
         pass
     content = data.get("content", "") if isinstance(data, dict) else ""
+    # Ensure newline for parser safety
+    if content and not content.endswith("\n"):
+        content = content + "\n"
     title = f"Result #{res_id}"
     from html import escape as _esc
     _raw = (_esc(content or "").replace("</textarea>", "&lt;/textarea&gt;") if content else "")

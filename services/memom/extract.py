@@ -63,6 +63,8 @@ def extract_memes(
     # Prefer explicit agent for OpenAI to keep symmetry with other agents folder
     final_content = ""
     pnorm = (provider or "openai").strip().lower()
+    if pnorm in {"", "auto"}:
+        pnorm = "openai"
     used_model = ""
     if pnorm == "openai":
         try:
@@ -74,7 +76,7 @@ def extract_memes(
             final_content = getattr(Runner.run_sync(agent, text), "final_output", "")
         except Exception:
             # Fallback to provider runner
-            runner = ProviderRunner(provider)
+            runner = ProviderRunner(pnorm)
             used_model = get_model("openai", "heavy")
             final_content = runner.run_text(system, text, speed="heavy") or ""
     else:
@@ -82,7 +84,7 @@ def extract_memes(
             used_model = get_model("gemini", "heavy")
         else:
             used_model = get_model("claude", "heavy")
-        runner = ProviderRunner(provider)
+        runner = ProviderRunner(pnorm)
         final_content = runner.run_text(system, text, speed="heavy") or ""
     # Guarantee non-empty content stored in DB/UI even if model returned empty
     if not final_content.strip():
@@ -107,7 +109,7 @@ def extract_memes(
     duration_s = max(0.0, time.perf_counter() - started_perf)
     header = (
         f"# 🧾 Meme Extraction Log\n\n"
-        f"- provider: {(provider or 'openai').strip().lower()}\n"
+        f"- provider: {pnorm}\n"
         f"- lang: {eff_lang}\n"
         f"- model: {used_model or '?'}\n"
         f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
@@ -205,7 +207,7 @@ def extract_memes(
                     kind="meme_extract",
                     path=rel_doc,
                     topic=Path(source_name).name,
-                    provider=(provider or "openai").strip().lower(),
+                    provider=pnorm,
                     lang=eff_lang,
                     content=final_content,
                     hidden=0,
