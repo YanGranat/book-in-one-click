@@ -336,6 +336,51 @@ def generate_post(
     if not content:
         raise RuntimeError("Empty result from writer agent")
 
+    # Define helper classes at function scope to ensure instances persist across blocks
+    class _SimpleItem:
+        def __init__(self, claim_text: str, verdict: str, reason: str):
+            self.claim_text = claim_text
+            self.verdict = verdict
+            self.reason = reason
+
+    class _SimpleReport:
+        def __init__(self, items):
+            self.items = items
+
+        def model_dump_json(self):
+            import json
+            return json.dumps(
+                {
+                    "summary": "Issues only for rewrite (exclude confirmed)",
+                    "items": [
+                        {
+                            "claim_text": i.claim_text,
+                            "verdict": i.verdict,
+                            "reason": i.reason,
+                        }
+                        for i in self.items
+                    ],
+                },
+                ensure_ascii=False,
+            )
+
+    class _TmpReport:
+        def __init__(self, point_id, notes):
+            self.point_id = point_id
+            self.notes = notes
+            self.synthesis = ""
+
+        def model_dump_json(self):
+            import json
+            return json.dumps(
+                {
+                    "point_id": self.point_id,
+                    "notes": [n.model_dump() for n in self.notes],
+                    "synthesis": self.synthesis,
+                },
+                ensure_ascii=False,
+            )
+
     report = None
     if factcheck:
         if _prov == "openai":
@@ -406,23 +451,6 @@ def generate_post(
                         if decision.done:
                             break
 
-                    class _TmpReport:
-                        def __init__(self, point_id, notes):
-                            self.point_id = point_id
-                            self.notes = notes
-                            self.synthesis = ""
-
-                        def model_dump_json(self):
-                            import json
-                            return json.dumps(
-                                {
-                                    "point_id": self.point_id,
-                                    "notes": [n.model_dump() for n in self.notes],
-                                    "synthesis": self.synthesis,
-                                },
-                                ensure_ascii=False,
-                            )
-
                     rr = _TmpReport(p.id, notes)
                     rec_res = _run_sync_with_retries(
                         rec_agent,
@@ -450,12 +478,6 @@ def generate_post(
                             pass
                 log("🔍 Processing complete", f"successful={len(results)}/{len(points)}")
 
-                class _SimpleItem:
-                    def __init__(self, claim_text: str, verdict: str, reason: str):
-                        self.claim_text = claim_text
-                        self.verdict = verdict
-                        self.reason = reason
-
                 simple_items = []
                 kept_count = 0
                 for (p, r, notes) in results:
@@ -472,27 +494,6 @@ def generate_post(
                     reason = getattr(r, "explanation", "") or ""
                     simple_items.append(_SimpleItem(p.text, verdict, reason))
                     log("⚠️ Issue found", f"action={action}, point={p.text[:60]}...")
-
-                class _SimpleReport:
-                    def __init__(self, items):
-                        self.items = items
-
-                    def model_dump_json(self):
-                        import json
-                        return json.dumps(
-                            {
-                                "summary": "Issues only for rewrite (exclude confirmed)",
-                                "items": [
-                                    {
-                                        "claim_text": i.claim_text,
-                                        "verdict": i.verdict,
-                                        "reason": i.reason,
-                                    }
-                                    for i in self.items
-                                ],
-                            },
-                            ensure_ascii=False,
-                        )
 
                 if kept_count > 0:
                     log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
@@ -614,23 +615,6 @@ def generate_post(
                 if decision.done:
                     break
 
-            class _TmpReport:
-                def __init__(self, point_id, notes):
-                    self.point_id = point_id
-                    self.notes = notes
-                    self.synthesis = ""
-
-                def model_dump_json(self):
-                    import json
-                    return json.dumps(
-                        {
-                            "point_id": self.point_id,
-                            "notes": [n.model_dump() for n in self.notes],
-                            "synthesis": self.synthesis,
-                        },
-                        ensure_ascii=False,
-                    )
-
             rr = _TmpReport(p.id, notes)
             rec = run_json_with_provider(
                 p_rec or "",
@@ -657,12 +641,6 @@ def generate_post(
                 # Skip failed point; continue others
                 pass
 
-        class _SimpleItem:
-            def __init__(self, claim_text: str, verdict: str, reason: str):
-                self.claim_text = claim_text
-                self.verdict = verdict
-                self.reason = reason
-
         simple_items = []
         for (p, r, notes) in results:
             if getattr(r, "action", "keep") == "keep":
@@ -676,34 +654,15 @@ def generate_post(
             reason = getattr(r, "explanation", "") or ""
             simple_items.append(_SimpleItem(p.text, verdict, reason))
 
-        class _SimpleReport:
-            def __init__(self, items):
-                self.items = items
-
-            def model_dump_json(self):
-                import json
-                return json.dumps(
-                    {
-                        "summary": "Issues only for rewrite (exclude confirmed)",
-                        "items": [
-                            {
-                                "claim_text": i.claim_text,
-                                "verdict": i.verdict,
-                                "reason": i.reason,
-                            }
-                            for i in self.items
-                        ],
-                    },
-                    ensure_ascii=False,
-                )
-
         report = _SimpleReport(simple_items) if simple_items else None
         if report is not None:
             log("factcheck_summary", report.model_dump_json())
 
     # Rewrite and refine
     final_content = content
+    log("🔍 DEBUG report", f"report={'exists' if report is not None else 'None'}, type={type(report)}")
     if report is not None:
+        log("🔍 DEBUG items", f"items count={len(report.items)}, verdicts={[i.verdict for i in report.items]}")
         needs_rewrite = any(i.verdict != "pass" for i in report.items)
         if needs_rewrite:
             _emit("rewrite:init")
