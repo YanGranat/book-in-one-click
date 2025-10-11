@@ -48,32 +48,37 @@ def extract_memes(
         except Exception:
             eff_lang = "en"
 
-    # Build system prompt - use ONLY the prompt from file, no additions
-    sys_prompt = _load_system_prompt()
-    # Optional: add language instruction if explicitly set (not auto)
-    if eff_lang == "ru":
-        system = sys_prompt + "\n\nОтвечай на русском языке."
-    elif eff_lang == "en":
-        system = sys_prompt + "\n\nAnswer in English."
-    else:
-        system = sys_prompt
+    # Use ONLY the prompt from file - no additions, no hardening, no language clause
+    system_prompt = _load_system_prompt()
 
-    # Run model - use ProviderRunner directly for all providers (no SDK interference)
+    # Run model
     pnorm = (provider or "openai").strip().lower()
     if pnorm in {"", "auto"}:
         pnorm = "openai"
+    used_model = ""
+    final_content = ""
     
-    # Get model for provider
     if pnorm == "openai":
-        used_model = get_model("openai", "heavy")
-    elif pnorm in {"gemini", "google"}:
-        used_model = get_model("gemini", "heavy")
-    else:  # claude
-        used_model = get_model("claude", "heavy")
-    
-    # Run with ProviderRunner for clean prompt control
-    runner = ProviderRunner(pnorm)
-    final_content = runner.run_text(system, text, speed="heavy") or ""
+        # Use OpenAI Agents SDK for multi-agent framework compatibility
+        try:
+            used_model = get_model("openai", "heavy")
+            from agents import Runner  # type: ignore
+            agent = build_meme_extractor_agent(model=used_model)
+            agent.instructions = system_prompt  # Clean prompt only
+            final_content = getattr(Runner.run_sync(agent, text), "final_output", "")
+        except Exception:
+            # Fallback to provider runner
+            runner = ProviderRunner(pnorm)
+            used_model = get_model("openai", "heavy")
+            final_content = runner.run_text(system_prompt, text, speed="heavy") or ""
+    else:
+        # Non-OpenAI providers use ProviderRunner
+        if pnorm in {"gemini", "google"}:
+            used_model = get_model("gemini", "heavy")
+        else:
+            used_model = get_model("claude", "heavy")
+        runner = ProviderRunner(pnorm)
+        final_content = runner.run_text(system_prompt, text, speed="heavy") or ""
     # Guarantee non-empty content stored in DB/UI even if model returned empty
     if not final_content.strip():
         final_content = "(no memes extracted)"
