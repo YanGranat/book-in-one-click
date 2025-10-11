@@ -920,7 +920,39 @@ async def get_result(res_id: int):
             row = res.scalar_one_or_none()
             if row is None:
                 return {"error": "not found"}
-            return {"id": row.id, "path": row.path, "content": row.content or "", "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
+            content = row.content or ""
+            # Fallbacks for legacy meme_extract rows with empty content
+            if (not content) and (getattr(row, "kind", "") or "").strip().lower() == "meme_extract":
+                # 1) Try by Job linkage
+                try:
+                    jid = int(getattr(row, "job_id", 0) or 0)
+                    if jid:
+                        from sqlalchemy import select as _sel
+                        jl = await s.execute(_sel(JobLog).where(JobLog.job_id == jid).order_by(JobLog.created_at.desc()))
+                        jlr = jl.scalars().first()
+                        if jlr and getattr(jlr, "content", None):
+                            content = jlr.content or ""
+                except Exception:
+                    content = content or ""
+                # 2) If still empty, try by filename pattern base
+                if not content:
+                    try:
+                        from sqlalchemy import select as _sel
+                        import re as _re
+                        p = Path(getattr(row, "path", "") or "")
+                        stem = p.name
+                        # Base before _memes*.md
+                        base = _re.sub(r"_memes(_\d+)?\.md$", "", stem)
+                        if base:
+                            like1 = f"%/{base}_log_%"
+                            like2 = f"%\\{base}_log_%"
+                            q = await s.execute(_sel(JobLog).where((JobLog.path.like(like1)) | (JobLog.path.like(like2))).order_by(JobLog.created_at.desc()))
+                            jlr = q.scalars().first()
+                            if jlr and getattr(jlr, "content", None):
+                                content = jlr.content or ""
+                    except Exception:
+                        pass
+            return {"id": row.id, "path": row.path, "content": content, "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
     except Exception as e:
         return {"error": f"database error: {e}"}
 
