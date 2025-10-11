@@ -65,6 +65,9 @@ def extract_memes(
     # Run model
     runner = ProviderRunner(provider)
     final_content = runner.run_text(system, text, speed="heavy") or ""
+    # Guarantee non-empty content stored in DB/UI even if model returned empty
+    if not final_content.strip():
+        final_content = "(no memes extracted)"
 
     # Persist result file
     output_dir = ensure_output_dir("memes")

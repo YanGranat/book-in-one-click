@@ -714,12 +714,38 @@ def create_dispatcher() -> Dispatcher:
         from .bot_commands import SUPER_ADMIN_ID
         if not (message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID)):
             return
+        # Deduplicate by message id
+        try:
+            last_id = int(data.get("meme_last_doc_msg_id") or 0)
+        except Exception:
+            last_id = 0
+        try:
+            cur_id = int(message.message_id)
+        except Exception:
+            cur_id = 0
+        if cur_id and last_id and cur_id == last_id:
+            return
+        try:
+            await state.update_data(meme_last_doc_msg_id=cur_id)
+        except Exception:
+            pass
+        # Chat-level lock to avoid duplicate runs across workers
+        chat_id = message.chat.id
+        if not await mark_chat_running(chat_id):
+            return
+        # Stop waiting for more files immediately
+        try:
+            await state.update_data(meme_waiting_file=False)
+        except Exception:
+            pass
         doc = message.document
         if not doc:
+            await unmark_chat_running(chat_id)
             return
         name = (doc.file_name or "document").lower()
         if not (name.endswith('.txt') or name.endswith('.md')):
             await message.answer("Поддерживаются только .txt или .md")
+            await unmark_chat_running(chat_id)
             return
         # Download file
         try:
@@ -737,6 +763,7 @@ def create_dispatcher() -> Dispatcher:
                 await state.update_data(meme_waiting_file=False)
             except Exception:
                 pass
+            await unmark_chat_running(chat_id)
             return
 
         # Resolve provider/lang
@@ -779,6 +806,7 @@ def create_dispatcher() -> Dispatcher:
                 await state.update_data(meme_waiting_file=False)
             except Exception:
                 pass
+            await unmark_chat_running(chat_id)
             return
 
         # Read content back and send as .md
@@ -802,6 +830,7 @@ def create_dispatcher() -> Dispatcher:
                 await state.update_data(meme_waiting_file=False)
             except Exception:
                 pass
+            await unmark_chat_running(chat_id)
 
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:ui_lang:"))  # type: ignore
