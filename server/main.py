@@ -744,6 +744,12 @@ async def _list_result_files() -> list[dict]:
             )
             rows = res.scalars().all()
             for r in rows:
+                # Exclude meme_extract from generic results list
+                try:
+                    if (getattr(r, "kind", "") or "").strip().lower() == "meme_extract":
+                        continue
+                except Exception:
+                    pass
                 items.append({
                     "id": r.id,
                     "path": r.path,
@@ -932,6 +938,176 @@ async def result_view_ui_id(res_id: int):
         "render(text);async function refresh(){try{const r=await fetch('/results/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&(j.content||j.path)){if(j.content)text=j.content;const meta=document.getElementById('meta');if(meta){meta.textContent=`provider=${j.provider||'?'} | lang=${j.lang||'?'} | topic=${j.topic||'?'} | id=${RES_ID}`;}render(text);}}catch(_){}}refresh();"
         "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
         "document.getElementById('download').onclick=async()=>{try{const ip=(await (await fetch('/ip',{cache:'no-store'})).json()).ip||'unknown';const key='res-'+RES_ID;const ok=await (await fetch(`/allow-download?key=${key}&ip=${encodeURIComponent(ip)}`,{cache:'no-store'})).json();if(!(ok&&ok.allow)){alert('Rate limit exceeded. Try later.');return;}const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'result')+'.md';a.click();}catch(_){}};"
+        "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}"
+        "</script>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html)
+
+
+# ------------------- Meme Extraction Results (separate UI) -------------------
+
+async def _list_meme_results() -> list[dict]:
+    items: list[dict] = []
+    if SessionLocal is None:
+        return items
+    try:
+        async with SessionLocal() as s:
+            from sqlalchemy import select
+            res = await s.execute(
+                select(ResultDoc)
+                .where(ResultDoc.kind == "meme_extract")
+                .order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc())
+            )
+            rows = res.scalars().all()
+            for r in rows:
+                items.append({
+                    "id": r.id,
+                    "path": r.path,
+                    "name": Path(r.path).name,
+                    "created_at": str(r.created_at),
+                    "kind": r.kind,
+                    "topic": getattr(r, "topic", "") or "",
+                    "provider": getattr(r, "provider", "") or "",
+                    "lang": getattr(r, "lang", "") or "",
+                })
+    except Exception as e:
+        print(f"[ERROR] memes db read failed: {e}")
+        items = []
+    return items
+
+
+@app.get("/memes")
+async def list_meme_results():
+    return {"items": await _list_meme_results()}
+
+
+@app.get("/memes-ui", response_class=HTMLResponse)
+async def memes_ui(_: bool = Depends(require_admin)):
+    items = await _list_meme_results()
+    for it in items:
+        try:
+            ts = it.get("created_at")
+            if ts:
+                from datetime import datetime as _dt
+                if "T" in ts:
+                    dt = _dt.fromisoformat(ts.replace("Z","+00:00"))
+                else:
+                    dt = _dt.fromisoformat(ts)
+                it["created_at"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+    rows = []
+    for it in items:
+        if "id" in it and isinstance(it.get("id"), int):
+            link = f"/memes-ui/id/{it['id']}"
+            topic = (it.get('topic','') or '').replace('<','&lt;').replace('>','&gt;')
+            rows.append(
+                f"<tr data-id='{it.get('id')}' data-topic='{topic.lower()}' data-lang='{(it.get('lang','') or '').lower()}'>"
+                f"<td class='t-topic'><a href='{link}'>{topic or '(no source)'}</a></td>"
+                f"<td class='t-created'>{it.get('created_at','')}</td><td class='t-lang'>{(it.get('lang','') or '')}</td>"
+                f"</tr>"
+            )
+    html = (
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Meme Extractions</title>"
+        "<style>"
+        ":root{--bg:#0e0f12;--panel:#151821;--muted:#9aa4b2;--text:#e6e9ef;--brand:#6cf;--line:#242938}"
+        "[data-theme='light']{--bg:#f7f9fc;--panel:#ffffff;--muted:#5f6b7a;--text:#0f172a;--brand:#0a84ff;--line:#e5e9f0}"
+        "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;padding:24px}"
+        ".topbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px}"
+        ".topbar h1{font-size:20px;margin:0 16px 0 0}a{color:var(--brand)}.spacer{flex:1}"
+        "input[type=text],select{background:#0f121a;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;min-width:200px}"
+        "button,.btn{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}"
+        "button:hover,.btn:hover{border-color:#2f3a4f}a.btn-link{padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#131824;color:var(--text)}"
+        "[data-theme='light'] input[type=text],[data-theme='light'] select{background:#ffffff;border:1px solid #d0d7e2;color:var(--text)}"
+        "[data-theme='light'] button,[data-theme='light'] .btn,[data-theme='light'] a.btn-link{background:#f7f9fc;border:1px solid #d0d7e2;color:var(--text)}"
+        "table{border-collapse:separate;border-spacing:0;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}"
+        "th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}"
+        "thead th{position:sticky;top:0;background:#0f1218;color:#cbd5e1;font-weight:600}tbody tr:hover{background:#121722}"
+        "[data-theme='light'] thead th{background:#f3f4f6;color:#0f172a}"
+        "[data-theme='light'] tbody tr:hover{background:#f5f7fb}"
+        "footer{margin-top:18px;color:var(--muted)}"
+        "</style></head><body>"
+        "<div class='topbar'>"
+        "<h1>Meme Extraction Results</h1>"
+        "<div class='spacer'></div>"
+        "<input id='q' type='text' placeholder='Search source...'>"
+        "<select id='lang'><option value=''>All languages</option><option>ru</option><option>en</option></select>"
+        "<select id='theme'><option value='dark' selected>Dark</option><option value='light'>Light</option></select>"
+        "<button id='refresh'>Refresh</button>"
+        "</div>"
+        f"<div class='muted'>Total: {len(items)}</div>"
+        "<table id='tbl'><thead><tr><th data-sort='topic'>Source</th><th data-sort='created'>Created</th><th data-sort='lang'>Lang</th></tr></thead><tbody>"
+        + ("".join(rows) or "<tr><td colspan='3' class='muted'>No meme results yet</td></tr>")
+        + "</tbody></table>"
+        "<footer>Tip: Filter by lang and search by source. Use the theme switcher for light/dark.</footer>"
+        "<script>"
+        "const $$=(s,el=document)=>el.querySelector(s);const $$$=(s,el=document)=>[...el.querySelectorAll(s)];"
+        "const q=$$('#q'),lang=$$('#lang'),tbody=$$('#tbl tbody'),themeSel=$$('#theme');"
+        "function applyFilter(){const term=(q.value||'').toLowerCase();const l=(lang.value||'').toLowerCase();for(const tr of $$$('tr',tbody)){const tt=(tr.getAttribute('data-topic')||'');const tl=(tr.getAttribute('data-lang')||'');const ok=tt.includes(term)&&(!l||tl===l);tr.style.display=ok?'':'';}}"
+        "q.oninput=applyFilter;lang.onchange=applyFilter;"
+        "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();const B=(b.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();return (asc?1:-1)*A.localeCompare(B);});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
+        "function applyTheme(){const v=themeSel.value;document.documentElement.setAttribute('data-theme',v);localStorage.setItem('ui_theme',v);}themeSel.onchange=applyTheme;"
+        "(function(){const t=localStorage.getItem('ui_theme');if(t){themeSel.value=t;document.documentElement.setAttribute('data-theme',t);}else{document.documentElement.setAttribute('data-theme','dark');}})();"
+        "$$('#refresh').onclick=()=>location.reload();"
+        "</script>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html)
+
+
+@app.get("/memes/{res_id}")
+async def get_meme_result(res_id: int, _: bool = Depends(require_admin)):
+    if SessionLocal is None:
+        return {"error": "db is not configured"}
+    try:
+        async with SessionLocal() as s:
+            from sqlalchemy import select
+            res = await s.execute(select(ResultDoc).where(ResultDoc.id == res_id, ResultDoc.kind == "meme_extract"))
+            row = res.scalar_one_or_none()
+            if row is None:
+                return {"error": "not found"}
+            return {"id": row.id, "path": row.path, "content": row.content or "", "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
+    except Exception as e:
+        return {"error": f"database error: {e}"}
+
+
+@app.get("/memes-ui/id/{res_id}", response_class=HTMLResponse)
+async def meme_result_view_ui_id(res_id: int, _: bool = Depends(require_admin)):
+    data = await get_meme_result(res_id)
+    if isinstance(data, dict) and data.get("error"):
+        return HTMLResponse("<h1>Not found</h1>", status_code=404)
+    content = data.get("content", "") if isinstance(data, dict) else ""
+    title = f"Meme Result #{res_id}"
+    from html import escape as _esc
+    _raw = (_esc(content or "").replace("</textarea>", "&lt;/textarea&gt;") if content else "")
+    html = (
+        "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Meme Result View</title>"
+        "<script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>"
+        "<style>"
+        ":root{--bg:#0e0f12;--panel:#151821;--muted:#9aa4b2;--text:#e6e9ef;--brand:#6cf;--line:#242938}"
+        "[data-theme='light']{--bg:#f7f9fc;--panel:#ffffff;--muted:#5f6b7a;--text:#0f172a;--brand:#0a84ff;--line:#e5e9f0}"
+        "*{box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Helvetica,Arial,sans-serif;margin:0;}"
+        "header{background:#0f1218;border-bottom:1px solid var(--line);color:#e6e9ef;padding:10px 14px;display:flex;gap:12px;align-items:center}"
+        "[data-theme='light'] header{background:#ffffff;color:#0f172a;border-bottom:1px solid #e5e9f0}"
+        "header a{color:var(--brand)}.spacer{flex:1}.toolbar button{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer;margin-left:8px}"
+        "[data-theme='light'] .toolbar button{background:#eef2f6;border:1px solid #e5e9f0;color:#0f172a}"
+        "main{padding:14px}#content{max-width:1000px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}a{color:var(--brand)}"
+        ".meta{opacity:.8;font-size:12px;margin:0 0 8px}code{background:#0f121a;color:inherit;padding:0 2px;font-size:12px}pre{white-space:pre-wrap;word-wrap:break-word;background:#0f121a;border-radius:8px;padding:12px;border:1px solid var(--line)}"
+        "[data-theme='light'] code{background:#f5f7fb;color:inherit}"
+        "[data-theme='light'] pre{background:#f5f7fb;border:1px solid #e5e9f0;color:#0f172a}"
+        "</style></head><body>"
+        f"<header><a href='/memes-ui'>← Meme Results</a><div class='spacer'></div><div class='toolbar'><button id='copy'>Copy</button><button id='download'>Download .md</button><button id='toggleRaw'>Show raw</button></div></header>"
+        f"<main><div class='meta' id='meta'>Result: {title}</div><div id='content'></div><textarea id='raw' style='display:none'>{_raw}</textarea></main>"
+        "<script>(function(){const t=localStorage.getItem('ui_theme');if(t==='light'){document.documentElement.setAttribute('data-theme','light');}else{document.documentElement.removeAttribute('data-theme');}})();"
+        f"const RES_ID={res_id};"
+        "let text=(document.getElementById('raw')?document.getElementById('raw').value:'');let showRaw=false;"
+        "function render(md){let html='';try{html=(window.marked?window.marked.parse(md):'');}catch(e){html='';}if(!html||html.trim()===''){const safe=md.replace(/</g,'&lt;').replace(/>/g,'&gt;');html='<pre>'+safe+'</pre>';}document.getElementById('content').innerHTML=showRaw?('<pre>'+md.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>'):html;}"
+        "render(text);async function refresh(){try{const r=await fetch('/memes/'+RES_ID,{cache:'no-store'});const j=await r.json();if(j&&(j.content||j.path)){if(j.content)text=j.content;const meta=document.getElementById('meta');if(meta){meta.textContent=`provider=${j.provider||'?'} | lang=${j.lang||'?'} | source=${j.topic||'?'} | id=${RES_ID}`;}render(text);}}catch(_){}}refresh();"
+        "document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(text);alert('Copied');}catch(_){}};"
+        "document.getElementById('download').onclick=async()=>{try{const ip=(await (await fetch('/ip',{cache:'no-store'})).json()).ip||'unknown';const key='res-meme-'+RES_ID;const ok=await (await fetch(`/allow-download?key=${key}&ip=${encodeURIComponent(ip)}`,{cache:'no-store'})).json();if(!(ok&&ok.allow)){alert('Rate limit exceeded. Try later.');return;}const a=document.createElement('a');const blob=new Blob([text],{type:'text/markdown'});a.href=URL.createObjectURL(blob);a.download=(document.title||'meme-result')+'.md';a.click();}catch(_){};"
         "document.getElementById('toggleRaw').onclick=()=>{showRaw=!showRaw;document.getElementById('toggleRaw').textContent=showRaw?'Show rendered':'Show raw';render(text);}"
         "</script>"
         "</body></html>"

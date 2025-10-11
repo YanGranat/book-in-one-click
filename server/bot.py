@@ -466,11 +466,13 @@ def create_dispatcher() -> Dispatcher:
                         types.BotCommand("pricing", "Цены"),
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
+                        types.BotCommand("meme_extract", "Экстракция мемов"),
                     ]
                     base_en = base_en + [
                         types.BotCommand("pricing", "Pricing"),
                         types.BotCommand("chat", "Chat with AI"),
                         types.BotCommand("endchat", "End chat"),
+                        types.BotCommand("meme_extract", "Meme extraction"),
                     ]
                 # Cancel at the very bottom
                 base_ru.append(types.BotCommand("cancel", "Отмена"))
@@ -603,7 +605,8 @@ def create_dispatcher() -> Dispatcher:
 
             results_block = (
                 "<b>Результаты:</b>\n"
-                f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n\n"
+                f"- <a href='{RESULTS_ORIGIN}/results-ui'>Список всех результатов</a>\n"
+                f"- <a href='{RESULTS_ORIGIN}/memes-ui'>Экстракции мемов</a>\n\n"
             )
             provider_line_ru = (f"- Провайдер: {_prov_name(prov, True)}\n" if is_superadmin else "")
             logs_line_ru = (f"- Логи генерации: {'вкл' if logs_enabled else 'выкл'}\n" if (is_superadmin or is_admin) else "")
@@ -654,7 +657,8 @@ def create_dispatcher() -> Dispatcher:
 
             results_block = (
                 "<b>Results:</b>\n"
-                f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n\n"
+                f"- <a href='{RESULTS_ORIGIN}/results-ui'>All results page</a>\n"
+                f"- <a href='{RESULTS_ORIGIN}/memes-ui'>Meme extractions</a>\n\n"
             )
             provider_line_en = (f"- Provider: {_prov_name(prov, False)}\n" if is_superadmin else "")
             logs_line_en = (f"- Generation logs: {'on' if logs_enabled else 'off'}\n" if (is_superadmin or is_admin) else "")
@@ -668,6 +672,119 @@ def create_dispatcher() -> Dispatcher:
             )
             text = intro_en + commands_block + results_block + settings_block
         await message.answer(text, disable_web_page_preview=True, parse_mode=types.ParseMode.HTML)
+
+
+    # ===== Meme Extraction (superadmin only) =====
+    @dp.message_handler(commands=["meme_extract"])  # type: ignore
+    async def cmd_meme_extract(message: types.Message, state: FSMContext):
+        # Superadmin gate
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        if not is_superadmin:
+            return
+        await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(meme_waiting_file=True)
+        await message.answer("Пришлите .txt или .md файл для экстракции мемов.")
+
+    @dp.message_handler(lambda m: getattr(m.from_user, 'is_bot', False) is False, content_types=types.ContentTypes.DOCUMENT, state='*')  # type: ignore
+    async def meme_file_received(message: types.Message, state: FSMContext):
+        try:
+            data = await state.get_data()
+        except Exception:
+            data = {}
+        if not bool(data.get("meme_waiting_file")):
+            return
+        # Superadmin gate again
+        from .bot_commands import SUPER_ADMIN_ID
+        if not (message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID)):
+            return
+        doc = message.document
+        if not doc:
+            return
+        name = (doc.file_name or "document").lower()
+        if not (name.endswith('.txt') or name.endswith('.md')):
+            await message.answer("Поддерживаются только .txt или .md")
+            return
+        # Download file
+        try:
+            f = await dp.bot.get_file(doc.file_id)
+            import aiohttp
+            import io as _io
+            url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{f.file_path}"
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(url) as resp:
+                    buf = await resp.read()
+            text = buf.decode('utf-8', errors='replace')
+        except Exception:
+            await message.answer("Не удалось загрузить файл.")
+            try:
+                await state.update_data(meme_waiting_file=False)
+            except Exception:
+                pass
+            return
+
+        # Resolve provider/lang
+        data = await state.get_data()
+        gen_lang = (data.get("gen_lang") or "auto").strip().lower()
+        # KV fallback for gen_lang
+        try:
+            if message.from_user and (not gen_lang or gen_lang == 'auto'):
+                from .kv import get_gen_lang as _get_gen_lang
+                kv_lang = await _get_gen_lang(message.from_user.id)
+                if kv_lang:
+                    gen_lang = kv_lang
+        except Exception:
+            pass
+        prov = (data.get("provider") or "openai").strip().lower()
+        # Resolve from KV only for superadmin
+        try:
+            if message.from_user:
+                from .bot_commands import SUPER_ADMIN_ID as _SA
+                if _SA is not None and int(message.from_user.id) == int(_SA):
+                    from .kv import get_provider as _get_provider
+                    prov = await _get_provider(message.from_user.id)
+        except Exception:
+            pass
+
+        # Run extraction in thread pool
+        await message.answer("Обрабатываю…")
+        import asyncio as _asyncio
+        from services.memom.extract import extract_memes
+        loop = _asyncio.get_running_loop()
+        try:
+            # Pass job_meta with user ids for DB linkage
+            job_meta = {"user_id": int(message.from_user.id) if message.from_user else 0}
+            def _run():
+                return extract_memes(text=text, source_name=name, lang=gen_lang or 'auto', provider=prov or 'openai', job_meta=job_meta)
+            result = await loop.run_in_executor(None, _run)
+        except Exception:
+            await message.answer("Ошибка при экстракции мемов.")
+            try:
+                await state.update_data(meme_waiting_file=False)
+            except Exception:
+                pass
+            return
+
+        # Read content back and send as .md
+        try:
+            from io import BytesIO
+            if hasattr(result, 'read_text'):
+                content = result.read_text(encoding='utf-8')  # type: ignore
+                fname = Path(result).name  # type: ignore
+            else:
+                # if return_content mode was used
+                content = str(result)
+                from utils.slug import safe_filename_base as _sfb
+                fname = f"{_sfb(Path(name).stem)}_memes.md"
+            buf = BytesIO((content if content.endswith('\n') else content + '\n').encode('utf-8'))
+            buf.name = fname
+            await message.answer_document(buf, caption="Готово")
+        except Exception:
+            await message.answer("Готово (но не удалось отправить файл).")
+        finally:
+            try:
+                await state.update_data(meme_waiting_file=False)
+            except Exception:
+                pass
 
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:ui_lang:"))  # type: ignore
@@ -1755,6 +1872,7 @@ def create_dispatcher() -> Dispatcher:
                     "chat": cmd_chat,
                     "endchat": cmd_endchat,
                     "cancel": cmd_cancel,
+                # Meme extraction will be handled below once implemented
                 }
                 h = handlers.get(cmd)
                 if h is not None:
@@ -3206,6 +3324,9 @@ def create_dispatcher() -> Dispatcher:
         for it in items:
             topic = (it.get("topic") or "(no topic)")
             kind = (it.get("kind") or "").lower()
+            # Skip meme_extract items from user-visible history
+            if kind == "meme_extract":
+                continue
             url = ""
             try:
                 if it.get("hidden") == 0 and it.get("id"):
