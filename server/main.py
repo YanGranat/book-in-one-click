@@ -1068,7 +1068,17 @@ async def get_meme_result(res_id: int, _: bool = Depends(require_admin)):
             row = res.scalar_one_or_none()
             if row is None:
                 return {"error": "not found"}
-            return {"id": row.id, "path": row.path, "content": row.content or "", "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
+            # Fallback: if DB content empty, try to read from filesystem path
+            content = row.content or ""
+            if (not content) and getattr(row, "path", None):
+                try:
+                    p = Path(row.path)
+                    if not p.is_absolute():
+                        p = Path.cwd() / p
+                    content = p.read_text(encoding="utf-8")
+                except Exception:
+                    content = ""
+            return {"id": row.id, "path": row.path, "content": content, "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
     except Exception as e:
         return {"error": f"database error: {e}"}
 
