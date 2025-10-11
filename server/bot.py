@@ -2488,7 +2488,7 @@ def create_dispatcher() -> Dispatcher:
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         factcheck=True,
-                        factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "3")),
+                        factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "7")),
                         research_iterations=int(depth or 2),
                         job_meta=job_meta,
                         on_progress=_on_progress,

@@ -417,12 +417,9 @@ def generate_post(
                     # In ThreadPoolExecutor threads, asyncio.run() will create and manage its own event loop
                     for i in range(attempts):
                         try:
-                            log("🔍 DEBUG agent call", f"Calling agent={agent.name}, attempt={i+1}/{attempts}")
                             result = asyncio.run(Runner.run(agent, inp))
-                            log("🔍 DEBUG agent result", f"Success for agent={agent.name}")
                             return result
                         except Exception as e:
-                            log("🔍 DEBUG agent error", f"Error in agent={agent.name}, attempt={i+1}/{attempts}: {str(e)[:100]}")
                             if i == attempts - 1:
                                 raise
                             time.sleep(base_delay * (2 ** i))
@@ -483,10 +480,8 @@ def generate_post(
 
                 simple_items = []
                 kept_count = 0
-                log("🔍 DEBUG results", f"Processing {len(results)} results")
                 for (p, r, notes) in results:
                     action = getattr(r, "action", "keep")
-                    log("🔍 DEBUG result", f"point_id={p.id}, action={action}")
                     if action == "keep":
                         kept_count += 1
                         continue
@@ -500,16 +495,12 @@ def generate_post(
                     simple_items.append(_SimpleItem(p.text, verdict, reason))
                     log("⚠️ Issue found", f"action={action}, point={p.text[:60]}...")
 
-                log("🔍 DEBUG summary", f"kept_count={kept_count}, simple_items_count={len(simple_items)}")
                 if kept_count > 0:
                     log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
                 
-                log("🔍 DEBUG creating report", f"simple_items={len(simple_items)} items")
                 report = _SimpleReport(simple_items) if simple_items else None
-                log("🔍 DEBUG report created", f"report={'exists' if report is not None else 'None'}, type={type(report).__name__}")
                 
                 if report is not None:
-                    log("🔍 DEBUG report items", f"report.items count={len(report.items)}")
                     log("factcheck_summary", report.model_dump_json())
                 else:
                     log("✅ Fact-check complete", "No issues found, skipping rewrite")
@@ -643,8 +634,7 @@ def generate_post(
             except RuntimeError:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-        
-            log("🔍 DEBUG non-OpenAI", f"Processing {len(points or [])} points")
+            
             for p in points or []:
                 try:
                     result = loop.run_until_complete(process_point_async(p))
@@ -658,10 +648,8 @@ def generate_post(
 
             simple_items = []
             kept_count = 0
-            log("🔍 DEBUG results", f"Processing {len(results)} results")
             for (p, r, notes) in results:
                 action = getattr(r, "action", "keep")
-                log("🔍 DEBUG result", f"point_id={p.id}, action={action}")
                 if action == "keep":
                     kept_count += 1
                     continue  # confirmed parts не передаём в переписывание
@@ -674,28 +662,19 @@ def generate_post(
                 reason = getattr(r, "explanation", "") or ""
                 simple_items.append(_SimpleItem(p.text, verdict, reason))
 
-            log("🔍 DEBUG summary", f"kept_count={kept_count}, simple_items_count={len(simple_items)}")
             if kept_count > 0:
                 log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
         
-            log("🔍 DEBUG creating report", f"simple_items={len(simple_items)} items")
             report = _SimpleReport(simple_items) if simple_items else None
-            log("🔍 DEBUG report created", f"report={'exists' if report is not None else 'None'}, type={type(report).__name__}")
         
             if report is not None:
-                log("🔍 DEBUG report items", f"report.items count={len(report.items)}")
                 log("factcheck_summary", report.model_dump_json())
 
     # Rewrite and refine
     final_content = content
-    log("🔍 DEBUG report check", f"report={'exists' if report is not None else 'None'}, type={type(report)}, id={id(report) if report else 'N/A'}")
     if report is not None:
-        log("🔍 DEBUG items check", f"items count={len(report.items)}, verdicts={[i.verdict for i in report.items]}")
-        log("🔍 DEBUG items details", f"items={[(i.claim_text[:30], i.verdict) for i in report.items]}")
         needs_rewrite = any(i.verdict != "pass" for i in report.items)
-        log("🔍 DEBUG needs_rewrite", f"needs_rewrite={needs_rewrite}, calculation={'any(i.verdict != pass)' if needs_rewrite else 'all items are pass'}")
         if needs_rewrite:
-            log("🚀 Starting rewrite", "needs_rewrite=True, launching rewrite agent")
             _emit("rewrite:init")
             from pathlib import Path
             p_rewrite = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "rewrite.md").read_text(encoding="utf-8")
