@@ -196,12 +196,21 @@ async def init_db() -> None:
 
 async def get_or_create_user(session: AsyncSession, telegram_id: int) -> User:
     from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
     res = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = res.scalar_one_or_none()
     if user is None:
-        user = User(telegram_id=telegram_id, credits=0)
-        session.add(user)
-        await session.flush()
+        try:
+            user = User(telegram_id=telegram_id, credits=0)
+            session.add(user)
+            await session.flush()
+        except IntegrityError:
+            # Race condition: another request created this user concurrently
+            await session.rollback()
+            res = await session.execute(select(User).where(User.telegram_id == telegram_id))
+            user = res.scalar_one_or_none()
+            if user is None:
+                raise  # Still can't find user, re-raise original error
     return user
 
 

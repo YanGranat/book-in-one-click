@@ -822,7 +822,6 @@ def generate_post(
                                             s.commit()  # Commit User creation immediately
                                         except Exception as _create_err:
                                             s.rollback()
-                                            print(f"[ERROR] Fallback User create failed for telegram_id={tg_uid}: {type(_create_err).__name__}: {str(_create_err)[:300]}")
                                             # Try one more time to find in case of race condition
                                             try:
                                                 urow = s.query(User).filter(User.telegram_id == tg_uid).first()
@@ -863,8 +862,6 @@ def generate_post(
                         except ValueError:
                             rel_doc = str(filepath)
                         final_job_id = int(result_job_id or 0)
-                        tg_id = int((job_meta or {}).get("user_id", 0) or 0)
-                        print(f"{'✓' if final_job_id > 0 else '✗'} [RESULT] Creating ResultDoc with job_id={final_job_id}, telegram_id={tg_id}, topic={topic[:30]}")
                         rd = ResultDoc(
                             job_id=final_job_id,
                             kind=output_subdir,

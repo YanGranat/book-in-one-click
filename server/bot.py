@@ -2380,9 +2380,7 @@ def create_dispatcher() -> Dispatcher:
                     await session.flush()
                     job_id = int(j.id)
                     await session.commit()
-                    print(f"✓ [START JOB] Created Job.id={job_id}, User.id={db_user_id}, telegram_id={message.from_user.id}")
-        except Exception as e:
-            print(f"✗ [START JOB] FAILED to create Job for telegram_id={message.from_user.id if message.from_user else 'N/A'}: {type(e).__name__}: {str(e)[:500]}")
+        except Exception:
             job_id = 0
 
         # Light progress notes before long run
@@ -3047,10 +3045,8 @@ def create_dispatcher() -> Dispatcher:
                     
                     # If User not found, history will be empty (as it should be - no generations yet)
                     if db_uid is None:
-                        print(f"⚠ [HISTORY] User NOT FOUND in DB for telegram_id={int(message.from_user.id)}")
                         items = []
                     else:
-                        print(f"✓ [HISTORY] User FOUND: telegram_id={int(message.from_user.id)}, User.id={db_uid}")
                         jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
                         # Support BOTH schemas:
                         # NEW: Job.user_id = User.id (normalized)
@@ -3065,7 +3061,6 @@ def create_dispatcher() -> Dispatcher:
                             .limit(50)
                         )
                         rows = res.fetchall()
-                        print(f"✓ [HISTORY] Found {len(rows)} ResultDoc+Job rows in DB")
                         # Filter by last clear ts if exists
                         cleared_ts = None
                         try:
