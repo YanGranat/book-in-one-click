@@ -217,6 +217,25 @@ def build_genlang_inline(ui_lang: str) -> InlineKeyboardMarkup:
     return kb
 
 
+def build_genlang_inline_with_check(current: str, ui_lang: str) -> InlineKeyboardMarkup:
+    """Build generation language keyboard with checkmark on current selection and Back button."""
+    kb = InlineKeyboardMarkup()
+    if _is_ru(ui_lang):
+        kb.add(
+            InlineKeyboardButton(text="Авто" + (" ✓" if current == "auto" else ""), callback_data="set:gen_lang:auto"),
+            InlineKeyboardButton(text="EN" + (" ✓" if current == "en" else ""), callback_data="set:gen_lang:en"),
+            InlineKeyboardButton(text="RU" + (" ✓" if current == "ru" else ""), callback_data="set:gen_lang:ru"),
+        )
+    else:
+        kb.add(
+            InlineKeyboardButton(text="Auto" + (" ✓" if current == "auto" else ""), callback_data="set:gen_lang:auto"),
+            InlineKeyboardButton(text="EN" + (" ✓" if current == "en" else ""), callback_data="set:gen_lang:en"),
+            InlineKeyboardButton(text="RU" + (" ✓" if current == "ru" else ""), callback_data="set:gen_lang:ru"),
+        )
+    kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
+    return kb
+
+
 def build_ui_lang_inline() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton(text="Русский", callback_data="set:ui_lang:ru"))
@@ -231,6 +250,17 @@ def build_provider_inline() -> InlineKeyboardMarkup:
     kb.add(InlineKeyboardButton(text="OpenAI", callback_data="set:provider:openai"))
     kb.add(InlineKeyboardButton(text="Gemini", callback_data="set:provider:gemini"))
     kb.add(InlineKeyboardButton(text="Claude", callback_data="set:provider:claude"))
+    return kb
+
+
+def build_provider_inline_with_check(current: str, ui_lang: str) -> InlineKeyboardMarkup:
+    """Build provider keyboard with checkmark on current selection and Back button."""
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(text="Auto" + (" ✓" if current == "auto" else ""), callback_data="set:provider:auto"))
+    kb.add(InlineKeyboardButton(text="OpenAI" + (" ✓" if current == "openai" else ""), callback_data="set:provider:openai"))
+    kb.add(InlineKeyboardButton(text="Gemini" + (" ✓" if current == "gemini" else ""), callback_data="set:provider:gemini"))
+    kb.add(InlineKeyboardButton(text="Claude" + (" ✓" if current == "claude" else ""), callback_data="set:provider:claude"))
+    kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
     return kb
 
 
@@ -638,10 +668,10 @@ def create_dispatcher() -> Dispatcher:
         in_settings = bool(cur.get("in_settings"))
         settings_view = cur.get("settings_view")
         if in_settings and query.message:
-            # When in new settings UI, show back button only for gen_lang
+            # When in new settings UI, update keyboard with checkmark on new selection
             if settings_view == "gen_lang":
                 try:
-                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                    await query.message.edit_reply_markup(reply_markup=build_genlang_inline_with_check(gen_lang, ui_lang))
                 except Exception:
                     pass
                 return
@@ -754,7 +784,7 @@ def create_dispatcher() -> Dispatcher:
         if in_settings and query.message:
             if settings_view == "provider":
                 try:
-                    await query.message.edit_reply_markup(reply_markup=build_back_only(ui_lang))
+                    await query.message.edit_reply_markup(reply_markup=build_provider_inline_with_check(prov, ui_lang))
                 except Exception:
                     pass
             else:
@@ -840,13 +870,7 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Недоступно." if ru else "Not available."))
             return
         if kind == "post":
-            # Superadmin: ask FC (with depth), then refine, then topic
-            if is_superadmin:
-                await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="post", next_after_fc="post")
-                prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
-                return
-            # Admins/users: ask topic directly
+            # All users: ask topic directly (FC/refine preferences already loaded from KV in cmd_generate)
             await state.update_data(gen_article=False, series_mode=None, series_count=None)
             prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
@@ -1072,28 +1096,23 @@ def create_dispatcher() -> Dispatcher:
             from .bot_commands import SUPER_ADMIN_ID
             if not (query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID)):
                 return
-            kb = InlineKeyboardMarkup()
-            for row in build_provider_inline().inline_keyboard:
-                try:
-                    kb.row(*row)
-                except Exception:
-                    for b in row:
-                        kb.add(b)
-            kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
+            # Get current provider to show checkmark
+            try:
+                current_prov = await get_provider(query.from_user.id) if query.from_user else "openai"
+            except Exception:
+                current_prov = "openai"
+            kb = build_provider_inline_with_check(current_prov, ui_lang)
             await state.update_data(settings_view="provider")
             if query.message:
                 await query.message.edit_text(("Выберите провайдера:" if _is_ru(ui_lang) else "Choose provider:"), reply_markup=kb)
             return
         if section == "gen_lang":
-            kb = build_genlang_inline(ui_lang)
-            # Add back button below
-            back = build_back_only(ui_lang)
+            # Get current language to show checkmark
             try:
-                for row in back.inline_keyboard:
-                    for b in row:
-                        kb.add(b)
+                current_lang = await get_gen_lang(query.from_user.id) if query.from_user else "auto"
             except Exception:
-                pass
+                current_lang = "auto"
+            kb = build_genlang_inline_with_check(current_lang, ui_lang)
             await state.update_data(settings_view="gen_lang")
             if query.message:
                 await query.message.edit_text(("Выберите язык генерации:" if _is_ru(ui_lang) else "Choose generation language:"), reply_markup=kb)
