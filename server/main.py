@@ -1104,8 +1104,7 @@ async def memes_ui(_: bool = Depends(require_admin)):
         "<input id='q' type='text' placeholder='Search source...'>"
         "<select id='lang'><option value=''>All languages</option><option>ru</option><option>en</option></select>"
         "<select id='theme'><option value='dark' selected>Dark</option><option value='light'>Light</option></select>"
-        "<button id='backfill' style='background:#f59e0b;border-color:#f59e0b;'>Backfill Empty Content</button>"
-        "<button id='refresh'>Refresh</button>"
+        "<button id='refresh'>Refresh & Clean Orphans</button>"
         "</div>"
         f"<div class='muted'>Total: {len(items)}</div>"
         "<table id='tbl'><thead><tr><th data-sort='topic'>Source</th><th data-sort='created'>Created</th><th data-sort='lang'>Lang</th></tr></thead><tbody>"
@@ -1120,11 +1119,56 @@ async def memes_ui(_: bool = Depends(require_admin)):
         "let asc=true;$$$('th[data-sort]').forEach(th=>{th.style.cursor='pointer';th.onclick=()=>{const key=th.getAttribute('data-sort');const rows=$$$('tr',tbody);rows.sort((a,b)=>{const A=(a.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();const B=(b.querySelector('.t-'+key)?.textContent||'').trim().toLowerCase();return (asc?1:-1)*A.localeCompare(B);});asc=!asc;rows.forEach(r=>tbody.appendChild(r));};});"
         "function applyTheme(){const v=themeSel.value;document.documentElement.setAttribute('data-theme',v);localStorage.setItem('ui_theme',v);}themeSel.onchange=applyTheme;"
         "(function(){const t=localStorage.getItem('ui_theme');if(t){themeSel.value=t;document.documentElement.setAttribute('data-theme',t);}else{document.documentElement.setAttribute('data-theme','dark');}})();"
-        "$$('#refresh').onclick=()=>location.reload();"
+        "$$('#refresh').onclick=async()=>{"
+        "const btn=$$('#refresh');"
+        "btn.disabled=true;btn.textContent='Cleaning...';"
+        "try{"
+        "await fetch('/memes-admin/clean-orphans',{method:'POST',cache:'no-store'});"
+        "}catch(_){}"
+        "location.reload();"
+        "};"
         "</script>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
+
+
+@app.post("/memes-admin/clean-orphans")
+async def memes_clean_orphans(_: bool = Depends(require_admin)):
+    """
+    Cleanup endpoint: remove orphaned meme_extract ResultDoc entries
+    that have no corresponding JobLog entries (e.g., logs were deleted manually).
+    """
+    if SessionLocal is None:
+        return {"ok": False, "error": "db not configured"}
+    deleted = 0
+    try:
+        async with SessionLocal() as s:
+            from sqlalchemy import select, delete
+            # Find all meme_extract results
+            res = await s.execute(select(ResultDoc).where(ResultDoc.kind == "meme_extract"))
+            rows = res.scalars().all()
+            for r in rows:
+                try:
+                    jid = int(getattr(r, "job_id", 0) or 0)
+                    if jid <= 0:
+                        # No job_id - orphan
+                        await s.execute(delete(ResultDoc).where(ResultDoc.id == int(r.id)))
+                        deleted += 1
+                    else:
+                        # Check if Job exists
+                        from server.db import Job
+                        job_check = await s.execute(select(Job).where(Job.id == jid))
+                        if job_check.scalar_one_or_none() is None:
+                            # Job doesn't exist - orphan
+                            await s.execute(delete(ResultDoc).where(ResultDoc.id == int(r.id)))
+                            deleted += 1
+                except Exception:
+                    continue
+            await s.commit()
+        return {"ok": True, "deleted": int(deleted)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/memes-admin/backfill")
