@@ -1796,9 +1796,9 @@ def create_dispatcher() -> Dispatcher:
         # If article mode is active, branch into article generation flow
         if bool(data.get("gen_article")):
             chat_id = message.chat.id
-            if await is_chat_running(chat_id):
-                return
-            await mark_chat_running(chat_id)
+            # Atomic check-and-set to prevent race conditions between workers
+            if not await mark_chat_running(chat_id):
+                return  # Another worker already started generation
             try:
                 # Resolve provider/lang
                 prov = (data.get("provider") or "openai").strip().lower()
@@ -1971,9 +1971,9 @@ def create_dispatcher() -> Dispatcher:
         series_mode = (data.get("series_mode") or "").strip().lower()
         if series_mode in {"auto", "fixed"}:
             chat_id = message.chat.id
-            if await is_chat_running(chat_id):
-                return
-            await mark_chat_running(chat_id)
+            # Atomic check-and-set to prevent race conditions between workers
+            if not await mark_chat_running(chat_id):
+                return  # Another worker already started generation
             try:
                 # Resolve provider and language
                 prov = (data.get("provider") or "").strip().lower()
@@ -2341,9 +2341,9 @@ def create_dispatcher() -> Dispatcher:
         # Use current state (or KV defaults) to start generation immediately
         # Resolve provider, language, refine, incognito
         chat_id = message.chat.id
-        if await is_chat_running(chat_id):
-            return
-        await mark_chat_running(chat_id)
+        # Atomic check-and-set to prevent race conditions between workers
+        if not await mark_chat_running(chat_id):
+            return  # Another worker already started generation
 
         # Optional confirmation with price (skip for admins)
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
@@ -2807,10 +2807,10 @@ def create_dispatcher() -> Dispatcher:
             await state.finish()
             return
         chat_id = query.message.chat.id if query.message else query.from_user.id
-        if await is_chat_running(chat_id):
+        # Atomic check-and-set to prevent race conditions between workers
+        if not await mark_chat_running(chat_id):
             await query.answer()
-            return
-        await mark_chat_running(chat_id)
+            return  # Another worker already started generation
         # Charge
         from sqlalchemy.exc import SQLAlchemyError
         # Only superadmin may use fact-check/refine; verify before computing price
