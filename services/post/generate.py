@@ -47,7 +47,7 @@ def generate_post(
     factcheck: bool = True,
     factcheck_max_items: int = 0,
     research_iterations: int = 2,
-    research_concurrency: int = 6,
+    research_concurrency: int = 4,  # Reduced from 6 to 4 for better multi-user stability
     output_subdir: str = "post",
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
@@ -771,7 +771,8 @@ def generate_post(
                 # Ensure SSL for psycopg2 if not explicitly set
                 if "sslmode" not in {k.lower() for k in qs.keys()}:
                     cargs["sslmode"] = "require"
-                sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True, pool_size=3, max_overflow=0)
+                # Increased pool for concurrent users: pool_size=15, max_overflow=10 = 25 total
+                sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True, pool_size=15, max_overflow=10, pool_timeout=30)
                 SyncSession = sessionmaker(sync_engine)
                 
                 with SyncSession() as s:

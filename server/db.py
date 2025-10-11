@@ -133,10 +133,14 @@ engine = None
 if DB_URL:
     sanitized, cargs = _sanitize_db_url(DB_URL)
     # For pgBouncer (transaction pooler) + asyncpg: disable statement cache to avoid PREPARE issues
+    # Increase pool for concurrent users: pool_size=20 (base), max_overflow=20 (burst) = 40 total
     engine = create_async_engine(
         sanitized,
         connect_args=cargs,
         pool_pre_ping=True,
+        pool_size=20,
+        max_overflow=20,
+        pool_timeout=30,
     )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False) if engine else None
 

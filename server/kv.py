@@ -107,7 +107,13 @@ def get_redis() -> "redis.Redis":
         return _inmem_kv  # type: ignore
     if redis is None:
         raise RuntimeError("redis package not installed; add 'redis' to requirements.txt")
-    _redis_client = redis.from_url(url)
+    # Use connection pool for better concurrency (default: 50 connections)
+    _redis_client = redis.from_url(
+        url,
+        max_connections=50,
+        socket_keepalive=True,
+        socket_connect_timeout=5,
+    )
     return _redis_client
 # ---- Simple history storage (KV fallback) ----
 

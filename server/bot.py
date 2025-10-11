@@ -388,9 +388,10 @@ def create_dispatcher() -> Dispatcher:
 
     # Simple in-memory guard to avoid duplicate generation per chat
     RUNNING_CHATS: Set[int] = set()
-    # Optional global concurrency limit (5–10 parallel jobs target)
+    # Global concurrency limit: increased to 30 for better multi-user performance
+    # Each user generation may spawn up to ~6 parallel workers, so 30 allows ~5 concurrent users
     import asyncio
-    _sem_capacity = int(os.getenv("BOT_PARALLEL_LIMIT", "12"))
+    _sem_capacity = int(os.getenv("BOT_PARALLEL_LIMIT", "30"))
     GLOBAL_SEMAPHORE = asyncio.Semaphore(max(1, _sem_capacity))
 
     @dp.message_handler(commands=["start"])  # type: ignore
