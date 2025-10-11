@@ -47,7 +47,7 @@ def generate_post(
     factcheck: bool = True,
     factcheck_max_items: int = 0,
     research_iterations: int = 2,
-    research_concurrency: int = 6,
+    research_concurrency: int = 8,
     output_subdir: str = "post",
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
@@ -563,7 +563,16 @@ def generate_post(
             )
             # Web context build (provider-agnostic)
             queries = getattr(qp, "queries", []) or []
-            web_ctx = build_search_context(queries, per_query=2, max_chars=2000)
+            # Reduce external fetch workload to improve latency under rate limits
+            try:
+                _per_q = int(os.getenv("FC_WEB_PER_QUERY", "1"))
+            except Exception:
+                _per_q = 1
+            try:
+                _max_chars = int(os.getenv("FC_WEB_MAX_CHARS", "1600"))
+            except Exception:
+                _max_chars = 1600
+            web_ctx = build_search_context(queries, per_query=max(1, _per_q), max_chars=max(200, _max_chars))
             if queries:
                 log("🌐 Web · Queries", "\n".join([f"- {q}" for q in queries]))
             # Extract sources (best-effort)
