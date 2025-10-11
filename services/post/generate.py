@@ -703,8 +703,11 @@ def generate_post(
 
     # Rewrite and refine
     final_content = content
+    log("DEBUG Rewrite check", f"report={report}, report is not None={report is not None}")
     if report is not None:
+        log("DEBUG items", f"report.items={report.items}, len={len(report.items)}")
         needs_rewrite = any(i.verdict != "pass" for i in report.items)
+        log("DEBUG needs_rewrite", f"needs_rewrite={needs_rewrite}, verdicts={[i.verdict for i in report.items]}")
         if needs_rewrite:
             _emit("rewrite:init")
             from pathlib import Path
