@@ -2341,11 +2341,9 @@ def create_dispatcher() -> Dispatcher:
         # Use current state (or KV defaults) to start generation immediately
         # Resolve provider, language, refine, incognito
         chat_id = message.chat.id
-        # Atomic check-and-set to prevent race conditions between workers
-        if not await mark_chat_running(chat_id):
-            return  # Another worker already started generation
 
         # Optional confirmation with price (skip for admins)
+        # NOTE: Don't mark chat as running yet - only after confirmation
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         if not is_admin:
             try:
@@ -2374,11 +2372,16 @@ def create_dispatcher() -> Dispatcher:
                 kb.add(InlineKeyboardButton(text=("Подтвердить" if _is_ru(ui_lang_local) else "Confirm"), callback_data="confirm:charge:yes"))
                 kb.add(InlineKeyboardButton(text=("Отмена" if _is_ru(ui_lang_local) else "Cancel"), callback_data="confirm:charge:no"))
                 await message.answer(confirm_txt, reply_markup=kb)
-                # Save pending topic and wait for callback
+                # Save pending topic and wait for callback (chat will be marked running in cb_confirm_charge)
                 await state.update_data(pending_topic=topic)
                 return
             except Exception:
                 pass
+        
+        # Atomic check-and-set to prevent race conditions between workers
+        # (only for admins who skip confirmation, or after exception in confirmation flow)
+        if not await mark_chat_running(chat_id):
+            return  # Another worker already started generation
 
         # Charge dynamic price before starting (DB if configured, else Redis KV)
         from sqlalchemy.exc import SQLAlchemyError
@@ -2765,9 +2768,9 @@ def create_dispatcher() -> Dispatcher:
                             await session.commit()
             except Exception:
                 pass
-
-        await state.finish()
-        await unmark_chat_running(chat_id)
+        finally:
+            await state.finish()
+            await unmark_chat_running(chat_id)
 
     @dp.callback_query_handler(lambda c: c.data in {"confirm:charge:yes","confirm:charge:no"}, state="*")  # type: ignore
     async def cb_confirm_charge(query: types.CallbackQuery, state: FSMContext):
@@ -2785,10 +2788,7 @@ def create_dispatcher() -> Dispatcher:
             pass
         if query.data.endswith(":no"):
             chat_id = query.message.chat.id if query.message else (query.from_user.id if query.from_user else 0)
-            try:
-                await unmark_chat_running(chat_id)
-            except Exception:
-                pass
+            # No need to unmark - chat was never marked as running (marking happens only on ":yes")
             try:
                 await state.update_data(pending_topic=None)
             except Exception:
@@ -3059,8 +3059,9 @@ def create_dispatcher() -> Dispatcher:
                         await session.commit()
             except Exception:
                 pass
-        await state.finish()
-        await unmark_chat_running(chat_id)
+        finally:
+            await state.finish()
+            await unmark_chat_running(chat_id)
 
     # ---- History command ----
     async def _list_deletable_ids_for_user(telegram_user_id: int, ids: Optional[list[int]] | None = None, *, only_visible: bool = False) -> list[int]:
