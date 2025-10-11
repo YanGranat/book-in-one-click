@@ -395,6 +395,14 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["start"])  # type: ignore
     async def cmd_start(message: types.Message):
+        # Prevent starting onboarding during active generation
+        if message.chat.id in RUNNING_CHATS:
+            state = dp.current_state(user=message.from_user.id, chat=message.chat.id)
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+            warn = "⏳ Генерация уже выполняется. Дождитесь завершения или используйте /cancel." if _is_ru(ui_lang) else "⏳ Generation in progress. Wait for completion or use /cancel."
+            await message.answer(warn)
+            return
         # Mark onboarding flow active and reset settings panel state
         await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(
             onboarding=True,
@@ -863,6 +871,13 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["generate"])  # type: ignore
     async def cmd_generate(message: types.Message, state: FSMContext):
+        # Prevent starting new generation during active generation
+        if message.chat.id in RUNNING_CHATS:
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+            warn = "⏳ Генерация уже выполняется. Дождитесь завершения или используйте /cancel." if _is_ru(ui_lang) else "⏳ Generation in progress. Wait for completion or use /cancel."
+            await message.answer(warn)
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         # Reset transient mode flags to avoid leakage from previous flows (including in_settings!)
@@ -1067,6 +1082,13 @@ def create_dispatcher() -> Dispatcher:
         is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
         if not (is_admin or is_superadmin):
             return
+        # Prevent starting new generation during active generation
+        if message.chat.id in RUNNING_CHATS:
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+            warn = "⏳ Генерация уже выполняется. Дождитесь завершения или используйте /cancel." if _is_ru(ui_lang) else "⏳ Generation in progress. Wait for completion or use /cancel."
+            await message.answer(warn)
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         txt = (
@@ -1086,6 +1108,13 @@ def create_dispatcher() -> Dispatcher:
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
         if not (is_admin or is_superadmin):
+            return
+        # Prevent starting new generation during active generation
+        if message.chat.id in RUNNING_CHATS:
+            data = await state.get_data()
+            ui_lang = (data.get("ui_lang") or "ru").strip()
+            warn = "⏳ Генерация уже выполняется. Дождитесь завершения или используйте /cancel." if _is_ru(ui_lang) else "⏳ Generation in progress. Wait for completion or use /cancel."
+            await message.answer(warn)
             return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
@@ -2086,7 +2115,7 @@ def create_dispatcher() -> Dispatcher:
                 loop = _asyncio.get_running_loop()
                 await message.answer("Генерирую серию…" if _is_ru(ui_lang) else "Generating series…")
                 from services.post_series.generate_series import generate_series as _gen_series
-                timeout_s = int(os.getenv("GEN_TIMEOUT_S", "1800"))
+                timeout_s = int(os.getenv("GEN_TIMEOUT_S", "3600"))
                 mode_param = ("auto" if is_admin and series_mode == "auto" else ("fixed" if target_count else series_mode))
                 count_param = (0 if mode_param == "auto" else int(target_count or 0))
                 fut = loop.run_in_executor(
@@ -2449,7 +2478,7 @@ def create_dispatcher() -> Dispatcher:
                 except Exception:
                     pass
 
-            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "1200"))
+            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "2400"))
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
@@ -2839,7 +2868,7 @@ def create_dispatcher() -> Dispatcher:
             if job_id:
                 job_meta["job_id"] = job_id
             await dp.bot.send_message(chat_id, "Генерирую…" if _is_ru(ui_lang) else "Working…")
-            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "1800"))
+            timeout_s = int(os.getenv("GEN_TIMEOUT_S", "3600"))
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
