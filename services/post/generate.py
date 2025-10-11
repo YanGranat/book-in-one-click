@@ -362,9 +362,11 @@ def generate_post(
                 log("ℹ️ Fact-check skipped", "No risky points identified")
                 report = None
             else:
+                log("🔧 Building agents", f"Starting fact-check for {len(points)} points")
                 research_agent = build_iterative_research_agent()
                 suff_agent = build_sufficiency_agent()
                 rec_agent = build_recommendation_agent()
+                log("✓ Agents ready", "All agents initialized")
 
                 def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
                     for i in range(attempts):
@@ -429,23 +431,22 @@ def generate_post(
 
                 # Parallelize across points using threads (Runner.run_sync is synchronous)
                 # Bound concurrency by research_concurrency to avoid provider rate limits
+                max_workers = max(1, int(research_concurrency))
+                log("🔍 Processing points", f"total={len(points)}, workers={max_workers}")
                 results = []
-                if points:
-                    max_workers = max(1, int(research_concurrency))
-                    log("🔍 Processing points", f"total={len(points)}, workers={max_workers}")
-                    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                        future_map = {pool.submit(process_point_sync, p): p for p in points}
-                        for fut in as_completed(list(future_map.keys())):
-                            try:
-                                result = fut.result()
-                                results.append(result)
-                                log("✓ Point processed", f"{result[0].id}: {result[0].text[:60]}...")
-                            except Exception as e:
-                                # Skip failed point; continue others
-                                p_failed = future_map[fut]
-                                log("✗ Point failed", f"{p_failed.id}: {str(e)[:200]}")
-                                pass
-                    log("🔍 Processing complete", f"successful={len(results)}/{len(points)}")
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    future_map = {pool.submit(process_point_sync, p): p for p in points}
+                    for fut in as_completed(list(future_map.keys())):
+                        try:
+                            result = fut.result()
+                            results.append(result)
+                            log("✓ Point processed", f"{result[0].id}: {result[0].text[:60]}...")
+                        except Exception as e:
+                            # Skip failed point; continue others
+                            p_failed = future_map[fut]
+                            log("✗ Point failed", f"{p_failed.id}: {str(e)[:200]}")
+                            pass
+                log("🔍 Processing complete", f"successful={len(results)}/{len(points)}")
 
                 class _SimpleItem:
                     def __init__(self, claim_text: str, verdict: str, reason: str):
