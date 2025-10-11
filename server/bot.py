@@ -3178,7 +3178,7 @@ def create_dispatcher() -> Dispatcher:
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(text=("Отмена" if _is_ru(ui_lang) else "Cancel"), callback_data="history:delete_cancel"))
         await dp.bot.send_message(
-            chat_id=query.message.chat.id,
+            chat_id=query.message.chat.id if query.message else query.from_user.id,
             text=(prompt_ru if _is_ru(ui_lang) else prompt_en),
             reply_markup=kb,
         )
@@ -3188,6 +3188,38 @@ def create_dispatcher() -> Dispatcher:
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         raw = (message.text or "").strip()
+        # If user typed a command while waiting for IDs — treat it as a command, exit state
+        if raw.startswith("/"):
+            try:
+                await state.finish()
+            except Exception:
+                pass
+            try:
+                cmd = raw.split()[0].lstrip("/").split("@")[0].lower()
+                handlers = {
+                    "start": cmd_start,
+                    "info": cmd_info,
+                    "generate": cmd_generate,
+                    "series": cmd_series,
+                    "series_fixed": cmd_series_fixed,
+                    "settings": cmd_settings,
+                    "history": cmd_history,
+                    "history_clear": cmd_history_clear,
+                    "interface_lang": cmd_lang,
+                    "credits": cmd_credits,
+                    "chat": cmd_chat,
+                    "endchat": cmd_endchat,
+                    "cancel": cmd_cancel,
+                }
+                h = handlers.get(cmd)
+                if h is not None:
+                    try:
+                        await h(message, state)  # type: ignore[arg-type]
+                    except TypeError:
+                        await h(message)  # type: ignore[misc]
+            except Exception:
+                pass
+            return
         # Textual cancel fallback
         if raw.lower() in {"отмена", "cancel"}:
             await state.finish()
@@ -3245,7 +3277,7 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await dp.bot.send_message(
-            chat_id=query.message.chat.id,
+            chat_id=query.message.chat.id if query.message else query.from_user.id,
             text=("Удаление отменено." if _is_ru(ui_lang) else "Deletion cancelled."),
         )
 
@@ -3273,7 +3305,7 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             pass
         await dp.bot.send_message(
-            chat_id=query.message.chat.id,
+            chat_id=query.message.chat.id if query.message else query.from_user.id,
             text=((f"Удалено: {deleted}" if _is_ru(ui_lang) else f"Deleted: {deleted}") if deleted > 0 else ("Ничего не удалено." if _is_ru(ui_lang) else "Nothing deleted.")),
         )
 
