@@ -803,30 +803,34 @@ def generate_post(
                     # Ensure we have a valid Job.id for history join; if missing, create one based on user_id
                     try:
                         if not result_job_id or int(result_job_id) <= 0:
-                            # Try to resolve or create User by telegram id (job_meta.user_id)
+                            # Prefer db_user_id (User.id) from job_meta if available; else resolve by telegram_id
                             from server.db import User, Job as _Job
-                            tg_uid = int((job_meta or {}).get("user_id", 0) or 0)
-                            db_user_id = None
-                            if tg_uid > 0:
-                                try:
-                                    urow = s.query(User).filter(User.telegram_id == tg_uid).first()
-                                except Exception:
-                                    urow = None
-                                if urow is None:
+                            db_user_id = (job_meta or {}).get("db_user_id")  # Try User.id first
+                            if db_user_id is None or int(db_user_id or 0) <= 0:
+                                # Fallback: resolve User by telegram_id
+                                tg_uid = int((job_meta or {}).get("user_id", 0) or 0)
+                                if tg_uid > 0:
                                     try:
-                                        urow = User(telegram_id=tg_uid, credits=0)
-                                        s.add(urow)
-                                        s.flush()
-                                        s.commit()  # Commit User creation immediately
-                                    except Exception as _create_err:
-                                        s.rollback()
-                                        # Try one more time to find in case of race condition
+                                        urow = s.query(User).filter(User.telegram_id == tg_uid).first()
+                                    except Exception:
+                                        urow = None
+                                    if urow is None:
                                         try:
-                                            urow = s.query(User).filter(User.telegram_id == tg_uid).first()
-                                        except Exception:
-                                            urow = None
-                                if urow is not None:
-                                    db_user_id = int(getattr(urow, "id", 0) or 0)
+                                            urow = User(telegram_id=tg_uid, credits=0)
+                                            s.add(urow)
+                                            s.flush()
+                                            s.commit()  # Commit User creation immediately
+                                        except Exception as _create_err:
+                                            s.rollback()
+                                            # Try one more time to find in case of race condition
+                                            try:
+                                                urow = s.query(User).filter(User.telegram_id == tg_uid).first()
+                                            except Exception:
+                                                urow = None
+                                    if urow is not None:
+                                        db_user_id = int(getattr(urow, "id", 0) or 0)
+                            else:
+                                db_user_id = int(db_user_id)
                             # Create a Job row linked to this user (ALWAYS use User.id, never telegram_id directly)
                             if db_user_id:
                                 try:
@@ -858,6 +862,8 @@ def generate_post(
                         except ValueError:
                             rel_doc = str(filepath)
                         final_job_id = int(result_job_id or 0)
+                        tg_id = int((job_meta or {}).get("user_id", 0) or 0)
+                        print(f"{'✓' if final_job_id > 0 else '✗'} [RESULT] Creating ResultDoc with job_id={final_job_id}, telegram_id={tg_id}, topic={topic[:30]}")
                         rd = ResultDoc(
                             job_id=final_job_id,
                             kind=output_subdir,

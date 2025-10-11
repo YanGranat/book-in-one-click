@@ -1789,8 +1789,9 @@ def create_dispatcher() -> Dispatcher:
                 # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
                 eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
 
-                # Create Job row (article)
+                # Create Job row (article) and ensure User exists
                 job_id = 0
+                db_user_id = None
                 try:
                     if SessionLocal is not None and message.from_user:
                         async with SessionLocal() as session:
@@ -1798,6 +1799,7 @@ def create_dispatcher() -> Dispatcher:
                             import json as _json
                             from .db import get_or_create_user as _get_or_create_user
                             db_user = await _get_or_create_user(session, message.from_user.id)
+                            db_user_id = int(db_user.id)
                             params = {"topic": topic, "lang": eff_lang, "provider": prov or "openai"}
                             j = Job(user_id=db_user.id, type="article", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=100)
                             session.add(j)
@@ -1867,7 +1869,7 @@ def create_dispatcher() -> Dispatcher:
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         output_subdir="deep_article",
-                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
+                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "db_user_id": db_user_id, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
                         enable_research=False,
                         enable_refine=False,
                     ),
@@ -2086,6 +2088,7 @@ def create_dispatcher() -> Dispatcher:
 
                 # Create Job row (series)
                 job_id = 0
+                db_user_id = None
                 try:
                     if SessionLocal is not None and message.from_user:
                         async with SessionLocal() as session:
@@ -2104,6 +2107,7 @@ def create_dispatcher() -> Dispatcher:
                             # Normalize to internal User.id for consistency with single-post flow
                             from .db import get_or_create_user as _get_or_create_user
                             db_user = await _get_or_create_user(session, message.from_user.id)
+                            db_user_id = int(db_user.id)
                             j = Job(user_id=db_user.id, type="post_series", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=int(precharged))
                             session.add(j)
                             await session.flush()
@@ -2135,7 +2139,7 @@ def create_dispatcher() -> Dispatcher:
                         factcheck=bool(fc_enabled_pref),
                         research_iterations=int(fc_depth_pref or 2),
                         refine=bool(refine_pref),
-                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "chat_id": message.chat.id, "job_id": job_id},
+                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "db_user_id": db_user_id, "chat_id": message.chat.id, "job_id": job_id},
                     ),
                 )
                 aggregate_path = await _asyncio.wait_for(fut, timeout=timeout_s)
@@ -2352,8 +2356,9 @@ def create_dispatcher() -> Dispatcher:
             RUNNING_CHATS.discard(chat_id)
             return
 
-        # Create Job row (running)
+        # Create Job row (running) and ensure User exists
         job_id = 0
+        db_user_id = None  # Track User.id for job_meta
         try:
             if SessionLocal is not None and message.from_user:
                 async with SessionLocal() as session:
@@ -2361,6 +2366,7 @@ def create_dispatcher() -> Dispatcher:
                     from .db import get_or_create_user as _get_or_create_user
                     import json as _json
                     db_user = await _get_or_create_user(session, message.from_user.id)
+                    db_user_id = int(db_user.id)  # Capture User.id
                     params = {
                         "topic": topic,
                         "lang": (data.get("gen_lang") or "auto"),
@@ -2374,11 +2380,10 @@ def create_dispatcher() -> Dispatcher:
                     await session.flush()
                     job_id = int(j.id)
                     await session.commit()
-                    print(f"[Job created] telegram_id={message.from_user.id}, User.id={db_user.id}, Job.id={job_id}")
-        except Exception as _job_err:
-            print(f"[Job FAILED] telegram_id={message.from_user.id if message.from_user else 'N/A'}, error={type(_job_err).__name__}: {str(_job_err)[:200]}")
+                    print(f"✓ [START JOB] Created Job.id={job_id}, User.id={db_user_id}, telegram_id={message.from_user.id}")
+        except Exception as e:
+            print(f"✗ [START JOB] FAILED to create Job for telegram_id={message.from_user.id if message.from_user else 'N/A'}: {type(e).__name__}")
             job_id = 0
-        print(f"[Job status] telegram_id={message.from_user.id if message.from_user else 'N/A'}, final job_id={job_id}")
 
         # Light progress notes before long run
         try:
@@ -2448,7 +2453,8 @@ def create_dispatcher() -> Dispatcher:
             async with GLOBAL_SEMAPHORE:
                 # Prepare job metadata for logging
                 job_meta = {
-                    "user_id": message.from_user.id if message.from_user else 0,
+                    "user_id": message.from_user.id if message.from_user else 0,  # telegram_id for backward compat
+                    "db_user_id": db_user_id,  # User.id for accurate fallback Job creation
                     "chat_id": message.chat.id,
                     "topic": topic,
                     "provider": prov or "openai",
@@ -2836,8 +2842,9 @@ def create_dispatcher() -> Dispatcher:
                         depth = 2
                 if not fc_enabled_state:
                     depth = None
-            # Create Job (running)
+            # Create Job (running) and ensure User exists
             job_id = 0
+            db_user_id = None  # Track User.id for job_meta
             try:
                 if SessionLocal is not None and query.from_user:
                     async with SessionLocal() as session:
@@ -2845,6 +2852,7 @@ def create_dispatcher() -> Dispatcher:
                         from .db import get_or_create_user as _get_or_create_user
                         import json as _json
                         db_user = await _get_or_create_user(session, query.from_user.id)
+                        db_user_id = int(db_user.id)  # Capture User.id
                         params = {
                             "topic": topic,
                             "lang": eff_lang,
@@ -2858,14 +2866,12 @@ def create_dispatcher() -> Dispatcher:
                         await session.flush()
                         job_id = int(j.id)
                         await session.commit()
-                        print(f"[Job created] telegram_id={query.from_user.id}, User.id={db_user.id}, Job.id={job_id}")
-            except Exception as _job_err:
-                print(f"[Job FAILED] telegram_id={query.from_user.id if query.from_user else 'N/A'}, error={type(_job_err).__name__}: {str(_job_err)[:200]}")
+            except Exception:
                 job_id = 0
-            print(f"[Job status] telegram_id={query.from_user.id if query.from_user else 'N/A'}, final job_id={job_id}")
 
             job_meta = {
-                "user_id": query.from_user.id if query.from_user else 0,
+                "user_id": query.from_user.id if query.from_user else 0,  # telegram_id for backward compat
+                "db_user_id": db_user_id,  # User.id for accurate fallback Job creation
                 "chat_id": chat_id,
                 "topic": topic,
                 "provider": prov or "openai",
@@ -3041,8 +3047,10 @@ def create_dispatcher() -> Dispatcher:
                     
                     # If User not found, history will be empty (as it should be - no generations yet)
                     if db_uid is None:
+                        print(f"⚠ [HISTORY] User NOT FOUND in DB for telegram_id={int(message.from_user.id)}")
                         items = []
                     else:
+                        print(f"✓ [HISTORY] User FOUND: telegram_id={int(message.from_user.id)}, User.id={db_uid}")
                         jn = _join(ResultDoc, Job, ResultDoc.job_id == Job.id)
                         # Support BOTH schemas:
                         # NEW: Job.user_id = User.id (normalized)
@@ -3057,6 +3065,7 @@ def create_dispatcher() -> Dispatcher:
                             .limit(50)
                         )
                         rows = res.fetchall()
+                        print(f"✓ [HISTORY] Found {len(rows)} ResultDoc+Job rows in DB")
                         # Filter by last clear ts if exists
                         cleared_ts = None
                         try:
