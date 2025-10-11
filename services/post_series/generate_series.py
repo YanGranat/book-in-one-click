@@ -379,7 +379,8 @@ def generate_series(
                 cargs = {}
                 if "sslmode" not in {k.lower() for k in qs.keys()}:
                     cargs["sslmode"] = "require"
-                sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True, pool_size=3, max_overflow=0)
+                # Increased pool for concurrent users: pool_size=15, max_overflow=10 = 25 total
+                sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True, pool_size=15, max_overflow=10, pool_timeout=30)
                 SyncSession = sessionmaker(sync_engine)
                 with SyncSession() as s:
                     try:
