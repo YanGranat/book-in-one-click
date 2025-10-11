@@ -802,20 +802,23 @@ def create_dispatcher() -> Dispatcher:
             await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow=None, next_after_fc=None)
         except Exception:
             pass
-        # Preload default fact-check preferences from KV for /generate flow
-        try:
-            fc_enabled = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
-        except Exception:
-            fc_enabled = False
-        try:
-            fc_depth = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
-        except Exception:
-            fc_depth = 2
-        await state.update_data(factcheck=bool(fc_enabled), research_iterations=(int(fc_depth) if fc_enabled else None), fc_ready=True)
-        # Ask what to generate; users cannot generate series
-        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        # Preload default fact-check preferences from KV for /generate flow (superadmin only)
         from .bot_commands import SUPER_ADMIN_ID
         is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        if is_superadmin:
+            try:
+                fc_enabled = await get_factcheck_enabled(message.from_user.id) if message.from_user else False
+            except Exception:
+                fc_enabled = False
+            try:
+                fc_depth = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
+            except Exception:
+                fc_depth = 2
+            await state.update_data(factcheck=bool(fc_enabled), research_iterations=(int(fc_depth) if fc_enabled else None), fc_ready=True)
+        else:
+            await state.update_data(factcheck=False, research_iterations=None, fc_ready=True)
+        # Ask what to generate; users cannot generate series
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         allow_series = bool(is_admin or is_superadmin)
         ru = _is_ru(ui_lang)
         kb = build_gentype_keyboard(ui_lang, allow_series=allow_series)
@@ -2622,12 +2625,43 @@ def create_dispatcher() -> Dispatcher:
         RUNNING_CHATS.add(chat_id)
         # Charge
         from sqlalchemy.exc import SQLAlchemyError
+        # Only superadmin may use fact-check/refine; verify before computing price
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin_local = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
         try:
             charged = False
             if SessionLocal is not None and query.from_user:
                 async with SessionLocal() as session:
                     user = await ensure_user_with_credits(session, query.from_user.id)
-                    # Compute unit price again
+                    # Compute unit price again (respect superadmin-only features)
+                    refine_pref = False
+                    fc_enabled_pref = False
+                    fc_depth_pref = 2
+                    if is_superadmin_local:
+                        try:
+                            refine_pref = await get_refine_enabled(query.from_user.id)
+                        except Exception:
+                            refine_pref = False
+                        try:
+                            fc_enabled_pref = await get_factcheck_enabled(query.from_user.id)
+                        except Exception:
+                            fc_enabled_pref = False
+                        try:
+                            fc_depth_pref = await get_factcheck_depth(query.from_user.id)
+                        except Exception:
+                            fc_depth_pref = 2
+                    fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
+                    unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                    ok, remaining = await charge_credits(session, user, unit_cost, reason="post")
+                    if ok:
+                        await session.commit()
+                        charged = True
+            if not charged and query.from_user:
+                # KV fallback (respect superadmin-only features)
+                refine_pref = False
+                fc_enabled_pref = False
+                fc_depth_pref = 2
+                if is_superadmin_local:
                     try:
                         refine_pref = await get_refine_enabled(query.from_user.id)
                     except Exception:
@@ -2640,26 +2674,6 @@ def create_dispatcher() -> Dispatcher:
                         fc_depth_pref = await get_factcheck_depth(query.from_user.id)
                     except Exception:
                         fc_depth_pref = 2
-                    fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
-                    unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
-                    ok, remaining = await charge_credits(session, user, unit_cost, reason="post")
-                    if ok:
-                        await session.commit()
-                        charged = True
-            if not charged and query.from_user:
-                # KV fallback
-                try:
-                    refine_pref = await get_refine_enabled(query.from_user.id)
-                except Exception:
-                    refine_pref = False
-                try:
-                    fc_enabled_pref = await get_factcheck_enabled(query.from_user.id)
-                except Exception:
-                    fc_enabled_pref = False
-                try:
-                    fc_depth_pref = await get_factcheck_depth(query.from_user.id)
-                except Exception:
-                    fc_depth_pref = 2
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
                 unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
                 ok, remaining = await charge_credits_kv(query.from_user.id, unit_cost)
@@ -2707,34 +2721,37 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 persisted_gen_lang = None
             gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
-            eff_lang = gen_lang
-            if (gen_lang or "auto").strip().lower() == "auto":
-                try:
-                    det = (detect_lang_from_text(topic) or "").lower()
-                    eff_lang = "en" if det.startswith("en") else "ru"
-                except Exception:
-                    eff_lang = "ru"
+            # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
+            eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
+            
+            # Refine preference (superadmin only)
             refine_enabled = False
-            try:
-                if query.from_user:
-                    refine_enabled = await get_refine_enabled(query.from_user.id)
-            except Exception:
-                refine_enabled = False
-            fc_enabled_state = data.get("factcheck")
-            if fc_enabled_state is None and query.from_user:
+            if is_superadmin_local:
                 try:
-                    fc_enabled_state = await get_factcheck_enabled(query.from_user.id)
+                    if query.from_user:
+                        refine_enabled = await get_refine_enabled(query.from_user.id)
                 except Exception:
-                    fc_enabled_state = False
-            fc_enabled_state = bool(fc_enabled_state)
-            depth = data.get("research_iterations")
-            if fc_enabled_state and depth is None and query.from_user:
-                try:
-                    depth = await get_factcheck_depth(query.from_user.id)
-                except Exception:
-                    depth = 2
-            if not fc_enabled_state:
-                depth = None
+                    refine_enabled = False
+            
+            # Fact-check decision (superadmin only)
+            fc_enabled_state = False
+            depth = None
+            if is_superadmin_local:
+                fc_enabled_state = data.get("factcheck")
+                if fc_enabled_state is None and query.from_user:
+                    try:
+                        fc_enabled_state = await get_factcheck_enabled(query.from_user.id)
+                    except Exception:
+                        fc_enabled_state = False
+                fc_enabled_state = bool(fc_enabled_state)
+                depth = data.get("research_iterations")
+                if fc_enabled_state and depth is None and query.from_user:
+                    try:
+                        depth = await get_factcheck_depth(query.from_user.id)
+                    except Exception:
+                        depth = 2
+                if not fc_enabled_state:
+                    depth = None
             # Create Job (running)
             job_id = 0
             try:
