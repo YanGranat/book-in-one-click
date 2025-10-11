@@ -40,17 +40,21 @@ def extract_memes(
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
 
-    # Resolve language
-    eff_lang = (lang or "auto").strip().lower()
-    if eff_lang == "auto":
+    # Normalize language parameter
+    lang_setting = (lang or "auto").strip().lower()
+    
+    # For logging/metadata: detect actual language if auto
+    detected_lang = lang_setting
+    if lang_setting == "auto":
         try:
-            eff_lang = detect_lang_from_text(text or "") or "en"
+            detected_lang = detect_lang_from_text(text or "") or "en"
         except Exception:
-            eff_lang = "en"
+            detected_lang = "en"
 
     # Load system prompt and substitute language variable
+    # Use original lang_setting (not detected), so prompt logic works correctly
     system_prompt = _load_system_prompt()
-    system_prompt = system_prompt.replace("{LANG}", eff_lang)
+    system_prompt = system_prompt.replace("{LANG}", lang_setting)
 
     # Run model
     pnorm = (provider or "openai").strip().lower()
@@ -104,7 +108,7 @@ def extract_memes(
     header = (
         f"# 🧾 Meme Extraction Log\n\n"
         f"- provider: {pnorm}\n"
-        f"- lang: {eff_lang}\n"
+        f"- lang: {lang_setting} (detected: {detected_lang if lang_setting == 'auto' else 'N/A'})\n"
         f"- model: {used_model or '?'}\n"
         f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
         f"- finished_at: {finished_at.strftime('%Y-%m-%d %H:%M')}\n"
@@ -210,7 +214,7 @@ def extract_memes(
                     path=rel_doc,
                     topic=Path(source_name).name,
                     provider=pnorm,
-                    lang=eff_lang,
+                    lang=detected_lang,  # Store detected language for metadata
                     content=final_content,
                     hidden=0,
                 )
