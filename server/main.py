@@ -690,10 +690,23 @@ async def delete_log_api(log_id: int, _: bool = Depends(require_admin)):
             return {"ok": False, "error": "not found"}
         # Also delete results linked by the same Job (ResultDoc.job_id == JobLog.job_id)
         try:
-            from sqlalchemy import delete as _sqdel
+            from sqlalchemy import delete as _sqdel, and_ as _and, or_ as _or
             job_id_val = int(getattr(obj, "job_id", 0) or 0)
             if job_id_val:
                 await s.execute(_sqdel(ResultDoc).where(ResultDoc.job_id == job_id_val))
+            else:
+                # Fallback: attempt to infer meme_extract results by filename base when job_id is 0
+                try:
+                    p = Path(getattr(obj, "path", "") or "")
+                    stem = p.name
+                    import re as _re
+                    base = _re.sub(r"_log(_\d{8}_\d{6})?\.md$", "", stem)
+                    if base:
+                        like1 = f"%/{base}_memes%"
+                        like2 = f"%\\{base}_memes%"
+                        await s.execute(_sqdel(ResultDoc).where(_and(ResultDoc.kind == "meme_extract", _or(ResultDoc.path.like(like1), ResultDoc.path.like(like2)))))
+                except Exception:
+                    pass
         except Exception:
             pass
         await s.delete(obj)
@@ -711,7 +724,7 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
     deleted = 0
     async with SessionLocal() as s:
         if ids:
-            from sqlalchemy import delete, select
+            from sqlalchemy import delete, select, and_ as _and, or_ as _or
             # Map JobLog ids -> Job ids, then delete ResultDoc by those Job ids
             try:
                 res = await s.execute(select(JobLog.job_id).where(JobLog.id.in_(ids)))
@@ -720,6 +733,27 @@ async def purge_logs(payload: dict, _: bool = Depends(require_admin)):
                 job_ids = []
             if job_ids:
                 await s.execute(delete(ResultDoc).where(ResultDoc.job_id.in_(job_ids)))
+            else:
+                # Fallback: infer meme_extract results by filename base patterns for all selected logs
+                try:
+                    res2_paths = await s.execute(select(JobLog.path).where(JobLog.id.in_(ids)))
+                    rows = [r[0] for r in res2_paths.fetchall() if r and r[0]]
+                    import re as _re
+                    bases = []
+                    for path in rows:
+                        try:
+                            stem = Path(str(path)).name
+                            base = _re.sub(r"_log(_\d{8}_\d{6})?\.md$", "", stem)
+                            if base:
+                                bases.append(base)
+                        except Exception:
+                            continue
+                    for base in set(bases):
+                        like1 = f"%/{base}_memes%"
+                        like2 = f"%\\{base}_memes%"
+                        await s.execute(delete(ResultDoc).where(_and(ResultDoc.kind == "meme_extract", _or(ResultDoc.path.like(like1), ResultDoc.path.like(like2)))))
+                except Exception:
+                    pass
             res2 = await s.execute(delete(JobLog).where(JobLog.id.in_(ids)))
             await s.commit()
             deleted = int(res2.rowcount or 0)
