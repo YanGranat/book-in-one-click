@@ -355,11 +355,9 @@ def generate_post(
                 points = points[: factcheck_max_items]
             try:
                 log("🔎 Fact-check · Plan (OpenAI)", f"points={len(points)}")
-                log("DEBUG", f"points type={type(points)}, bool={bool(points)}, content={points[:1] if points else 'EMPTY'}")
-            except Exception as e:
-                log("ERROR in logging", str(e))
+            except Exception:
+                pass
             
-            log("DEBUG check", f"Checking if points empty: not points = {not points}")
             if not points:
                 log("ℹ️ Fact-check skipped", "No risky points identified")
                 report = None
@@ -371,6 +369,13 @@ def generate_post(
                 log("✓ Agents ready", "All agents initialized")
 
                 def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+                    # Ensure event loop exists in thread
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    
                     for i in range(attempts):
                         try:
                             return Runner.run_sync(agent, inp)
@@ -382,6 +387,13 @@ def generate_post(
                 def process_point_sync(p):
                     # Skip query synthesis for OpenAI - WebSearchTool handles this internally
                     # The agent will autonomously decide what to search for
+                    
+                    # Ensure event loop exists in this thread
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
 
                     notes = []
                     for step in range(1, max(1, int(research_iterations)) + 1):
