@@ -3334,6 +3334,14 @@ def create_dispatcher() -> Dispatcher:
     # ---- Balance and purchasing with Telegram Stars ----
     @dp.message_handler(commands=["balance"])  # type: ignore
     async def cmd_balance(message: types.Message, state: FSMContext):
+        """Redirect to /credits for regular users, keep for backward compatibility"""
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        if not is_admin:
+            # Regular users should use /credits instead
+            await cmd_credits(message, state)
+            return
+        
+        # For admins, show balance info
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         try:
@@ -3367,37 +3375,30 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["pricing"])  # type: ignore
     async def cmd_pricing(message: types.Message, state: FSMContext):
+        """Show pricing. For regular users, redirect to /credits"""
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        if not is_admin:
+            # Regular users should use /credits instead (which includes pricing)
+            await cmd_credits(message, state)
+            return
+        
+        # For admins, show detailed pricing
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
-        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         if _is_ru(ui_lang):
-            if is_admin:
-                await message.answer(
-                    "Цены:\n"
-                    "- Пост: 1 кредит\n"
-                    "- Серия: 1×N кредитов\n"
-                    "- Статья: 100 кредитов\n"
-                )
-            else:
-                await message.answer(
-                    "Цены:\n"
-                    "- Пост: 1 кредит\n"
-                    "- Статья: 100 кредитов\n"
-                )
+            await message.answer(
+                "Цены:\n"
+                "- Пост: 1 кредит\n"
+                "- Серия: 1×N кредитов\n"
+                "- Статья: 100 кредитов\n"
+            )
         else:
-            if is_admin:
-                await message.answer(
-                    "Pricing:\n"
-                    "- Post: 1 credit\n"
-                    "- Series: 1×N credits\n"
-                    "- Article: 100 credits\n"
-                )
-            else:
-                await message.answer(
-                    "Pricing:\n"
-                    "- Post: 1 credit\n"
-                    "- Article: 100 credits\n"
-                )
+            await message.answer(
+                "Pricing:\n"
+                "- Post: 1 credit\n"
+                "- Series: 1×N credits\n"
+                "- Article: 100 credits\n"
+            )
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
     async def cb_buy_stars(query: types.CallbackQuery, state: FSMContext):
@@ -4022,7 +4023,20 @@ def create_dispatcher() -> Dispatcher:
         try:
             from .kv import topup_kv
             new_balance = await topup_kv(target_user_id, amount)
-            await message.answer(f"✅ Successfully added {amount} credits to user {target_user_id}.\nNew balance: {new_balance} credits.")
+            # Send confirmation to superadmin
+            await message.answer(
+                f"✅ Успешно начислено {amount} кредитов пользователю {target_user_id}.\n"
+                f"Новый баланс: {new_balance} кредитов."
+            )
+            # Try to notify the user
+            try:
+                await dp.bot.send_message(
+                    target_user_id,
+                    f"🎁 Вам начислено {amount} кредит(ов)!\nВаш баланс: {new_balance} кредитов."
+                )
+                await message.answer(f"📤 Пользователь {target_user_id} уведомлен.")
+            except Exception as notify_err:
+                await message.answer(f"⚠️ Не удалось уведомить пользователя: {notify_err}")
         except Exception as e:
             await message.answer(f"❌ Error: {e}")
 
