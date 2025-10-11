@@ -107,8 +107,15 @@ def extract_memes(
     log_path = log_dir / f"{safe_filename_base(Path(source_name).stem or 'memes')}_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
     finished_at = datetime.utcnow()
     duration_s = max(0.0, time.perf_counter() - started_perf)
+    # Calculate source statistics
+    source_text = text or ""
+    char_count = len(source_text)
+    word_count = len(source_text.split())
+    line_count = source_text.count('\n') + 1
+    
     header = (
         f"# 🧾 Meme Extraction Log\n\n"
+        f"## 📊 Metadata\n\n"
         f"- provider: {pnorm}\n"
         f"- lang: {lang_setting} (detected: {detected_lang if lang_setting == 'auto' else 'N/A'})\n"
         f"- model: {used_model or '?'}\n"
@@ -116,14 +123,17 @@ def extract_memes(
         f"- finished_at: {finished_at.strftime('%Y-%m-%d %H:%M')}\n"
         f"- duration: {duration_s:.1f}s\n"
         f"- source: {Path(source_name).name}\n"
+        f"- source_stats: {char_count:,} chars, {word_count:,} words, {line_count:,} lines\n"
     )
-    # For transparency, include first N chars of input (avoid dumping entire large text)
-    preview = (text or "")[:4000]
+    
+    # Full source in code block for easy reading
     full_log = (
         header
-        + "\n## Input (truncated)\n\n"
-        + preview
-        + "\n\n## Output (model)\n\n"
+        + "\n---\n\n## 📄 Input Source (Full)\n\n"
+        + "```text\n"
+        + source_text
+        + "\n```\n"
+        + "\n---\n\n## 🎯 Extracted Memes (Output)\n\n"
         + final_content
         + "\n"
     )
