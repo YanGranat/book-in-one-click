@@ -5,7 +5,7 @@
 <input>
 Тебе передают:
 - <topic> — тема поста
-- <lang> — язык (auto|ru|en)
+- <lang> — язык (auto|ru|en). Если auto — используй язык <topic>.
 - <post> — текущая версия поста в Markdown
 </input>
 
