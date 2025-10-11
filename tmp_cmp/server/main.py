@@ -146,24 +146,42 @@ async def _startup():
     # Register bot commands and enable command menu button
     try:
         await DP.bot.set_my_commands([
-                types.BotCommand(command="start", description="Start / Начать"),
-                types.BotCommand(command="generate", description="Generate / Сгенерировать"),
-                types.BotCommand(command="settings", description="Settings / Настройки"),
-                types.BotCommand(command="history", description="History / История"),
-                types.BotCommand(command="info", description="Info / Инфо"),
-                types.BotCommand(command="interface_lang", description="Interface language / Язык интерфейса"),
-                types.BotCommand(command="cancel", description="Cancel / Отмена"),
+            types.BotCommand(command="start", description="Start / Начать"),
+            types.BotCommand(command="generate", description="Generate / Сгенерировать"),
+            types.BotCommand(command="settings", description="Settings / Настройки"),
+            types.BotCommand(command="balance", description="Balance / Баланс"),
+            types.BotCommand(command="pricing", description="Pricing / Цены"),
+            types.BotCommand(command="history", description="History / История"),
+            types.BotCommand(command="info", description="Info / Инфо"),
+            types.BotCommand(command="lang", description="Language / Язык"),
+            types.BotCommand(command="lang_generate", description="Gen Language / Язык генерации"),
+            types.BotCommand(command="provider", description="Provider / Провайдер"),
+            types.BotCommand(command="logs", description="Logs / Логи генерации"),
+            types.BotCommand(command="incognito", description="Incognito / Инкогнито"),
+            types.BotCommand(command="factcheck", description="Fact-check / Факт-чекинг"),
+            types.BotCommand(command="depth", description="Depth / Глубина"),
+            types.BotCommand(command="refine", description="Refine Step / Финальная редактура"),
+            types.BotCommand(command="cancel", description="Cancel / Отмена"),
         ])
         # RU-localized menu
         try:
             await DP.bot.set_my_commands([
-                    types.BotCommand(command="start", description="Начать"),
-                    types.BotCommand(command="generate", description="Сгенерировать"),
-                    types.BotCommand(command="settings", description="Настройки"),
-                    types.BotCommand(command="history", description="История"),
-                    types.BotCommand(command="info", description="Инфо"),
-                    types.BotCommand(command="interface_lang", description="Язык интерфейса"),
-                    types.BotCommand(command="cancel", description="Отмена"),
+                types.BotCommand(command="start", description="Начать"),
+                types.BotCommand(command="generate", description="Сгенерировать"),
+                types.BotCommand(command="settings", description="Настройки"),
+                types.BotCommand(command="balance", description="Баланс"),
+                types.BotCommand(command="pricing", description="Цены"),
+                types.BotCommand(command="history", description="История"),
+                types.BotCommand(command="info", description="Инфо"),
+                types.BotCommand(command="lang", description="Язык интерфейса"),
+                types.BotCommand(command="lang_generate", description="Язык генерации"),
+                types.BotCommand(command="provider", description="Провайдер"),
+                types.BotCommand(command="logs", description="Логи генерации"),
+                types.BotCommand(command="incognito", description="Инкогнито"),
+                types.BotCommand(command="factcheck", description="Факт-чекинг"),
+                types.BotCommand(command="depth", description="Глубина"),
+                types.BotCommand(command="refine", description="Финальная редактура"),
+                types.BotCommand(command="cancel", description="Отмена"),
             ], language_code="ru")
         except Exception:
             pass

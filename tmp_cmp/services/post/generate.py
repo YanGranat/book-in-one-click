@@ -15,7 +15,6 @@ from typing import Callable, Optional, Type, Any
 import os
 import asyncio
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.models import get_model
@@ -25,7 +24,6 @@ from utils.web import build_search_context
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from pipelines.post.pipeline import build_instructions as build_post_instructions
 from utils.json_parse import parse_json_best_effort
-from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
 
 
 def _try_import_sdk():
@@ -366,25 +364,23 @@ def generate_post(
             rec_agent = build_recommendation_agent()
             synth_agent = build_query_synthesizer_agent()
 
-            def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+            async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
                 for i in range(attempts):
                     try:
-                        return Runner.run_sync(agent, inp)
+                        return await Runner.run(agent, inp)
                     except Exception:
                         if i == attempts - 1:
                             raise
-                        time.sleep(base_delay * (2 ** i))
+                        await asyncio.sleep(base_delay * (2 ** i))
 
-            def process_point_sync(p):
-                # Query synthesis (best-effort, result is not used directly beyond validation)
+            async def process_point_async(p):
+                # Query synthesis
                 cfg_pref = ",".join(pref)
-                try:
-                    _ = _run_sync_with_retries(
-                        synth_agent,
-                        f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
-                    ).final_output  # type: ignore
-                except Exception:
-                    _ = None
+                qp_res = await _run_with_retries(
+                    synth_agent,
+                    f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
+                )  # type: ignore
+                _ = qp_res.final_output
 
                 notes = []
                 for step in range(1, max(1, int(research_iterations)) + 1):
@@ -394,8 +390,8 @@ def generate_post(
                         f"<step>{step}</step>\n"
                         "</input>"
                     )
-                    note_res = _run_sync_with_retries(research_agent, rr_input)
-                    note = note_res.final_output  # type: ignore
+                    note_res = await _run_with_retries(research_agent, rr_input)  # type: ignore
+                    note = note_res.final_output
                     notes.append(note)
 
                     suff_input = (
@@ -404,8 +400,8 @@ def generate_post(
                         f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
                         "</input>"
                     )
-                    decision_res = _run_sync_with_retries(suff_agent, suff_input)
-                    decision = decision_res.final_output  # type: ignore
+                    decision_res = await _run_with_retries(suff_agent, suff_input)  # type: ignore
+                    decision = decision_res.final_output
                     if decision.done:
                         break
 
@@ -427,26 +423,27 @@ def generate_post(
                         )
 
                 rr = _TmpReport(p.id, notes)
-                rec_res = _run_sync_with_retries(
+                rec_res = await _run_with_retries(
                     rec_agent,
                     f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
-                )
-                rec = rec_res.final_output  # type: ignore
+                )  # type: ignore
+                rec = rec_res.final_output
                 return p, rec, notes
 
-            # Parallelize across points using threads (Runner.run_sync is synchronous)
-            # Bound concurrency by research_concurrency to avoid provider rate limits
-            results = []
-            if points:
-                max_workers = max(1, int(research_concurrency))
-                with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                    future_map = {pool.submit(process_point_sync, p): p for p in points}
-                    for fut in as_completed(list(future_map.keys())):
-                        try:
-                            results.append(fut.result())
-                        except Exception:
-                            # Skip failed point; continue others
-                            pass
+            async def process_all(points_list):
+                sem = asyncio.Semaphore(max(1, int(research_concurrency)))
+
+                async def worker(p):
+                    async with sem:
+                        return await process_point_async(p)
+
+                tasks = [asyncio.create_task(worker(p)) for p in points_list]
+                results = []
+                for t in asyncio.as_completed(tasks):
+                    results.append(await t)
+                return results
+
+            results = asyncio.run(process_all(points)) if points else []
 
             class _SimpleItem:
                 def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
@@ -497,6 +494,7 @@ def generate_post(
         else:
             from utils.config import load_config
             from pathlib import Path
+            from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
 
             _emit("factcheck:init")
             base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
@@ -563,16 +561,7 @@ def generate_post(
             )
             # Web context build (provider-agnostic)
             queries = getattr(qp, "queries", []) or []
-            # Reduce external fetch workload to improve latency under rate limits
-            try:
-                _per_q = int(os.getenv("FC_WEB_PER_QUERY", "1"))
-            except Exception:
-                _per_q = 1
-            try:
-                _max_chars = int(os.getenv("FC_WEB_MAX_CHARS", "1600"))
-            except Exception:
-                _max_chars = 1600
-            web_ctx = build_search_context(queries, per_query=max(1, _per_q), max_chars=max(200, _max_chars))
+            web_ctx = build_search_context(queries, per_query=2, max_chars=2000)
             if queries:
                 log("🌐 Web · Queries", "\n".join([f"- {q}" for q in queries]))
             # Extract sources (best-effort)
@@ -647,12 +636,11 @@ def generate_post(
 
         # For non-openai providers concurrency brings little benefit; run sequentially
         if _prov == "openai":
-            results = [process_point_sync(p) for p in (points or [])]
-            results = [process_point_sync(p) for p in (points or [])]
+            results = asyncio.run(process_all(points)) if points else []
         else:
             seq_results = []
             for p in points or []:
-                seq_results.append(process_point_sync(p))
+                seq_results.append(asyncio.run(process_point_async(p)))
             results = seq_results
 
         class _SimpleItem:
@@ -827,49 +815,6 @@ def generate_post(
                     except Exception as _e:
                         s.rollback()
                         print(f"[ERROR] JobLog commit failed: {_e}")
-                    # Ensure we have a valid Job.id for history join; if missing, create one based on user_id
-                    try:
-                        if not result_job_id or int(result_job_id) <= 0:
-                            # Try to resolve or create User by telegram id (job_meta.user_id)
-                            from server.db import User, Job as _Job
-                            tg_uid = int((job_meta or {}).get("user_id", 0) or 0)
-                            db_user_id = None
-                            if tg_uid > 0:
-                                try:
-                                    urow = s.query(User).filter(User.telegram_id == tg_uid).first()
-                                except Exception:
-                                    urow = None
-                                if urow is None:
-                                    try:
-                                        urow = User(telegram_id=tg_uid, credits=0)
-                                        s.add(urow)
-                                        s.flush()
-                                    except Exception:
-                                        s.rollback()
-                                        urow = None
-                                if urow is not None:
-                                    db_user_id = int(getattr(urow, "id", 0) or 0)
-                            # Create a Job row linked to this user
-                            try:
-                                import json as __json
-                                params = {
-                                    "topic": topic,
-                                    "lang": lang,
-                                    "provider": _prov,
-                                    "factcheck": bool(factcheck),
-                                    "refine": bool(use_refine),
-                                }
-                                jrow = _Job(user_id=(db_user_id or 0), type="post", status="done", params_json=__json.dumps(params, ensure_ascii=False), cost=1, file_path=str(filepath) if filepath else None)
-                                s.add(jrow)
-                                s.flush()
-                                result_job_id = int(getattr(jrow, "id", 0) or 0)
-                                s.commit()
-                            except Exception as _e:
-                                s.rollback()
-                                print(f"[ERROR] Fallback Job create failed: {_e}")
-                    except Exception:
-                        # Non-fatal: keep result_job_id as-is
-                        pass
                     # 2) Persist final ResultDoc independently (even if JobLog failed)
                     if filepath is not None:
                         try:
@@ -877,7 +822,7 @@ def generate_post(
                         except ValueError:
                             rel_doc = str(filepath)
                         rd = ResultDoc(
-                            job_id=int(result_job_id or 0),
+                            job_id=result_job_id,
                             kind=output_subdir,
                             path=rel_doc,
                             topic=topic,

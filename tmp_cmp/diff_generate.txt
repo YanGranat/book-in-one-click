@@ -1,0 +1,273 @@
+Сравнение файлов TMP_CMP\SERVICES\POST\generate.py и SERVICES\POST\GENERATE.PY
+***** TMP_CMP\SERVICES\POST\generate.py
+   17:  import time
+   18:  
+***** SERVICES\POST\GENERATE.PY
+   17:  import time
+   18:  from concurrent.futures import ThreadPoolExecutor, as_completed
+   19:  
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+   26:  from utils.json_parse import parse_json_best_effort
+   27:  
+***** SERVICES\POST\GENERATE.PY
+   27:  from utils.json_parse import parse_json_best_effort
+   28:  from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
+   29:  
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+   47:      research_iterations: int = 2,
+   48:      research_concurrency: int = 6,
+   49:      output_subdir: str = "post",
+***** SERVICES\POST\GENERATE.PY
+   49:      research_iterations: int = 2,
+   50:      research_concurrency: int = 8,
+   51:      output_subdir: str = "post",
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  366:  
+  367:              async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+  368:                  for i in range(attempts):
+***** SERVICES\POST\GENERATE.PY
+  368:  
+  369:              def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+  370:                  for i in range(attempts):
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  369:                      try:
+  370:                          return await Runner.run(agent, inp)
+  371:                      except Exception:
+***** SERVICES\POST\GENERATE.PY
+  371:                      try:
+  372:                          return Runner.run_sync(agent, inp)
+  373:                      except Exception:
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  373:                              raise
+  374:                          await asyncio.sleep(base_delay * (2 ** i))
+  375:  
+  376:              async def process_point_async(p):
+  377:                  # Query synthesis
+  378:                  cfg_pref = ",".join(pref)
+  379:                  qp_res = await _run_with_retries(
+  380:                      synth_agent,
+  381:                      f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input
+  382:  >",
+  383:                  )  # type: ignore
+  384:                  _ = qp_res.final_output
+  385:  
+***** SERVICES\POST\GENERATE.PY
+  375:                              raise
+  376:                          time.sleep(base_delay * (2 ** i))
+  377:  
+  378:              def process_point_sync(p):
+  379:                  # Query synthesis (best-effort, result is not used directly beyond validation)
+  380:                  cfg_pref = ",".join(pref)
+  381:                  try:
+  382:                      _ = _run_sync_with_retries(
+  383:                          synth_agent,
+  384:                          f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</i
+  385:  nput>",
+  386:                      ).final_output  # type: ignore
+  387:                  except Exception:
+  388:                      _ = None
+  389:  
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  393:                      )
+  394:                      note_res = await _run_with_retries(research_agent, rr_input)  # type: ignore
+  395:                      note = note_res.final_output
+  396:                      notes.append(note)
+***** SERVICES\POST\GENERATE.PY
+  397:                      )
+  398:                      note_res = _run_sync_with_retries(research_agent, rr_input)
+  399:                      note = note_res.final_output  # type: ignore
+  400:                      notes.append(note)
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  403:                      )
+  404:                      decision_res = await _run_with_retries(suff_agent, suff_input)  # type: ignore
+  405:                      decision = decision_res.final_output
+  406:                      if decision.done:
+***** SERVICES\POST\GENERATE.PY
+  407:                      )
+  408:                      decision_res = _run_sync_with_retries(suff_agent, suff_input)
+  409:                      decision = decision_res.final_output  # type: ignore
+  410:                      if decision.done:
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  426:                  rr = _TmpReport(p.id, notes)
+  427:                  rec_res = await _run_with_retries(
+  428:                      rec_agent,
+***** SERVICES\POST\GENERATE.PY
+  430:                  rr = _TmpReport(p.id, notes)
+  431:                  rec_res = _run_sync_with_retries(
+  432:                      rec_agent,
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  429:                      f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
+  430:                  )  # type: ignore
+  431:                  rec = rec_res.final_output
+  432:                  return p, rec, notes
+***** SERVICES\POST\GENERATE.PY
+  433:                      f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
+  434:                  )
+  435:                  rec = rec_res.final_output  # type: ignore
+  436:                  return p, rec, notes
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  433:  
+  434:              async def process_all(points_list):
+  435:                  sem = asyncio.Semaphore(max(1, int(research_concurrency)))
+  436:  
+  437:                  async def worker(p):
+  438:                      async with sem:
+  439:                          return await process_point_async(p)
+  440:  
+  441:                  tasks = [asyncio.create_task(worker(p)) for p in points_list]
+  442:                  results = []
+  443:                  for t in asyncio.as_completed(tasks):
+  444:                      results.append(await t)
+  445:                  return results
+  446:  
+  447:              results = asyncio.run(process_all(points)) if points else []
+  448:  
+***** SERVICES\POST\GENERATE.PY
+  437:  
+  438:              # Parallelize across points using threads (Runner.run_sync is synchronous)
+  439:              # Bound concurrency by research_concurrency to avoid provider rate limits
+  440:              results = []
+  441:              if points:
+  442:                  max_workers = max(1, int(research_concurrency))
+  443:                  with ThreadPoolExecutor(max_workers=max_workers) as pool:
+  444:                      future_map = {pool.submit(process_point_sync, p): p for p in points}
+  445:                      for fut in as_completed(list(future_map.keys())):
+  446:                          try:
+  447:                              results.append(fut.result())
+  448:                          except Exception:
+  449:                              # Skip failed point; continue others
+  450:                              pass
+  451:  
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  497:              from pathlib import Path
+  498:              from schemas.research import ResearchPlan, QueryPack, ResearchIterationNote, SufficiencyDecision, Recommendation
+  499:  
+***** SERVICES\POST\GENERATE.PY
+  500:              from pathlib import Path
+  501:  
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  567:              queries = getattr(qp, "queries", []) or []
+  568:              web_ctx = build_search_context(queries, per_query=2, max_chars=2000)
+  569:              if queries:
+***** SERVICES\POST\GENERATE.PY
+  569:              queries = getattr(qp, "queries", []) or []
+  570:              # Reduce external fetch workload to improve latency under rate limits
+  571:              try:
+  572:                  _per_q = int(os.getenv("FC_WEB_PER_QUERY", "1"))
+  573:              except Exception:
+  574:                  _per_q = 1
+  575:              try:
+  576:                  _max_chars = int(os.getenv("FC_WEB_MAX_CHARS", "1600"))
+  577:              except Exception:
+  578:                  _max_chars = 1600
+  579:              web_ctx = build_search_context(queries, per_query=max(1, _per_q), max_chars=max(200, _max_chars))
+  580:              if queries:
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  642:          if _prov == "openai":
+  643:              results = asyncio.run(process_all(points)) if points else []
+  644:          else:
+***** SERVICES\POST\GENERATE.PY
+  653:          if _prov == "openai":
+  654:              results = [process_point_sync(p) for p in (points or [])]
+  655:              results = [process_point_sync(p) for p in (points or [])]
+  656:          else:
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  646:              for p in points or []:
+  647:                  seq_results.append(asyncio.run(process_point_async(p)))
+  648:              results = seq_results
+***** SERVICES\POST\GENERATE.PY
+  658:              for p in points or []:
+  659:                  seq_results.append(process_point_sync(p))
+  660:              results = seq_results
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  827:                          print(f"[ERROR] JobLog commit failed: {_e}")
+  828:                      # 2) Persist final ResultDoc independently (even if JobLog failed)
+***** SERVICES\POST\GENERATE.PY
+  839:                          print(f"[ERROR] JobLog commit failed: {_e}")
+  840:                      # Ensure we have a valid Job.id for history join; if missing, create one based on user_id
+  841:                      try:
+  842:                          if not result_job_id or int(result_job_id) <= 0:
+  843:                              # Try to resolve or create User by telegram id (job_meta.user_id)
+  844:                              from server.db import User, Job as _Job
+  845:                              tg_uid = int((job_meta or {}).get("user_id", 0) or 0)
+  846:                              db_user_id = None
+  847:                              if tg_uid > 0:
+  848:                                  try:
+  849:                                      urow = s.query(User).filter(User.telegram_id == tg_uid).first()
+  850:                                  except Exception:
+  851:                                      urow = None
+  852:                                  if urow is None:
+  853:                                      try:
+  854:                                          urow = User(telegram_id=tg_uid, credits=0)
+  855:                                          s.add(urow)
+  856:                                          s.flush()
+  857:                                      except Exception:
+  858:                                          s.rollback()
+  859:                                          urow = None
+  860:                                  if urow is not None:
+  861:                                      db_user_id = int(getattr(urow, "id", 0) or 0)
+  862:                              # Create a Job row linked to this user
+  863:                              try:
+  864:                                  import json as __json
+  865:                                  params = {
+  866:                                      "topic": topic,
+  867:                                      "lang": lang,
+  868:                                      "provider": _prov,
+  869:                                      "factcheck": bool(factcheck),
+  870:                                      "refine": bool(use_refine),
+  871:                                  }
+  872:                                  jrow = _Job(user_id=(db_user_id or 0), type="post", status="done", params_json=__json.dumps(par
+  873:  ams, ensure_ascii=False), cost=1, file_path=str(filepath) if filepath else None)
+  874:                                  s.add(jrow)
+  875:                                  s.flush()
+  876:                                  result_job_id = int(getattr(jrow, "id", 0) or 0)
+  877:                                  s.commit()
+  878:                              except Exception as _e:
+  879:                                  s.rollback()
+  880:                                  print(f"[ERROR] Fallback Job create failed: {_e}")
+  881:                      except Exception:
+  882:                          # Non-fatal: keep result_job_id as-is
+  883:                          pass
+  884:                      # 2) Persist final ResultDoc independently (even if JobLog failed)
+*****
+
+***** TMP_CMP\SERVICES\POST\generate.py
+  834:                          rd = ResultDoc(
+  835:                              job_id=result_job_id,
+  836:                              kind=output_subdir,
+***** SERVICES\POST\GENERATE.PY
+  890:                          rd = ResultDoc(
+  891:                              job_id=int(result_job_id or 0),
+  892:                              kind=output_subdir,
+*****
+
