@@ -8,6 +8,7 @@ from typing import Optional
 from sqlalchemy import (
     String,
     Integer,
+    BigInteger,
     DateTime,
     Text,
 )
@@ -34,7 +35,7 @@ def _t(name: str) -> str:
 class User(Base):
     __tablename__ = _t("users")
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     credits: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     # Optional simple rate limiting fields
@@ -191,6 +192,13 @@ async def init_db() -> None:
             print("[INFO] Migrated rows from legacy result_docs to results (if existed)")
         except Exception:
             # Old table may not exist; ignore
+            pass
+        # Migrate telegram_id from INTEGER to BIGINT to support large Telegram IDs
+        try:
+            await conn.execute(text(f"ALTER TABLE {_t('users')} ALTER COLUMN telegram_id TYPE BIGINT"))
+            print("[INFO] Migrated telegram_id column to BIGINT")
+        except Exception:
+            # Already BIGINT or other error - that's fine
             pass
 
 
