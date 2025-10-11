@@ -1619,6 +1619,11 @@ def create_dispatcher() -> Dispatcher:
         text_raw = (message.text or "").strip()
         data = await state.get_data()
         ui_lang = data.get("ui_lang", "ru")
+        # Mark this message as handled to prevent auto-chat from reusing it on webhook retries
+        try:
+            await state.update_data(last_handled_message_id=int(message.message_id))
+        except Exception:
+            pass
         # If user typed a command while waiting for topic — treat it as a command, not a topic
         if text_raw.startswith("/"):
             # Finish topic-waiting state and re-dispatch the command to its handler
@@ -3623,6 +3628,12 @@ def create_dispatcher() -> Dispatcher:
         # Ignore commands or empty
         if not txt or txt.startswith("/"):
             return
+        # Block while generation is running or pending (race-safe)
+        try:
+            if message.chat and message.chat.id in RUNNING_CHATS:
+                return
+        except Exception:
+            pass
         # Deduplicate: avoid processing the same message twice (webhook retries)
         try:
             sd = await state.get_data()
@@ -3645,13 +3656,30 @@ def create_dispatcher() -> Dispatcher:
             cur = await state.get_state()
         except Exception:
             cur = None
+        # Block auto-chat during ANY step of generation wizard
         try:
-            if cur in {GenerateStates.WaitingTopic.state}:
+            gen_states = {
+                GenerateStates.ChoosingLanguage.state,
+                GenerateStates.ChoosingGenLanguage.state,
+                GenerateStates.ChoosingProvider.state,
+                GenerateStates.ChoosingLogs.state,
+                GenerateStates.ChoosingIncognito.state,
+                GenerateStates.ChoosingGenType.state,
+                GenerateStates.WaitingTopic.state,
+                GenerateStates.ChoosingSeriesPreset.state,
+                GenerateStates.ChoosingSeriesCount.state,
+                GenerateStates.ChoosingFactcheck.state,
+                GenerateStates.ChoosingDepth.state,
+                GenerateStates.ChoosingRefine.state,
+            }
+            if cur in gen_states or cur == ChatStates.Active.state:
                 return
         except Exception:
             pass
+        # Block when generation flow has pending flags (confirmation/payment or flow markers)
         try:
-            if cur == ChatStates.Active.state:
+            sd2 = await state.get_data()
+            if sd2.get("pending_topic") or sd2.get("active_flow") or sd2.get("series_mode") or sd2.get("series_count") or sd2.get("fc_ready") or sd2.get("in_settings"):
                 return
         except Exception:
             pass
