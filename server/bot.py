@@ -3989,6 +3989,43 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             await message.answer("\n".join(txt))
 
+    @dp.message_handler(commands=["topup"])  # type: ignore
+    async def cmd_topup(message: types.Message, state: FSMContext):
+        """Superadmin-only command to manually add credits to a user.
+        Usage: /topup <telegram_id> <amount>
+        Example: /topup 452623935 100
+        """
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        if not is_superadmin:
+            await message.answer("⛔ Access denied. Superadmin only.")
+            return
+        
+        # Parse arguments
+        parts = (message.text or "").split()
+        if len(parts) < 3:
+            await message.answer("Usage: /topup <telegram_id> <amount>\nExample: /topup 452623935 100")
+            return
+        
+        try:
+            target_user_id = int(parts[1])
+            amount = int(parts[2])
+        except ValueError:
+            await message.answer("❌ Invalid arguments. Both telegram_id and amount must be integers.")
+            return
+        
+        if amount <= 0:
+            await message.answer("❌ Amount must be positive.")
+            return
+        
+        # Add credits
+        try:
+            from .kv import topup_kv
+            new_balance = await topup_kv(target_user_id, amount)
+            await message.answer(f"✅ Successfully added {amount} credits to user {target_user_id}.\nNew balance: {new_balance} credits.")
+        except Exception as e:
+            await message.answer(f"❌ Error: {e}")
+
     return dp
 
 
