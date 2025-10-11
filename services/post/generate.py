@@ -438,11 +438,10 @@ def generate_post(
                             pass
 
             class _SimpleItem:
-                def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
+                def __init__(self, claim_text: str, verdict: str, reason: str):
                     self.claim_text = claim_text
                     self.verdict = verdict
                     self.reason = reason
-                    self.supporting_facts = supporting_facts
 
             simple_items = []
             for (p, r, notes) in results:
@@ -455,8 +454,7 @@ def generate_post(
                 else:
                     verdict = "fail"
                 reason = getattr(r, "explanation", "") or ""
-                supporting_facts = " \n".join(getattr(n, "findings", "") for n in (notes or []))
-                simple_items.append(_SimpleItem(p.text, verdict, reason, supporting_facts))
+                simple_items.append(_SimpleItem(p.text, verdict, reason))
 
             class _SimpleReport:
                 def __init__(self, items):
@@ -472,7 +470,6 @@ def generate_post(
                                     "claim_text": i.claim_text,
                                     "verdict": i.verdict,
                                     "reason": i.reason,
-                                    "supporting_facts": i.supporting_facts,
                                 }
                                 for i in self.items
                             ],
@@ -646,11 +643,10 @@ def generate_post(
             results = seq_results
 
         class _SimpleItem:
-            def __init__(self, claim_text: str, verdict: str, reason: str, supporting_facts: str):
+            def __init__(self, claim_text: str, verdict: str, reason: str):
                 self.claim_text = claim_text
                 self.verdict = verdict
                 self.reason = reason
-                self.supporting_facts = supporting_facts
 
         simple_items = []
         for (p, r, notes) in results:
@@ -663,9 +659,7 @@ def generate_post(
             else:
                 verdict = "fail"
             reason = getattr(r, "explanation", "") or ""
-            # Take only the last (most complete) findings instead of concatenating all iterations
-            supporting_facts = getattr(notes[-1], "findings", "") if notes else ""
-            simple_items.append(_SimpleItem(p.text, verdict, reason, supporting_facts))
+            simple_items.append(_SimpleItem(p.text, verdict, reason))
 
         class _SimpleReport:
             def __init__(self, items):
@@ -681,7 +675,6 @@ def generate_post(
                                 "claim_text": i.claim_text,
                                 "verdict": i.verdict,
                                 "reason": i.reason,
-                                "supporting_facts": i.supporting_facts,
                             }
                             for i in self.items
                         ],
