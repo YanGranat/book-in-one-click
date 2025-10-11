@@ -48,15 +48,17 @@ def extract_memes(
         except Exception:
             eff_lang = "en"
 
-    # Build system prompt with language instruction
+    # Build system prompt with language instruction based on user settings
     system_prompt = _load_system_prompt()
     
-    # Add explicit language instruction based on settings
+    # Add explicit language instruction based on user language setting
     if eff_lang == "ru":
-        system_prompt += "\n\n<output_language>Пиши результат экстракции (названия мемов, их суть, пояснения, обзор) СТРОГО на русском языке.</output_language>"
+        system_prompt += "\n\n<output_language>Пиши результат экстракции (названия мемов, их суть, пояснения, обзор) СТРОГО на русском языке, независимо от языка исходного контента.</output_language>"
     elif eff_lang == "en":
-        system_prompt += "\n\n<output_language>Write the extraction result (meme names, essence, explanations, overview) STRICTLY in English.</output_language>"
-    # For auto/other languages, the prompt already has the instruction to match source language
+        system_prompt += "\n\n<output_language>Write the extraction result (meme names, essence, explanations, overview) STRICTLY in English, regardless of the source content language.</output_language>"
+    else:
+        # For auto mode - match the source language
+        system_prompt += "\n\n<output_language>Write the extraction result in the same language as the source content.</output_language>"
 
     # Run model
     pnorm = (provider or "openai").strip().lower()
