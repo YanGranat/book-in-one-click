@@ -67,9 +67,11 @@ def extract_memes(
         # Use OpenAI Agents SDK for multi-agent framework compatibility
         try:
             used_model = get_model("openai", "heavy")
-            from agents import Runner  # type: ignore
+            from agents import Runner, ModelSettings  # type: ignore
             agent = build_meme_extractor_agent(model=used_model)
             agent.instructions = system_prompt  # Clean prompt only
+            # High reasoning budget for deep meme analysis
+            agent.model_settings = ModelSettings(reasoning={"effort": "high"})
             final_content = getattr(Runner.run_sync(agent, text), "final_output", "")
         except Exception:
             # Fallback to provider runner

@@ -1260,6 +1260,7 @@ async def meme_result_view_ui_id(res_id: int, _: bool = Depends(require_admin)):
         "header a{color:var(--brand)}.spacer{flex:1}.toolbar button{background:#1b2230;border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer;margin-left:8px}"
         "[data-theme='light'] .toolbar button{background:#eef2f6;border:1px solid #e5e9f0;color:#0f172a}"
         "main{padding:14px}#content{max-width:1000px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}a{color:var(--brand)}"
+        "#content ol{padding-left:24px}#content ol li{line-height:1.7;margin-bottom:16px;white-space:pre-wrap}"
         ".meta{opacity:.8;font-size:12px;margin:0 0 8px}code{background:#0f121a;color:inherit;padding:0 2px;font-size:12px}pre{white-space:pre-wrap;word-wrap:break-word;background:#0f121a;border-radius:8px;padding:12px;border:1px solid var(--line)}"
         "[data-theme='light'] code{background:#f5f7fb;color:inherit}"
         "[data-theme='light'] pre{background:#f5f7fb;border:1px solid #e5e9f0;color:#0f172a}"
