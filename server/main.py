@@ -885,6 +885,8 @@ async def results_ui():
 
 @app.get("/results/{res_id}")
 async def get_result(res_id: int):
+    import sys
+    print(f"[DEBUG] get_result called for res_id={res_id}", file=sys.stderr)
     if SessionLocal is None:
         # Sync fallback
         try:
@@ -952,8 +954,11 @@ async def get_result(res_id: int):
                                 content = jlr.content or ""
                     except Exception:
                         pass
-            return {"id": row.id, "path": row.path, "content": content, "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
+            result = {"id": row.id, "path": row.path, "content": content, "created_at": str(row.created_at), "kind": row.kind, "provider": getattr(row, "provider", None), "lang": getattr(row, "lang", None), "topic": getattr(row, "topic", None)}
+            print(f"[DEBUG] Returning result for {res_id}: kind={result.get('kind')}, content_len={len(content)}, path={result.get('path')}", file=sys.stderr)
+            return result
     except Exception as e:
+        print(f"[DEBUG] Error in get_result for {res_id}: {e}", file=sys.stderr)
         return {"error": f"database error: {e}"}
 
 
