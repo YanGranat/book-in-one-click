@@ -357,129 +357,147 @@ def generate_post(
                 log("🔎 Fact-check · Plan (OpenAI)", f"points={len(points)}")
             except Exception:
                 pass
+            
+            if not points:
+                log("ℹ️ Fact-check skipped", "No risky points identified")
+                report = None
+            else:
+                research_agent = build_iterative_research_agent()
+                suff_agent = build_sufficiency_agent()
+                rec_agent = build_recommendation_agent()
 
-            research_agent = build_iterative_research_agent()
-            suff_agent = build_sufficiency_agent()
-            rec_agent = build_recommendation_agent()
+                def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
+                    for i in range(attempts):
+                        try:
+                            return Runner.run_sync(agent, inp)
+                        except Exception:
+                            if i == attempts - 1:
+                                raise
+                            time.sleep(base_delay * (2 ** i))
 
-            def _run_sync_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
-                for i in range(attempts):
-                    try:
-                        return Runner.run_sync(agent, inp)
-                    except Exception:
-                        if i == attempts - 1:
-                            raise
-                        time.sleep(base_delay * (2 ** i))
+                def process_point_sync(p):
+                    # Skip query synthesis for OpenAI - WebSearchTool handles this internally
+                    # The agent will autonomously decide what to search for
 
-            def process_point_sync(p):
-                # Skip query synthesis for OpenAI - WebSearchTool handles this internally
-                # The agent will autonomously decide what to search for
+                    notes = []
+                    for step in range(1, max(1, int(research_iterations)) + 1):
+                        rr_input = (
+                            "<input>\n"
+                            f"<point>{p.model_dump_json()}</point>\n"
+                            f"<step>{step}</step>\n"
+                            "</input>"
+                        )
+                        note_res = _run_sync_with_retries(research_agent, rr_input)
+                        note = note_res.final_output  # type: ignore
+                        notes.append(note)
 
-                notes = []
-                for step in range(1, max(1, int(research_iterations)) + 1):
-                    rr_input = (
-                        "<input>\n"
-                        f"<point>{p.model_dump_json()}</point>\n"
-                        f"<step>{step}</step>\n"
-                        "</input>"
+                        suff_input = (
+                            "<input>\n"
+                            f"<point>{p.model_dump_json()}</point>\n"
+                            f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
+                            "</input>"
+                        )
+                        decision_res = _run_sync_with_retries(suff_agent, suff_input)
+                        decision = decision_res.final_output  # type: ignore
+                        if decision.done:
+                            break
+
+                    class _TmpReport:
+                        def __init__(self, point_id, notes):
+                            self.point_id = point_id
+                            self.notes = notes
+                            self.synthesis = ""
+
+                        def model_dump_json(self):
+                            import json
+                            return json.dumps(
+                                {
+                                    "point_id": self.point_id,
+                                    "notes": [n.model_dump() for n in self.notes],
+                                    "synthesis": self.synthesis,
+                                },
+                                ensure_ascii=False,
+                            )
+
+                    rr = _TmpReport(p.id, notes)
+                    rec_res = _run_sync_with_retries(
+                        rec_agent,
+                        f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
                     )
-                    note_res = _run_sync_with_retries(research_agent, rr_input)
-                    note = note_res.final_output  # type: ignore
-                    notes.append(note)
+                    rec = rec_res.final_output  # type: ignore
+                    return p, rec, notes
 
-                    suff_input = (
-                        "<input>\n"
-                        f"<point>{p.model_dump_json()}</point>\n"
-                        f"<notes>[{','.join([n.model_dump_json() for n in notes])}]</notes>\n"
-                        "</input>"
-                    )
-                    decision_res = _run_sync_with_retries(suff_agent, suff_input)
-                    decision = decision_res.final_output  # type: ignore
-                    if decision.done:
-                        break
+                # Parallelize across points using threads (Runner.run_sync is synchronous)
+                # Bound concurrency by research_concurrency to avoid provider rate limits
+                results = []
+                if points:
+                    max_workers = max(1, int(research_concurrency))
+                    log("🔍 Processing points", f"total={len(points)}, workers={max_workers}")
+                    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                        future_map = {pool.submit(process_point_sync, p): p for p in points}
+                        for fut in as_completed(list(future_map.keys())):
+                            try:
+                                result = fut.result()
+                                results.append(result)
+                                log("✓ Point processed", f"{result[0].id}: {result[0].text[:60]}...")
+                            except Exception as e:
+                                # Skip failed point; continue others
+                                p_failed = future_map[fut]
+                                log("✗ Point failed", f"{p_failed.id}: {str(e)[:200]}")
+                                pass
+                    log("🔍 Processing complete", f"successful={len(results)}/{len(points)}")
 
-                class _TmpReport:
-                    def __init__(self, point_id, notes):
-                        self.point_id = point_id
-                        self.notes = notes
-                        self.synthesis = ""
+                class _SimpleItem:
+                    def __init__(self, claim_text: str, verdict: str, reason: str):
+                        self.claim_text = claim_text
+                        self.verdict = verdict
+                        self.reason = reason
+
+                simple_items = []
+                kept_count = 0
+                for (p, r, notes) in results:
+                    action = getattr(r, "action", "keep")
+                    if action == "keep":
+                        kept_count += 1
+                        continue
+                    if r.action == "clarify":
+                        verdict = "uncertain"
+                    elif r.action == "rewrite" or r.action == "remove":
+                        verdict = "fail"
+                    else:
+                        verdict = "fail"
+                    reason = getattr(r, "explanation", "") or ""
+                    simple_items.append(_SimpleItem(p.text, verdict, reason))
+                    log("⚠️ Issue found", f"action={action}, point={p.text[:60]}...")
+
+                class _SimpleReport:
+                    def __init__(self, items):
+                        self.items = items
 
                     def model_dump_json(self):
                         import json
                         return json.dumps(
                             {
-                                "point_id": self.point_id,
-                                "notes": [n.model_dump() for n in self.notes],
-                                "synthesis": self.synthesis,
+                                "summary": "Issues only for rewrite (exclude confirmed)",
+                                "items": [
+                                    {
+                                        "claim_text": i.claim_text,
+                                        "verdict": i.verdict,
+                                        "reason": i.reason,
+                                    }
+                                    for i in self.items
+                                ],
                             },
                             ensure_ascii=False,
                         )
 
-                rr = _TmpReport(p.id, notes)
-                rec_res = _run_sync_with_retries(
-                    rec_agent,
-                    f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n</input>",
-                )
-                rec = rec_res.final_output  # type: ignore
-                return p, rec, notes
-
-            # Parallelize across points using threads (Runner.run_sync is synchronous)
-            # Bound concurrency by research_concurrency to avoid provider rate limits
-            results = []
-            if points:
-                max_workers = max(1, int(research_concurrency))
-                with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                    future_map = {pool.submit(process_point_sync, p): p for p in points}
-                    for fut in as_completed(list(future_map.keys())):
-                        try:
-                            results.append(fut.result())
-                        except Exception:
-                            # Skip failed point; continue others
-                            pass
-
-            class _SimpleItem:
-                def __init__(self, claim_text: str, verdict: str, reason: str):
-                    self.claim_text = claim_text
-                    self.verdict = verdict
-                    self.reason = reason
-
-            simple_items = []
-            for (p, r, notes) in results:
-                if getattr(r, "action", "keep") == "keep":
-                    continue
-                if r.action == "clarify":
-                    verdict = "uncertain"
-                elif r.action == "rewrite" or r.action == "remove":
-                    verdict = "fail"
+                if kept_count > 0:
+                    log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
+                report = _SimpleReport(simple_items) if simple_items else None
+                if report is not None:
+                    log("factcheck_summary", report.model_dump_json())
                 else:
-                    verdict = "fail"
-                reason = getattr(r, "explanation", "") or ""
-                simple_items.append(_SimpleItem(p.text, verdict, reason))
-
-            class _SimpleReport:
-                def __init__(self, items):
-                    self.items = items
-
-                def model_dump_json(self):
-                    import json
-                    return json.dumps(
-                        {
-                            "summary": "Issues only for rewrite (exclude confirmed)",
-                            "items": [
-                                {
-                                    "claim_text": i.claim_text,
-                                    "verdict": i.verdict,
-                                    "reason": i.reason,
-                                }
-                                for i in self.items
-                            ],
-                        },
-                        ensure_ascii=False,
-                    )
-
-            report = _SimpleReport(simple_items) if simple_items else None
-            if report is not None:
-                log("factcheck_summary", report.model_dump_json())
+                    log("✅ Fact-check complete", "No issues found, skipping rewrite")
         else:
             from utils.config import load_config
             from pathlib import Path
