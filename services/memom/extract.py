@@ -16,14 +16,9 @@ from llm_agents.memom.extractor import build_meme_extractor_agent
 
 def _load_system_prompt() -> str:
     p = Path("prompts") / "memom" / "meme_extractor.md"
-    try:
-        return p.read_text(encoding="utf-8")
-    except Exception:
-        # Minimal fallback if prompt file missing
-        return (
-            "Задача: выявить ключевые 'мемы' (копируемые смысловые единицы) из предоставленного текста.\n"
-            "Формат строго: нумерованный список; тип мема и формулировка; затем (опционально) 'Суть мема', 'Пояснение', 'Происхождение'.\n"
-        )
+    if not p.exists():
+        raise FileNotFoundError("memom system prompt not found: prompts/memom/meme_extractor.md")
+    return p.read_text(encoding="utf-8")
 
 
 def extract_memes(
