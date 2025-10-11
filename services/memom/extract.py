@@ -198,6 +198,14 @@ def extract_memes(
                             s.flush()
                             s.commit()
                             result_job_id = int(getattr(jrow, "id", 0) or 0)
+                            # Back-link previously saved JobLog to this Job for cascade deletions
+                            try:
+                                from sqlalchemy import update as _upd
+                                if int(getattr(jl, "id", 0) or 0) > 0 and result_job_id > 0:
+                                    s.execute(_upd(JobLog).where(JobLog.id == int(jl.id)).values(job_id=result_job_id))
+                                    s.commit()
+                            except Exception:
+                                s.rollback()
                     except Exception:
                         s.rollback()
 
