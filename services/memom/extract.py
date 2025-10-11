@@ -12,6 +12,7 @@ from utils.slug import safe_filename_base
 from utils.lang import detect_lang_from_text
 from services.providers.runner import ProviderRunner
 from llm_agents.memom.extractor import build_meme_extractor_agent
+from utils.models import get_model
 
 
 def _load_system_prompt() -> str:
@@ -62,18 +63,25 @@ def extract_memes(
     # Prefer explicit agent for OpenAI to keep symmetry with other agents folder
     final_content = ""
     pnorm = (provider or "openai").strip().lower()
+    used_model = ""
     if pnorm == "openai":
         try:
+            used_model = get_model("openai", "heavy")
             from agents import Runner  # type: ignore
-            agent = build_meme_extractor_agent(model=os.getenv("OPENAI_MODEL") or "gpt-5")
+            agent = build_meme_extractor_agent(model=used_model)
             # Inject hardening/language at call time
             agent.instructions = system
             final_content = getattr(Runner.run_sync(agent, text), "final_output", "")
         except Exception:
             # Fallback to provider runner
             runner = ProviderRunner(provider)
+            used_model = get_model("openai", "heavy")
             final_content = runner.run_text(system, text, speed="heavy") or ""
     else:
+        if pnorm in {"gemini", "google"}:
+            used_model = get_model("gemini", "heavy")
+        else:
+            used_model = get_model("claude", "heavy")
         runner = ProviderRunner(provider)
         final_content = runner.run_text(system, text, speed="heavy") or ""
     # Guarantee non-empty content stored in DB/UI even if model returned empty
@@ -101,6 +109,7 @@ def extract_memes(
         f"# 🧾 Meme Extraction Log\n\n"
         f"- provider: {(provider or 'openai').strip().lower()}\n"
         f"- lang: {eff_lang}\n"
+        f"- model: {used_model or '?'}\n"
         f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
         f"- finished_at: {finished_at.strftime('%Y-%m-%d %H:%M')}\n"
         f"- duration: {duration_s:.1f}s\n"
