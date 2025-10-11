@@ -822,6 +822,7 @@ def generate_post(
                                             s.commit()  # Commit User creation immediately
                                         except Exception as _create_err:
                                             s.rollback()
+                                            print(f"[ERROR] Fallback User create failed for telegram_id={tg_uid}: {type(_create_err).__name__}: {str(_create_err)[:300]}")
                                             # Try one more time to find in case of race condition
                                             try:
                                                 urow = s.query(User).filter(User.telegram_id == tg_uid).first()

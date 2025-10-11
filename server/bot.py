@@ -2382,7 +2382,7 @@ def create_dispatcher() -> Dispatcher:
                     await session.commit()
                     print(f"✓ [START JOB] Created Job.id={job_id}, User.id={db_user_id}, telegram_id={message.from_user.id}")
         except Exception as e:
-            print(f"✗ [START JOB] FAILED to create Job for telegram_id={message.from_user.id if message.from_user else 'N/A'}: {type(e).__name__}")
+            print(f"✗ [START JOB] FAILED to create Job for telegram_id={message.from_user.id if message.from_user else 'N/A'}: {type(e).__name__}: {str(e)[:500]}")
             job_id = 0
 
         # Light progress notes before long run
