@@ -380,16 +380,18 @@ def create_dispatcher() -> Dispatcher:
                 if (not is_admin):
                     base_ru = base_ru + [types.BotCommand("credits", "Кредиты")]
                     base_en = base_en + [types.BotCommand("credits", "Credits")]
-                # Superadmin extras: no additional commands in menu (handled in flows)
+                # Superadmin extras: pricing + chat
                 from .bot_commands import SUPER_ADMIN_ID
                 is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
                 if is_superadmin and ("chat" not in [c.command for c in base_ru]):
-                    # Ensure chat commands visible for superadmin as well
+                    # Ensure chat commands and pricing visible for superadmin as well
                     base_ru = base_ru + [
+                        types.BotCommand("pricing", "Цены"),
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
                     ]
                     base_en = base_en + [
+                        types.BotCommand("pricing", "Pricing"),
                         types.BotCommand("chat", "Chat with AI"),
                         types.BotCommand("endchat", "End chat"),
                     ]
@@ -1000,6 +1002,12 @@ def create_dispatcher() -> Dispatcher:
     # ---- Series command ----
     @dp.message_handler(commands=["series"])  # type: ignore
     async def cmd_series(message: types.Message, state: FSMContext):
+        # Admin/superadmin only
+        from .bot_commands import SUPER_ADMIN_ID
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        if not (is_admin or is_superadmin):
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         txt = (
@@ -1014,6 +1022,12 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["series_fixed"])  # type: ignore
     async def cmd_series_fixed(message: types.Message, state: FSMContext):
+        # Admin/superadmin only
+        from .bot_commands import SUPER_ADMIN_ID
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+        if not (is_admin or is_superadmin):
+            return
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         parts = (message.text or "").split()
