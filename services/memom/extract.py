@@ -58,8 +58,13 @@ def extract_memes(
 
     # Run model
     pnorm = (provider or "openai").strip().lower()
+    # Normalize aliases and auto
     if pnorm in {"", "auto"}:
         pnorm = "openai"
+    if pnorm == "google":
+        pnorm = "gemini"
+    if pnorm == "anthropic":
+        pnorm = "claude"
     used_model = ""
     final_content = ""
     
@@ -97,7 +102,7 @@ def extract_memes(
     save_markdown(
         result_path,
         title=Path(source_name).name,
-        generator=("OpenAI Agents SDK" if (provider or "openai").strip().lower() == "openai" else provider),
+        generator=("OpenAI Agents SDK" if pnorm == "openai" else pnorm),
         pipeline="MemeExtract",
         content=final_content,
     )
@@ -202,7 +207,7 @@ def extract_memes(
                                     db_user_id = int(getattr(urow, "id", 0) or 0)
                         if db_user_id > 0:
                             import json as _json
-                            params = {"source": Path(source_name).name, "lang": eff_lang, "provider": (provider or "openai").strip().lower()}
+                            params = {"source": Path(source_name).name, "lang": lang_setting, "provider": pnorm}
                             jrow = _Job(user_id=db_user_id, type="meme_extract", status="done", params_json=_json.dumps(params, ensure_ascii=False), cost=0, file_path=str(result_path))
                             s.add(jrow)
                             s.flush()

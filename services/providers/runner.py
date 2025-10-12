@@ -21,7 +21,15 @@ def _ensure_loop() -> None:
 
 class ProviderRunner:
     def __init__(self, provider: str):
-        self.provider = (provider or "openai").strip().lower()
+        # Normalize provider aliases and auto
+        p = (provider or "openai").strip().lower()
+        if p in {"", "auto"}:
+            p = "openai"
+        if p == "google":
+            p = "gemini"
+        if p == "anthropic":
+            p = "claude"
+        self.provider = p
 
     # --- OpenAI ---
     def _openai_text(self, system: str, user_message: str, *, tier: str = "heavy") -> str:
