@@ -1402,6 +1402,69 @@ async def telegram_webhook(secret: str, request: Request):
             print(f"[DP] Dispatcher ready: bot={bool(DP.bot)}", file=_sys.stderr, flush=True)
         except Exception:
             pass
+        # Fast-path for /topup to avoid any handler routing issues
+        try:
+            msg = getattr(update, "message", None)
+            txt = (getattr(msg, "text", None) or "").strip()
+            if txt.startswith("/topup") and msg and msg.from_user and msg.chat:
+                import os as _os
+                from .bot_commands import ADMIN_IDS, SUPER_ADMIN_ID
+                superadmin_id = SUPER_ADMIN_ID
+                from_id = int(getattr(msg.from_user, "id", 0) or 0)
+                chat_id = int(getattr(msg.chat, "id", 0) or 0)
+                # Auth
+                if superadmin_id is None or from_id != int(superadmin_id):
+                    try:
+                        await DP.bot.send_message(chat_id, "⛔ Access denied. Superadmin only.")
+                    except Exception:
+                        pass
+                    return JSONResponse({"ok": True})
+                # Parse
+                parts = txt.split()
+                if len(parts) < 3 or (not parts[1].isdigit()) or (not parts[2].isdigit()):
+                    try:
+                        await DP.bot.send_message(chat_id, "Usage: /topup <telegram_id> <amount>\nExample: /topup 452623935 100")
+                    except Exception:
+                        pass
+                    return JSONResponse({"ok": True})
+                target_user_id = int(parts[1])
+                amount = int(parts[2])
+                # KV topup
+                try:
+                    from .kv import topup_kv
+                    new_balance_kv = await topup_kv(target_user_id, amount)
+                except Exception as e:
+                    try:
+                        await DP.bot.send_message(chat_id, f"❌ KV error: {type(e).__name__}: {str(e)[:160]}")
+                    except Exception:
+                        pass
+                    return JSONResponse({"ok": True})
+                # DB mirror
+                db_balance = new_balance_kv
+                if SessionLocal is not None:
+                    try:
+                        async with SessionLocal() as s:
+                            from .credits import topup_credits
+                            from .db import get_or_create_user as _gcu
+                            await topup_credits(s, target_user_id, amount)
+                            await s.commit()
+                            user = await _gcu(s, target_user_id)
+                            db_balance = int(getattr(user, "credits", 0) or 0)
+                    except Exception:
+                        db_balance = new_balance_kv
+                # Notify target (best effort)
+                try:
+                    await DP.bot.send_message(target_user_id, f"🎁 Вам начислено {amount} кредит(ов)!\nВаш баланс: {db_balance} кредитов.")
+                except Exception:
+                    pass
+                # Ack to superadmin
+                try:
+                    await DP.bot.send_message(chat_id, f"✅ Начислено {amount}. Новый баланс {target_user_id}: {db_balance}")
+                except Exception:
+                    pass
+                return JSONResponse({"ok": True})
+        except Exception:
+            pass
         await DP.process_update(update)
         return JSONResponse({"ok": True})
     except Exception as e:
