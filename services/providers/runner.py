@@ -141,11 +141,20 @@ class ProviderRunner:
                 if bool(tcfg.get("supported")):
                     cfg_budget = int(tcfg.get("default_budget_tokens", 0) or 0)
                     if cfg_budget > 0:
-                        # Claude API requires: max_tokens > thinking.budget_tokens
-                        max_tokens_base = int(os.getenv("CLAUDE_MAX_TOKENS", str(kwargs.get("max_tokens", 8192))))
-                        safe_budget = max(0, min(cfg_budget, max_tokens_base - 1))
-                        if safe_budget > 0:
-                            kwargs["thinking"] = {"type": "enabled", "budget_tokens": safe_budget}
+                        # Ensure Claude API invariant: max_tokens > thinking.budget_tokens
+                        cur_max = int(kwargs.get("max_tokens", 8192))
+                        env_cap = os.getenv("CLAUDE_MAX_TOKENS", "")
+                        cap = int(env_cap) if env_cap.isdigit() else None
+                        desired_max = max(cur_max, cfg_budget + 1)
+                        if cap is not None and desired_max > cap:
+                            # Respect explicit env cap: reduce budget to cap-1
+                            safe_budget = max(0, cap - 1)
+                            kwargs["max_tokens"] = cap
+                            if safe_budget > 0:
+                                kwargs["thinking"] = {"type": "enabled", "budget_tokens": safe_budget}
+                        else:
+                            kwargs["max_tokens"] = desired_max
+                            kwargs["thinking"] = {"type": "enabled", "budget_tokens": cfg_budget}
             except Exception:
                 pass
             msg = client.messages.create(**kwargs)
