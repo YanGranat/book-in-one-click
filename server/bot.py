@@ -441,15 +441,13 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("info", "Info"),
                     types.BotCommand("interface_lang", "Interface language"),
                 ]
-                # Admin extras: chat and pricing
+                # Admin extras: chat (pricing removed for admins)
                 if is_admin:
                     base_ru = base_ru + [
-                        types.BotCommand("pricing", "Цены"),
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
                     ]
                     base_en = base_en + [
-                        types.BotCommand("pricing", "Pricing"),
                         types.BotCommand("chat", "Chat with AI"),
                         types.BotCommand("endchat", "End chat"),
                     ]
@@ -457,22 +455,18 @@ def create_dispatcher() -> Dispatcher:
                 if (not is_admin):
                     base_ru = base_ru + [types.BotCommand("credits", "Кредиты")]
                     base_en = base_en + [types.BotCommand("credits", "Credits")]
-                # Superadmin extras: ensure pricing/chat/endchat/meme_extract present
+                # Superadmin extras: ensure chat/endchat/meme_extract present (pricing removed)
                 from .bot_commands import SUPER_ADMIN_ID
                 is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
                 if is_superadmin:
                     ru_cmds = {c.command for c in base_ru}
                     en_cmds = {c.command for c in base_en}
-                    if "pricing" not in ru_cmds:
-                        base_ru.append(types.BotCommand("pricing", "Цены"))
                     if "chat" not in ru_cmds:
                         base_ru.append(types.BotCommand("chat", "Чат с ИИ"))
                     if "endchat" not in ru_cmds:
                         base_ru.append(types.BotCommand("endchat", "Завершить чат"))
                     if "meme_extract" not in ru_cmds:
                         base_ru.append(types.BotCommand("meme_extract", "Экстракция мемов"))
-                    if "pricing" not in en_cmds:
-                        base_en.append(types.BotCommand("pricing", "Pricing"))
                     if "chat" not in en_cmds:
                         base_en.append(types.BotCommand("chat", "Chat with AI"))
                     if "endchat" not in en_cmds:
