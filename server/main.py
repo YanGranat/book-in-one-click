@@ -1366,6 +1366,25 @@ async def telegram_webhook(secret: str, request: Request):
 
     try:
         data = await request.json()
+        # Debug log (safe summary)
+        try:
+            import sys as _sys
+            _kind = None
+            _from = None
+            _text = None
+            if isinstance(data, dict):
+                if "message" in data and isinstance(data["message"], dict):
+                    _kind = "message"
+                    mu = data["message"].get("from") or {}
+                    _from = mu.get("id")
+                    _text = data["message"].get("text")
+                elif "edited_message" in data and isinstance(data["edited_message"], dict):
+                    _kind = "edited_message"
+                elif "callback_query" in data and isinstance(data["callback_query"], dict):
+                    _kind = "callback_query"
+            print(f"[WEBHOOK] kind={_kind} from={_from} text={(str(_text)[:80] if _text else None)}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
         # Aiogram v2 expects Update constructed from dict via kwargs
         update = types.Update(**data)
         # Ensure aiogram context is set in webhook execution
