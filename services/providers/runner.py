@@ -157,6 +157,13 @@ class ProviderRunner:
                             kwargs["thinking"] = {"type": "enabled", "budget_tokens": cfg_budget}
             except Exception:
                 pass
+            # Diagnostics: log request params
+            try:
+                import sys as _sys
+                _think = kwargs.get("thinking")
+                print(f"[CLAUDE][REQ] model={mname} max_tokens={kwargs.get('max_tokens')} thinking={_think}", file=_sys.stderr, flush=True)
+            except Exception:
+                pass
             # Prefer streaming for long‑running requests (extended thinking)
             try:
                 out: List[str] = []
@@ -181,9 +188,16 @@ class ProviderRunner:
                                         continue
                             except Exception:
                                 pass
-                        # Ensure completion (ignore returned object)
+                        # Ensure completion and log usage
                         try:
-                            _ = stream.get_final_message()  # type: ignore
+                            _final = stream.get_final_message()  # type: ignore
+                            try:
+                                import sys as _sys
+                                _usage = getattr(_final, "usage", None)
+                                if _usage:
+                                    print(f"[CLAUDE][USAGE][stream] usage={_usage}", file=_sys.stderr, flush=True)
+                            except Exception:
+                                pass
                         except Exception:
                             pass
                 except Exception:
@@ -195,6 +209,13 @@ class ProviderRunner:
                 pass
             # Fallback to non‑streaming
             msg = client.messages.create(**kwargs)
+            try:
+                import sys as _sys
+                _usage2 = getattr(msg, "usage", None)
+                if _usage2:
+                    print(f"[CLAUDE][USAGE][nonstream] usage={_usage2}", file=_sys.stderr, flush=True)
+            except Exception:
+                pass
             parts: List[str] = []
             for blk in getattr(msg, "content", []) or []:
                 txt = getattr(blk, "text", None)
