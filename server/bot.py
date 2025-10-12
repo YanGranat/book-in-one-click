@@ -1896,8 +1896,19 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(state=GenerateStates.WaitingTopic, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def topic_received(message: types.Message, state: FSMContext):
+        # Diagnostics: entrypoint
+        try:
+            import sys as _sys
+            print(f"[FLOW][topic_received] uid={getattr(getattr(message,'from_user',None),'id',None)} chat={getattr(getattr(message,'chat',None),'id',None)} mid={getattr(message,'message_id',None)}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
         text_raw = (message.text or "").strip()
         data = await state.get_data()
+        try:
+            import sys as _sys
+            print(f"[FLOW][topic_received] text_len={len(text_raw)} keys={list(data.keys())[:10]}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
         ui_lang = data.get("ui_lang", "ru")
         # Mark this message as handled to prevent auto-chat from reusing it on webhook retries
         try:
@@ -2537,6 +2548,11 @@ def create_dispatcher() -> Dispatcher:
                     fc_depth_pref = 2
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
                 unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                try:
+                    import sys as _sys
+                    print(f"[FLOW][confirm_show] uid={getattr(getattr(message,'from_user',None),'id',None)} cost={unit_cost} refine={refine_pref} fc={fc_enabled_pref} depth={fc_depth_pref}", file=_sys.stderr, flush=True)
+                except Exception:
+                    pass
                 confirm_txt = (
                     f"Будет списано {unit_cost} кредит(ов). Подтвердить?"
                     if _is_ru(ui_lang_local) else
@@ -2548,6 +2564,11 @@ def create_dispatcher() -> Dispatcher:
                 await message.answer(confirm_txt, reply_markup=kb)
                 # Save pending topic and wait for callback (chat will be marked running in cb_confirm_charge)
                 await state.update_data(pending_topic=topic)
+                try:
+                    import sys as _sys
+                    print(f"[FLOW][confirm_saved] uid={getattr(getattr(message,'from_user',None),'id',None)} topic_saved_len={len(topic)}", file=_sys.stderr, flush=True)
+                except Exception:
+                    pass
                 return
             except Exception:
                 pass
@@ -2947,6 +2968,11 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query_handler(lambda c: c.data in {"confirm:charge:yes","confirm:charge:no"}, state="*")  # type: ignore
     async def cb_confirm_charge(query: types.CallbackQuery, state: FSMContext):
+        try:
+            import sys as _sys
+            print(f"[FLOW][cb_confirm_charge] from={getattr(getattr(query,'from_user',None),'id',None)} chat={getattr(getattr(getattr(query,'message',None),'chat',None),'id',None)} data={(getattr(query,'data',None))}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         # Always ack and try to remove inline keyboard to avoid hanging spinner
@@ -2975,6 +3001,11 @@ def create_dispatcher() -> Dispatcher:
             return
         # proceed and charge then run generation using saved topic
         topic = (data.get("pending_topic") or "").strip()
+        try:
+            import sys as _sys
+            print(f"[FLOW][cb_confirm_charge] pending_topic_len={len(topic)}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
         if not topic:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, "Тема не найдена, отправьте заново /generate" if _is_ru(ui_lang) else "Topic missing, send /generate again")
             await state.finish()
@@ -2982,6 +3013,11 @@ def create_dispatcher() -> Dispatcher:
         chat_id = query.message.chat.id if query.message else query.from_user.id
         # Atomic check-and-set to prevent race conditions between workers
         if not await mark_chat_running(chat_id):
+            try:
+                import sys as _sys
+                print(f"[FLOW][cb_confirm_charge] already_running chat={chat_id}", file=_sys.stderr, flush=True)
+            except Exception:
+                pass
             await query.answer()
             return  # Another worker already started generation
         # Charge
@@ -3013,10 +3049,20 @@ def create_dispatcher() -> Dispatcher:
                             fc_depth_pref = 2
                     fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
                     unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                    try:
+                        import sys as _sys
+                        print(f"[FLOW][charge_db] uid={getattr(getattr(query,'from_user',None),'id',None)} cost={unit_cost}", file=_sys.stderr, flush=True)
+                    except Exception:
+                        pass
                     ok, remaining = await charge_credits(session, user, unit_cost, reason="post")
                     if ok:
                         await session.commit()
                         charged = True
+                        try:
+                            import sys as _sys
+                            print(f"[FLOW][charge_db_ok] remaining={remaining}", file=_sys.stderr, flush=True)
+                        except Exception:
+                            pass
                     else:
                         # Not enough credits in DB
                         need = max(0, int(unit_cost) - int(remaining))
@@ -3054,8 +3100,18 @@ def create_dispatcher() -> Dispatcher:
                         fc_depth_pref = 2
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
                 unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                try:
+                    import sys as _sys
+                    print(f"[FLOW][charge_kv] uid={getattr(getattr(query,'from_user',None),'id',None)} cost={unit_cost}", file=_sys.stderr, flush=True)
+                except Exception:
+                    pass
                 ok, remaining = await charge_credits_kv(query.from_user.id, unit_cost)
                 if not ok:
+                    try:
+                        import sys as _sys
+                        print(f"[FLOW][charge_kv_fail] bal={remaining}", file=_sys.stderr, flush=True)
+                    except Exception:
+                        pass
                     need = max(0, int(unit_cost) - int(remaining))
                     warn = (
                         f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения."
@@ -3080,7 +3136,11 @@ def create_dispatcher() -> Dispatcher:
             return
 
         await query.answer()
-        await query.message.edit_reply_markup() if query.message else None
+        try:
+            if query.message:
+                await query.message.edit_reply_markup()
+        except Exception:
+            pass
         # Reuse generation code path by simulating message with topic — call inner function via helper
         # To avoid duplication, inline the core after charging:
         # Resolve provider/lang/refine/fc and run generate_post (same as in topic_received)
@@ -3102,6 +3162,11 @@ def create_dispatcher() -> Dispatcher:
             gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
             # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
             eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
+            try:
+                import sys as _sys
+                print(f"[FLOW][gen_start] uid={getattr(getattr(query,'from_user',None),'id',None)} topic_len={len(topic)} lang={eff_lang} prov={prov}", file=_sys.stderr, flush=True)
+            except Exception:
+                pass
             
             # Refine preference (superadmin only)
             refine_enabled = False

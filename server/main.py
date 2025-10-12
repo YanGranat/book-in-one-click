@@ -1383,6 +1383,17 @@ async def telegram_webhook(secret: str, request: Request):
                 elif "callback_query" in data and isinstance(data["callback_query"], dict):
                     _kind = "callback_query"
             print(f"[WEBHOOK] kind={_kind} from={_from} text={(str(_text)[:80] if _text else None)}", file=_sys.stderr, flush=True)
+            # Extra diagnostics for callback queries: log callback data and chat/message context
+            try:
+                if isinstance(data, dict) and "callback_query" in data and isinstance(data["callback_query"], dict):
+                    cq = data["callback_query"]
+                    _from_cb = ((cq.get("from") or {}).get("id"))
+                    _data_cb = cq.get("data")
+                    _mid_cb = ((cq.get("message") or {}).get("message_id"))
+                    _chat_cb = (((cq.get("message") or {}).get("chat") or {}).get("id"))
+                    print(f"[WEBHOOK][CB] from={_from_cb} chat={_chat_cb} mid={_mid_cb} data={(str(_data_cb)[:200] if _data_cb else None)}", file=_sys.stderr, flush=True)
+            except Exception:
+                pass
         except Exception:
             pass
         # Aiogram v2 expects Update constructed from dict via kwargs
