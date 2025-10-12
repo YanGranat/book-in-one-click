@@ -33,7 +33,7 @@
     },
     "thinking": {
       "supported": true,
-      "default_budget_tokens": 4096
+      "default_budget_tokens": 63999
     }
   }
 }
