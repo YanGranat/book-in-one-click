@@ -38,6 +38,15 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
             print(f"[TOPUP] {msg}", file=sys.stderr, flush=True)
         except Exception:
             pass
+    # Log environment once
+    try:
+        print(
+            f"[TOPUP] env SUPER_ADMIN_ID={SUPER_ADMIN_ID} BOT_ADMIN_IDS={len(ADMIN_IDS)} SessionLocal={bool(session_factory)}",
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:
+        pass
     @dp.message_handler(commands=["balance"])  # type: ignore
     async def balance_cmd(message: types.Message):
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
@@ -121,6 +130,17 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
     try:
         dp.register_message_handler(topup_cmd, commands=["topup"], state="*")
         _log_topup("handler_registered: /topup")
+    except Exception:
+        pass
+    # Fallback registration via text predicate in case commands filter misbehaves
+    try:
+        dp.register_message_handler(
+            topup_cmd,
+            lambda m: isinstance(getattr(m, "text", None), str) and (m.text or "").strip().lower().startswith("/topup"),
+            state="*",
+            content_types=types.ContentTypes.TEXT,
+        )
+        _log_topup("handler_registered_fallback: /topup startswith")
     except Exception:
         pass
 

@@ -1390,16 +1390,16 @@ async def telegram_webhook(secret: str, request: Request):
         # Ensure aiogram context is set in webhook execution
         Bot.set_current(DP.bot)
         Dispatcher.set_current(DP)
-        # Short-circuit /topup to ensure handler is called even if generic filters misroute
+        # Ensure admin commands are registered (idempotent)
         try:
-            msg = getattr(update, "message", None)
-            txt = (getattr(msg, "text", None) or "").strip()
-            if txt.startswith("/topup"):
-                # Build a minimal aiogram message object and call handler via dispatcher
-                # Prefer the registered handler path; DP.process_update should already route it,
-                # but we invoke explicitly as a defensive measure.
-                from .bot_commands import register_admin_commands
-                register_admin_commands(DP, SessionLocal)
+            from .bot_commands import register_admin_commands
+            register_admin_commands(DP, SessionLocal)
+        except Exception:
+            pass
+        # Trace DP state
+        try:
+            import sys as _sys
+            print(f"[DP] Dispatcher ready: bot={bool(DP.bot)}", file=_sys.stderr, flush=True)
         except Exception:
             pass
         await DP.process_update(update)

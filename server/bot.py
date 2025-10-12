@@ -3864,6 +3864,13 @@ def create_dispatcher() -> Dispatcher:
     @dp.message_handler(lambda m: (m.text or "").startswith("/") and ((m.text or "").split()[0].lstrip("/").split("@")[0].lower() in _allowed_cmds), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def cmd_any_in_chat(message: types.Message, state: FSMContext):
         try:
+            import sys as _sys
+            raw = (message.text or "").strip()
+            cmd = raw.split()[0].lstrip("/").split("@")[0].lower()
+            print(f"[CMD_ANY_CHAT] cmd={cmd} allowed={cmd in _allowed_cmds}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
+        try:
             await state.finish()
         except Exception:
             pass
@@ -3901,6 +3908,13 @@ def create_dispatcher() -> Dispatcher:
     # Generic commands while ANY FSM state (except active chat): finish state and re-dispatch
     @dp.message_handler(lambda m: (m.text or "").startswith("/") and ((m.text or "").split()[0].lstrip("/").split("@")[0].lower() in _allowed_cmds), state="*", content_types=types.ContentTypes.TEXT)  # type: ignore
     async def cmd_any_during_fsm(message: types.Message, state: FSMContext):
+        try:
+            import sys as _sys
+            raw = (message.text or "").strip()
+            cmd = raw.split()[0].lstrip("/").split("@")[0].lower()
+            print(f"[CMD_ANY_FSM] cmd={cmd} allowed={cmd in _allowed_cmds}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
         try:
             cur = await state.get_state()
         except Exception:
