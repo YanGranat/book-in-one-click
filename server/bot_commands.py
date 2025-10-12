@@ -66,14 +66,23 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
             return
         telegram_id = int(parts[1])
         amount = int(parts[2])
+        # Always top up KV (source of truth for chat/UI); also mirror to DB if available
+        new_balance_kv = await topup_credits_kv(telegram_id, amount)
         if session_factory is None:
-            new_balance = await topup_credits_kv(telegram_id, amount)
-            await message.answer(f"OK. New balance for {telegram_id}: {new_balance}")
+            await message.answer(f"OK. New balance for {telegram_id}: {new_balance_kv}")
             return
         async with session_factory() as session:
-            new_balance = await topup_credits(session, telegram_id, amount)
-            await session.commit()
-        await message.answer(f"OK. New balance for {telegram_id}: {new_balance}")
+            try:
+                from .db import get_or_create_user
+                # Mirror to DB ledger
+                await topup_credits(session, telegram_id, amount)
+                await session.commit()
+                # Read DB balance for confirmation
+                user = await get_or_create_user(session, telegram_id)
+                db_balance = int(getattr(user, "credits", 0) or 0)
+            except Exception:
+                db_balance = new_balance_kv
+        await message.answer(f"OK. New balance for {telegram_id}: {db_balance}")
 
 
 async def ensure_db_ready():
