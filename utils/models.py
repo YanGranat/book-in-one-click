@@ -87,3 +87,13 @@ def is_json_supported(provider: str) -> bool:
     return bool(jm.get("supported"))
 
 
+def get_thinking_config(provider: str) -> Dict[str, Any]:
+    """Return provider-specific thinking hints from config, if any.
+    Currently used for Anthropic Claude to pass optional 'thinking' object with budget_tokens.
+    """
+    p = (provider or "openai").strip().lower()
+    cfg = _load_models_config()
+    prov = cfg.get(p) or cfg.get("gemini" if p == "google" else p) or {}
+    return (prov.get("thinking") or {})
+
+

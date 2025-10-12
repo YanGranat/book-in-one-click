@@ -5,7 +5,7 @@ import os
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
-from utils.models import get_model, get_json_mode, is_json_supported
+from utils.models import get_model, get_json_mode, is_json_supported, get_thinking_config
 
 
 def _ensure_loop() -> None:
@@ -135,6 +135,15 @@ class ProviderRunner:
                 "system": system_augmented,
                 "messages": [{"role": "user", "content": user_message}]
             }
+            # Optional thinking support (if configured in models.json)
+            try:
+                tcfg = get_thinking_config("claude")
+                if bool(tcfg.get("supported")):
+                    budget = int(tcfg.get("default_budget_tokens", 0) or 0)
+                    if budget > 0:
+                        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            except Exception:
+                pass
             msg = client.messages.create(**kwargs)
             parts: List[str] = []
             for blk in getattr(msg, "content", []) or []:

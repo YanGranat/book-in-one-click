@@ -30,6 +30,10 @@
     "json_mode": {
       "supported": true,
       "response_format": { "type": "json_object" }
+    },
+    "thinking": {
+      "supported": true,
+      "default_budget_tokens": 4096
     }
   }
 }
