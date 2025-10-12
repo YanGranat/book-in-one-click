@@ -141,20 +141,40 @@ class ProviderRunner:
                 if bool(tcfg.get("supported")):
                     cfg_budget = int(tcfg.get("default_budget_tokens", 0) or 0)
                     if cfg_budget > 0:
-                        # Ensure Claude API invariant: max_tokens > thinking.budget_tokens
+                        # Ensure Claude API invariant and leave headroom for output tokens
                         cur_max = int(kwargs.get("max_tokens", 8192))
-                        env_cap = os.getenv("CLAUDE_MAX_TOKENS", "")
-                        cap = int(env_cap) if env_cap.isdigit() else None
-                        desired_max = max(cur_max, cfg_budget + 1)
+                        env_cap_raw = os.getenv("CLAUDE_MAX_TOKENS", "")
+                        cap = int(env_cap_raw) if env_cap_raw.isdigit() else None
+                        out_headroom = os.getenv("CLAUDE_OUTPUT_TOKENS", "8192")
+                        try:
+                            out_headroom_val = max(1024, int(out_headroom))
+                        except Exception:
+                            out_headroom_val = 8192
+                        # Desired max = budget + headroom
+                        desired_max = max(cur_max, cfg_budget + out_headroom_val)
+                        final_max = desired_max
+                        final_budget = cfg_budget
+                        trimmed = False
                         if cap is not None and desired_max > cap:
-                            # Respect explicit env cap: reduce budget to cap-1
-                            safe_budget = max(0, cap - 1)
-                            kwargs["max_tokens"] = cap
-                            if safe_budget > 0:
-                                kwargs["thinking"] = {"type": "enabled", "budget_tokens": safe_budget}
-                        else:
-                            kwargs["max_tokens"] = desired_max
-                            kwargs["thinking"] = {"type": "enabled", "budget_tokens": cfg_budget}
+                            trimmed = True
+                            final_max = cap
+                            # keep at least 1k output tokens if possible
+                            final_budget = max(0, min(cfg_budget, cap - max(1024, min(out_headroom_val, cap // 4))))
+                            if final_budget <= 0:
+                                final_budget = max(0, cap - 1024)
+                        kwargs["max_tokens"] = int(final_max)
+                        if final_budget > 0:
+                            kwargs["thinking"] = {"type": "enabled", "budget_tokens": int(final_budget)}
+                        # Diagnostics for resolved limits
+                        try:
+                            import sys as _sys
+                            print(
+                                f"[CLAUDE][LIMITS] budget_cfg={cfg_budget} headroom={out_headroom_val} cur_max={cur_max} cap={cap} -> max_tokens={kwargs.get('max_tokens')} thinking={kwargs.get('thinking')} trimmed={trimmed}",
+                                file=_sys.stderr,
+                                flush=True,
+                            )
+                        except Exception:
+                            pass
             except Exception:
                 pass
             # Diagnostics: log request params
@@ -165,14 +185,18 @@ class ProviderRunner:
             except Exception:
                 pass
             # Prefer streaming for long‑running requests (extended thinking)
+            import time as _time
+            _t0 = _time.monotonic()
             try:
                 out: List[str] = []
+                _chunks = 0
                 try:
                     # Anthropic SDK streaming helper (high‑level)
                     with client.messages.stream(**kwargs) as stream:  # type: ignore
                         try:
                             for chunk in getattr(stream, "text_stream", []):
                                 out.append(str(chunk))
+                                _chunks += 1
                         except Exception:
                             # Fallback: iterate raw events
                             try:
@@ -184,6 +208,7 @@ class ProviderRunner:
                                                 t = getattr(delta, "text", "")
                                                 if t:
                                                     out.append(str(t))
+                                                    _chunks += 1
                                     except Exception:
                                         continue
                             except Exception:
@@ -194,8 +219,10 @@ class ProviderRunner:
                             try:
                                 import sys as _sys
                                 _usage = getattr(_final, "usage", None)
+                                _stop = getattr(_final, "stop_reason", None)
+                                _elapsed = _time.monotonic() - _t0
                                 if _usage:
-                                    print(f"[CLAUDE][USAGE][stream] usage={_usage}", file=_sys.stderr, flush=True)
+                                    print(f"[CLAUDE][USAGE][stream] usage={_usage} stop={_stop} chunks={_chunks} elapsed={_elapsed:.1f}s out_len={sum(len(s) for s in out)}", file=_sys.stderr, flush=True)
                             except Exception:
                                 pass
                         except Exception:
@@ -212,8 +239,10 @@ class ProviderRunner:
             try:
                 import sys as _sys
                 _usage2 = getattr(msg, "usage", None)
+                _stop2 = getattr(msg, "stop_reason", None)
+                _elapsed2 = _time.monotonic() - _t0
                 if _usage2:
-                    print(f"[CLAUDE][USAGE][nonstream] usage={_usage2}", file=_sys.stderr, flush=True)
+                    print(f"[CLAUDE][USAGE][nonstream] usage={_usage2} stop={_stop2} elapsed={_elapsed2:.1f}s", file=_sys.stderr, flush=True)
             except Exception:
                 pass
             parts: List[str] = []
