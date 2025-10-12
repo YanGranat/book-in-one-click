@@ -157,6 +157,43 @@ class ProviderRunner:
                             kwargs["thinking"] = {"type": "enabled", "budget_tokens": cfg_budget}
             except Exception:
                 pass
+            # Prefer streaming for long‑running requests (extended thinking)
+            try:
+                out: List[str] = []
+                try:
+                    # Anthropic SDK streaming helper (high‑level)
+                    with client.messages.stream(**kwargs) as stream:  # type: ignore
+                        try:
+                            for chunk in getattr(stream, "text_stream", []):
+                                out.append(str(chunk))
+                        except Exception:
+                            # Fallback: iterate raw events
+                            try:
+                                for ev in stream:  # type: ignore
+                                    try:
+                                        if getattr(ev, "type", "") == "content_block_delta":
+                                            delta = getattr(ev, "delta", None)
+                                            if delta and getattr(delta, "type", "") == "text_delta":
+                                                t = getattr(delta, "text", "")
+                                                if t:
+                                                    out.append(str(t))
+                                    except Exception:
+                                        continue
+                            except Exception:
+                                pass
+                        # Ensure completion (ignore returned object)
+                        try:
+                            _ = stream.get_final_message()  # type: ignore
+                        except Exception:
+                            pass
+                except Exception:
+                    out = out or []
+                txt_all = ("".join(out)).strip()
+                if txt_all:
+                    return txt_all
+            except Exception:
+                pass
+            # Fallback to non‑streaming
             msg = client.messages.create(**kwargs)
             parts: List[str] = []
             for blk in getattr(msg, "content", []) or []:
