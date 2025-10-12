@@ -1258,8 +1258,16 @@ def create_dispatcher() -> Dispatcher:
             return
         # Mark precharged and ask for topic
         await state.update_data(series_mode="fixed", series_count=int(count), series_precharged_amount=int(total))
-        await query.answer()
-        await query.message.edit_reply_markup() if query.message else None
+        # Be defensive: Telegram may raise "Message is not modified" if markup already cleared
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        try:
+            if query.message:
+                await query.message.edit_reply_markup()
+        except Exception:
+            pass
         await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Ок. Отправьте тему для серии." if ru else "OK. Send a topic for the series."))
         await GenerateStates.WaitingTopic.set()
 
