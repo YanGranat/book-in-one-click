@@ -145,7 +145,8 @@ class ProviderRunner:
                         cur_max = int(kwargs.get("max_tokens", 8192))
                         env_cap_raw = os.getenv("CLAUDE_MAX_TOKENS", "")
                         cap = int(env_cap_raw) if env_cap_raw.isdigit() else None
-                        out_headroom = os.getenv("CLAUDE_OUTPUT_TOKENS", "32000")
+                        # Target output headroom default 48k-51200 for Claude 4.5 heavy unless overridden
+                        out_headroom = os.getenv("CLAUDE_OUTPUT_TOKENS", "48000")
                         try:
                             out_headroom_val = max(1024, int(out_headroom))
                         except Exception:
@@ -158,8 +159,8 @@ class ProviderRunner:
                         if cap is not None and desired_max > cap:
                             trimmed = True
                             final_max = cap
-                            # keep at least 1k output tokens if possible
-                            final_budget = max(0, min(cfg_budget, cap - max(1024, min(out_headroom_val, cap // 4))))
+                            # keep at least 4k output tokens if possible
+                            final_budget = max(0, min(cfg_budget, cap - max(4096, min(out_headroom_val, cap // 4))))
                             if final_budget <= 0:
                                 final_budget = max(0, cap - 1024)
                         kwargs["max_tokens"] = int(final_max)

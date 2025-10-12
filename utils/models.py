@@ -59,6 +59,8 @@ def get_model(provider: str, tier: str = "heavy") -> str:
             return os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-0")
         if t == "fast" and os.getenv("ANTHROPIC_FAST_MODEL"):
             return os.getenv("ANTHROPIC_FAST_MODEL", "claude-haiku-4-0")
+        # Hard fallback updated to 4.5 when no overrides and config missing
+        # (config normally has 4.5 already)
     # Config file fallback
     prov = cfg.get(p) or cfg.get("gemini" if p == "google" else p) or {}
     tiers = (prov.get("tiers") or {})
