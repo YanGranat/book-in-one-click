@@ -143,46 +143,18 @@ class ProviderRunner:
                     if cfg_budget > 0:
                         # Ensure Claude API invariant and leave headroom for output tokens
                         cur_max = int(kwargs.get("max_tokens", 8192))
-                        # Hard-coded defaults; no ENV overrides per policy
+                        # Hard-coded cap and simple policy: heavy Claude runs with thinking enabled
+                        # Max tokens hard default 60k; budget from config but not exceeding cap-1
                         cap = 60000
-                        # Target output headroom default for Claude 4.5 heavy (no ENV overrides)
-                        out_headroom = "48000"
-                        try:
-                            out_headroom_val = max(1024, int(out_headroom))
-                        except Exception:
-                            out_headroom_val = 8192
-                        # Desired max = budget + headroom
-                        desired_max = max(cur_max, cfg_budget + out_headroom_val)
-                        final_max = desired_max
-                        final_budget = cfg_budget
-                        trimmed = False
-                        eff_out = out_headroom_val
-                        if cap is not None and desired_max > cap:
-                            trimmed = True
-                            final_max = cap
-                            # Prefer preserving output headroom fully if possible under cap
-                            # Minimal thinking floor
-                            min_thinking = 2048
-                            # If cap allows desired output + minimal thinking, keep desired output
-                            if cap >= (out_headroom_val + min_thinking):
-                                eff_out = out_headroom_val
-                                final_budget = max(min_thinking, min(cfg_budget, cap - eff_out))
-                            else:
-                                # Otherwise reduce output headroom but keep at least minimal output tokens
-                                # Minimal output floor
-                                min_out = 4096
-                                eff_out = max(min_out, cap - min_thinking)
-                                final_budget = max(min_thinking, min(cfg_budget, cap - eff_out))
-                            if final_budget <= 0:
-                                final_budget = max(0, cap - 1024)
-                        kwargs["max_tokens"] = int(final_max)
-                        if final_budget > 0:
-                            kwargs["thinking"] = {"type": "enabled", "budget_tokens": int(final_budget)}
+                        final_budget = int(min(cfg_budget, cap - 1))
+                        final_max = int(max(cap, final_budget + 1))  # ensure API invariant
+                        kwargs["max_tokens"] = final_max
+                        kwargs["thinking"] = {"type": "enabled", "budget_tokens": final_budget}
                         # Diagnostics for resolved limits
                         try:
                             import sys as _sys
                             print(
-                                f"[CLAUDE][LIMITS] budget_cfg={cfg_budget} headroom_req={out_headroom_val} headroom_eff={eff_out} cur_max={cur_max} cap={cap} -> max_tokens={kwargs.get('max_tokens')} thinking={kwargs.get('thinking')} trimmed={trimmed}",
+                                f"[CLAUDE][LIMITS] budget_cfg={cfg_budget} cur_max={cur_max} cap={cap} -> max_tokens={kwargs.get('max_tokens')} thinking={kwargs.get('thinking')}",
                                 file=_sys.stderr,
                                 flush=True,
                             )
