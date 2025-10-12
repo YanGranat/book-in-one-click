@@ -441,21 +441,23 @@ def create_dispatcher() -> Dispatcher:
                     types.BotCommand("info", "Info"),
                     types.BotCommand("interface_lang", "Interface language"),
                 ]
-                # Admin extras: chat (pricing removed for admins)
+                # Admin extras: chat and meme_extract
                 if is_admin:
                     base_ru = base_ru + [
                         types.BotCommand("chat", "Чат с ИИ"),
                         types.BotCommand("endchat", "Завершить чат"),
+                        types.BotCommand("meme_extract", "Экстракция мемов"),
                     ]
                     base_en = base_en + [
                         types.BotCommand("chat", "Chat with AI"),
                         types.BotCommand("endchat", "End chat"),
+                        types.BotCommand("meme_extract", "Meme extraction"),
                     ]
                 # Regular user extras: credits
                 if (not is_admin):
                     base_ru = base_ru + [types.BotCommand("credits", "Кредиты")]
                     base_en = base_en + [types.BotCommand("credits", "Credits")]
-                # Superadmin extras: ensure chat/endchat/meme_extract present (pricing removed)
+                # Superadmin extras: ensure chat/endchat/meme_extract present
                 from .bot_commands import SUPER_ADMIN_ID
                 is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
                 if is_superadmin:
@@ -576,7 +578,8 @@ def create_dispatcher() -> Dispatcher:
                     "- /history — история.\n"
                     "- /info — справка.\n"
                     "- /interface_lang — язык интерфейса.\n"
-                    "- /chat, /endchat — чат с ИИ.\n\n"
+                    "- /chat, /endchat — чат с ИИ.\n"
+                    "- /meme_extract — экстракция мемов.\n\n"
                 )
             elif is_admin:
                 commands_block = (
@@ -587,8 +590,8 @@ def create_dispatcher() -> Dispatcher:
                     "- /history — история.\n"
                     "- /info — справка.\n"
                     "- /interface_lang — язык интерфейса.\n"
-                    "- /pricing — цены.\n"
-                    "- /chat, /endchat — чат с ИИ.\n\n"
+                    "- /chat, /endchat — чат с ИИ.\n"
+                    "- /meme_extract — экстракция мемов.\n\n"
                 )
             else:
                 commands_block = (
@@ -634,7 +637,8 @@ def create_dispatcher() -> Dispatcher:
                     "- /history — history.\n"
                     "- /info — info.\n"
                     "- /interface_lang — interface language.\n"
-                    "- /chat, /endchat — chat with AI.\n\n"
+                    "- /chat, /endchat — chat with AI.\n"
+                    "- /meme_extract — meme extraction.\n\n"
                 )
             elif is_admin:
                 commands_block = (
@@ -645,8 +649,8 @@ def create_dispatcher() -> Dispatcher:
                     "- /history — history.\n"
                     "- /info — info.\n"
                     "- /interface_lang — interface language.\n"
-                    "- /pricing — pricing.\n"
-                    "- /chat, /endchat — chat with AI.\n\n"
+                    "- /chat, /endchat — chat with AI.\n"
+                    "- /meme_extract — meme extraction.\n\n"
                 )
             else:
                 commands_block = (
@@ -685,13 +689,14 @@ def create_dispatcher() -> Dispatcher:
         await message.answer(text, disable_web_page_preview=True, parse_mode=types.ParseMode.HTML)
 
 
-    # ===== Meme Extraction (superadmin only) =====
+    # ===== Meme Extraction (admins and superadmin) =====
     @dp.message_handler(commands=["meme_extract"])  # type: ignore
     async def cmd_meme_extract(message: types.Message, state: FSMContext):
-        # Superadmin gate
-        from .bot_commands import SUPER_ADMIN_ID
+        # Admin or Superadmin gate
+        from .bot_commands import SUPER_ADMIN_ID, ADMIN_IDS
         is_superadmin = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
-        if not is_superadmin:
+        is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+        if not (is_superadmin or is_admin):
             return
         await dp.current_state(user=message.from_user.id, chat=message.chat.id).update_data(meme_waiting_file=True)
         await message.answer("Пришлите .txt или .md файл для экстракции мемов.")
@@ -704,9 +709,12 @@ def create_dispatcher() -> Dispatcher:
             data = {}
         if not bool(data.get("meme_waiting_file")):
             return
-        # Superadmin gate again
-        from .bot_commands import SUPER_ADMIN_ID
-        if not (message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID)):
+        # Admin/Superadmin gate again
+        from .bot_commands import SUPER_ADMIN_ID, ADMIN_IDS
+        if not (message.from_user and (
+            (SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
+            or (message.from_user.id in ADMIN_IDS)
+        )):
             return
         # Deduplicate by message id
         try:
