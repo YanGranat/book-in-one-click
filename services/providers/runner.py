@@ -156,16 +156,29 @@ class ProviderRunner:
                         final_max = desired_max
                         final_budget = cfg_budget
                         trimmed = False
+                        eff_out = out_headroom_val
                         if cap is not None and desired_max > cap:
                             trimmed = True
                             final_max = cap
-                            # keep at least minimal output tokens; bias to preserve budget
-                            min_out_raw = os.getenv("CLAUDE_MIN_OUTPUT_TOKENS", "4096")
+                            # Prefer preserving output headroom fully if possible under cap
+                            min_thinking_raw = os.getenv("CLAUDE_MIN_THINKING_TOKENS", "2048")
                             try:
-                                min_out = max(1024, int(min_out_raw))
+                                min_thinking = max(1024, int(min_thinking_raw))
                             except Exception:
-                                min_out = 4096
-                            final_budget = max(0, min(cfg_budget, cap - min_out))
+                                min_thinking = 2048
+                            # If cap allows desired output + minimal thinking, keep desired output
+                            if cap >= (out_headroom_val + min_thinking):
+                                eff_out = out_headroom_val
+                                final_budget = max(min_thinking, min(cfg_budget, cap - eff_out))
+                            else:
+                                # Otherwise reduce output headroom but keep at least minimal output tokens
+                                min_out_raw = os.getenv("CLAUDE_MIN_OUTPUT_TOKENS", "4096")
+                                try:
+                                    min_out = max(1024, int(min_out_raw))
+                                except Exception:
+                                    min_out = 4096
+                                eff_out = max(min_out, cap - min_thinking)
+                                final_budget = max(min_thinking, min(cfg_budget, cap - eff_out))
                             if final_budget <= 0:
                                 final_budget = max(0, cap - 1024)
                         kwargs["max_tokens"] = int(final_max)
@@ -175,7 +188,7 @@ class ProviderRunner:
                         try:
                             import sys as _sys
                             print(
-                                f"[CLAUDE][LIMITS] budget_cfg={cfg_budget} headroom={out_headroom_val} cur_max={cur_max} cap={cap} -> max_tokens={kwargs.get('max_tokens')} thinking={kwargs.get('thinking')} trimmed={trimmed}",
+                                f"[CLAUDE][LIMITS] budget_cfg={cfg_budget} headroom_req={out_headroom_val} headroom_eff={eff_out} cur_max={cur_max} cap={cap} -> max_tokens={kwargs.get('max_tokens')} thinking={kwargs.get('thinking')} trimmed={trimmed}",
                                 file=_sys.stderr,
                                 flush=True,
                             )
