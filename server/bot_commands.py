@@ -68,6 +68,14 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
         amount = int(parts[2])
         # Always top up KV (source of truth for chat/UI); also mirror to DB if available
         new_balance_kv = await topup_credits_kv(telegram_id, amount)
+        # Try to notify the user regardless of DB presence
+        try:
+            await message.bot.send_message(
+                telegram_id,
+                f"🎁 Вам начислено {amount} кредит(ов)!\nВаш баланс: {new_balance_kv} кредитов."
+            )
+        except Exception:
+            pass
         if session_factory is None:
             await message.answer(f"OK. New balance for {telegram_id}: {new_balance_kv}")
             return
