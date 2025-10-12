@@ -117,6 +117,13 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
                 db_balance = new_balance_kv
         await message.answer(f"✅ Начислено {amount}. Новый баланс {telegram_id}: {db_balance}")
 
+    # Extra explicit registration to ensure handler is bound (defensive)
+    try:
+        dp.register_message_handler(topup_cmd, commands=["topup"], state="*")
+        _log_topup("handler_registered: /topup")
+    except Exception:
+        pass
+
 
 async def ensure_db_ready():
     await init_db()
