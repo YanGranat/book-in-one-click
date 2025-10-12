@@ -19,6 +19,7 @@ from .bot import create_dispatcher
 from .kv import get_redis, kv_prefix
 from .bot_commands import register_admin_commands, ensure_db_ready
 from .db import SessionLocal, JobLog, Job, ResultDoc
+from sqlalchemy import text  # for DB health check
 
 
 def _load_env():
@@ -178,6 +179,54 @@ async def _startup():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/health/diag")
+async def health_diag():
+    # Diagnostics without exposing secrets
+    import os as _os
+    out = {
+        "ok": True,
+        "env": {
+            "db_url": bool(_os.getenv("DB_URL", "").strip()),
+            "redis_url": bool(_os.getenv("REDIS_URL", "").strip()),
+            "super_admin_id": bool((_os.getenv("SUPER_ADMIN_ID", "").strip() or _os.getenv("BOT_SUPER_ADMIN_ID", "").strip())),
+            "telegram_bot_token": bool(_os.getenv("TELEGRAM_BOT_TOKEN", "").strip()),
+        },
+        "db_ok": False,
+        "redis_ok": False,
+    }
+    # Check DB connectivity (async)
+    try:
+        if SessionLocal is not None:
+            async with SessionLocal() as s:
+                await s.execute(text("SELECT 1"))
+            out["db_ok"] = True
+        else:
+            out["db_ok"] = False
+    except Exception as e:
+        out["db_ok"] = False
+        out["db_error"] = type(e).__name__
+    # Check Redis connectivity via KV helper
+    try:
+        r = get_redis()
+        key = f"{kv_prefix()}:health:ping"
+        try:
+            await r.set(key, "1")  # type: ignore
+            try:
+                await r.expire(key, 30)  # type: ignore
+            except Exception:
+                pass
+            val = await r.get(key)  # type: ignore
+            sval = val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "")
+            out["redis_ok"] = (sval == "1")
+        except Exception:
+            out["redis_ok"] = False
+    except Exception as e:
+        out["redis_ok"] = False
+        out["redis_error"] = type(e).__name__
+    out["ok"] = bool(out.get("db_ok") and out.get("redis_ok") and out["env"]["telegram_bot_token"])  # minimal readiness
+    return JSONResponse(out)
 
 @app.get("/ip")
 async def ip_endpoint(request: Request):

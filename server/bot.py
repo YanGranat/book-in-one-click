@@ -4262,10 +4262,21 @@ def create_dispatcher() -> Dispatcher:
         if is_admin:
             await message.answer("Админ: генерации бесплатны." if _is_ru(ui_lang) else "Admin: generation is free.")
             return
+        # Prefer DB balance when available; fallback to KV
+        bal = 0
         try:
-            bal = await get_balance_kv_only(message.from_user.id) if message.from_user else 0
+            from .db import SessionLocal as _Sess, get_or_create_user as _gcu
+            if _Sess is not None and message.from_user:
+                async with _Sess() as s:
+                    user = await _gcu(s, int(message.from_user.id))
+                    bal = int(getattr(user, "credits", 0) or 0)
+            else:
+                bal = await get_balance_kv_only(message.from_user.id) if message.from_user else 0
         except Exception:
-            bal = 0
+            try:
+                bal = await get_balance_kv_only(message.from_user.id) if message.from_user else 0
+            except Exception:
+                bal = 0
         if _is_ru(ui_lang):
             txt = [f"Баланс: {int(bal)} кредит(ов).", "", "Цены:", "- Пост: 1 кредит", "- Статья: 100 кредитов", "", "Купить за ⭐ (1 кредит = 50⭐):"]
         else:
