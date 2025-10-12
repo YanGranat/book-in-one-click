@@ -24,8 +24,8 @@
     "tiers": {
       "superfast": { "model": "claude-haiku-4-0" },
       "fast": { "model": "claude-haiku-4-0" },
-      "medium": { "model": "claude-sonnet-4-0" },
-      "heavy": { "model": "claude-sonnet-4-0" }
+      "medium": { "model": "claude-sonnet-4-5" },
+      "heavy": { "model": "claude-sonnet-4-5" }
     },
     "json_mode": {
       "supported": true,

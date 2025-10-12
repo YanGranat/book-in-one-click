@@ -145,7 +145,7 @@ class ProviderRunner:
                         cur_max = int(kwargs.get("max_tokens", 8192))
                         env_cap_raw = os.getenv("CLAUDE_MAX_TOKENS", "")
                         cap = int(env_cap_raw) if env_cap_raw.isdigit() else None
-                        out_headroom = os.getenv("CLAUDE_OUTPUT_TOKENS", "8192")
+                        out_headroom = os.getenv("CLAUDE_OUTPUT_TOKENS", "32000")
                         try:
                             out_headroom_val = max(1024, int(out_headroom))
                         except Exception:
