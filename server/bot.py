@@ -3860,7 +3860,8 @@ def create_dispatcher() -> Dispatcher:
         await message.answer("Чат завершён.")
 
     # Generic commands while chat active: finish state and re-dispatch the same update
-    @dp.message_handler(lambda m: (m.text or "").startswith("/"), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
+    _allowed_cmds = {"start","info","generate","series","series_fixed","settings","history","history_clear","interface_lang","credits","pricing","chat","endchat","cancel"}
+    @dp.message_handler(lambda m: (m.text or "").startswith("/") and ((m.text or "").split()[0].lstrip("/").split("@")[0].lower() in _allowed_cmds), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def cmd_any_in_chat(message: types.Message, state: FSMContext):
         try:
             await state.finish()
@@ -3898,7 +3899,7 @@ def create_dispatcher() -> Dispatcher:
         return
 
     # Generic commands while ANY FSM state (except active chat): finish state and re-dispatch
-    @dp.message_handler(lambda m: (m.text or "").startswith("/"), state="*", content_types=types.ContentTypes.TEXT)  # type: ignore
+    @dp.message_handler(lambda m: (m.text or "").startswith("/") and ((m.text or "").split()[0].lstrip("/").split("@")[0].lower() in _allowed_cmds), state="*", content_types=types.ContentTypes.TEXT)  # type: ignore
     async def cmd_any_during_fsm(message: types.Message, state: FSMContext):
         try:
             cur = await state.get_state()

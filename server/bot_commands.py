@@ -57,27 +57,34 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
     @dp.message_handler(commands=["topup"])  # type: ignore
     async def topup_cmd(message: types.Message):
         # Superadmin-only topup
-        if message.from_user is None or SUPER_ADMIN_ID is None or int(message.from_user.id) != int(SUPER_ADMIN_ID):
-            await message.answer("Forbidden")
+        if message.from_user is None or SUPER_ADMIN_ID is None:
+            await message.answer("⛔ Not authorized: superadmin is not configured")
+            return
+        if int(message.from_user.id) != int(SUPER_ADMIN_ID):
+            await message.answer("⛔ Access denied. Superadmin only.")
             return
         parts = (message.text or "").split()
         if len(parts) < 3 or not parts[1].isdigit() or not parts[2].isdigit():
-            await message.answer("Usage: /topup <telegram_id> <amount>")
+            await message.answer("Usage: /topup <telegram_id> <amount>\nExample: /topup 452623935 100")
             return
         telegram_id = int(parts[1])
         amount = int(parts[2])
         # Always top up KV (source of truth for chat/UI); also mirror to DB if available
-        new_balance_kv = await topup_credits_kv(telegram_id, amount)
+        try:
+            new_balance_kv = await topup_credits_kv(telegram_id, amount)
+        except Exception as e:
+            await message.answer(f"❌ KV error: {type(e).__name__}: {str(e)[:160]}")
+            return
         # Try to notify the user regardless of DB presence
         try:
             await message.bot.send_message(
                 telegram_id,
                 f"🎁 Вам начислено {amount} кредит(ов)!\nВаш баланс: {new_balance_kv} кредитов."
             )
-        except Exception:
-            pass
+        except Exception as notify_err:
+            await message.answer(f"⚠️ Не удалось уведомить пользователя: {type(notify_err).__name__}")
         if session_factory is None:
-            await message.answer(f"OK. New balance for {telegram_id}: {new_balance_kv}")
+            await message.answer(f"✅ Начислено {amount}. Новый баланс {telegram_id}: {new_balance_kv}")
             return
         async with session_factory() as session:
             try:
@@ -88,9 +95,10 @@ def register_admin_commands(dp: Dispatcher, session_factory: async_sessionmaker)
                 # Read DB balance for confirmation
                 user = await get_or_create_user(session, telegram_id)
                 db_balance = int(getattr(user, "credits", 0) or 0)
-            except Exception:
+            except Exception as db_err:
+                await message.answer(f"⚠️ DB mirror failed: {type(db_err).__name__}")
                 db_balance = new_balance_kv
-        await message.answer(f"OK. New balance for {telegram_id}: {db_balance}")
+        await message.answer(f"✅ Начислено {amount}. Новый баланс {telegram_id}: {db_balance}")
 
 
 async def ensure_db_ready():
