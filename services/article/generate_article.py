@@ -361,9 +361,9 @@ def generate_article(
             sec_body_text = "".join(sec_md_parts)
             # Trim very long sections for lead agent
             try:
-                sec_max_chars = int(os.getenv("SECTION_LEAD_MAX_CHARS", "100000"))
+                sec_max_chars = int(os.getenv("SECTION_LEAD_MAX_CHARS", "2000000"))
             except Exception:
-                sec_max_chars = 100000
+                sec_max_chars = 2000000
             used_sec = sec_body_text if len(sec_body_text) <= sec_max_chars else sec_body_text[:sec_max_chars]
             srvlog("SECTION_LEAD_INPUT", f"sec={sec.id} title_len={len(sec.title or '')} body_len={len(sec_body_text)} used_len={len(used_sec)} max_chars={sec_max_chars}")
             sec_user = (
@@ -413,11 +413,11 @@ def generate_article(
     body_text = "\n".join(body_lines)
 
     # Title & Lead based on full article content
-    max_chars = 80000
+    max_chars = 2000000
     try:
-        max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "80000"))
+        max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "2000000"))
     except Exception:
-        max_chars = 80000
+        max_chars = 2000000
     used_body = body_text if len(body_text) <= max_chars else body_text[:max_chars]
     srvlog("TITLE_LEAD_INPUT", f"toc_len={len(toc_text)} body_len={len(body_text)} used_len={len(used_body)} max_chars={max_chars}")
     atl_user = (
