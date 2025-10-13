@@ -344,11 +344,17 @@ def generate_article(
                 sub_md = d.markdown if d else ""
                 sec_md_parts.append(f"\n### {sub_title}\n\n{sub_md}\n")
             sec_body_text = "".join(sec_md_parts)
+            # Trim very long sections for lead agent
+            try:
+                sec_max_chars = int(os.getenv("SECTION_LEAD_MAX_CHARS", "20000"))
+            except Exception:
+                sec_max_chars = 20000
+            used_sec = sec_body_text if len(sec_body_text) <= sec_max_chars else sec_body_text[:sec_max_chars]
             sec_user = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{lang}</lang>\n"
-                f"<article_markdown>{sec.title}\n\n{sec_body_text}</article_markdown>\n"
+                f"<article_markdown>{sec.title}\n\n{used_sec}</article_markdown>\n"
                 f"<section_id>{sec.id}</section_id>\n"
                 "</input>"
             )
@@ -356,6 +362,26 @@ def generate_article(
             sec_lead = (sec_lead_obj.lead_markdown or "").strip()
             if sec_lead:
                 body_lines.append(f"{sec_lead}\n\n")
+            else:
+                # Retry with only subsection titles to help agent summarize
+                titles_bullets = "\n".join([f"- {s.title}" for s in sec.subsections])
+                sec_user2 = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
+                    f"<article_markdown>{sec.title}\n\n{titles_bullets}</article_markdown>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    "</input>"
+                )
+                try:
+                    sec_lead_obj2: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user2).final_output  # type: ignore
+                    sec_lead2 = (sec_lead_obj2.lead_markdown or "").strip()
+                    if sec_lead2:
+                        body_lines.append(f"{sec_lead2}\n\n")
+                    else:
+                        srvlog("SECTION_LEAD_EMPTY", f"{sec.id}: lead empty after retries")
+                except Exception as e2:
+                    srvlog("SECTION_LEAD_RETRY_ERR", f"{sec.id}: {type(e2).__name__}: {e2}")
         except Exception as e:
             srvlog("SECTION_LEAD_ERR", f"{sec.id}: {type(e).__name__}: {e}")
         for sub in sec.subsections:
