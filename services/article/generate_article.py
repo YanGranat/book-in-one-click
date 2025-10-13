@@ -128,7 +128,7 @@ def generate_article(
 
     # Module 1
     srvlog("START", f"topic='{topic[:100]}' lang={lang} provider={_prov}")
-    outline_agent = build_sections_and_subsections_agent()
+    outline_agent = build_sections_and_subsections_agent(provider=_prov)
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
     try:
         outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
@@ -148,7 +148,7 @@ def generate_article(
     # Research module removed in 2‑module pipeline
 
     # Module 2 (Writing): Subsections drafts in parallel across all subsections
-    ssw_agent = build_subsection_writer_agent()
+    ssw_agent = build_subsection_writer_agent(provider=_prov)
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
     all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
 
@@ -284,7 +284,7 @@ def generate_article(
     body_text = "\n".join(body_lines)
 
     # Title & Lead based on full article content
-    atl_agent = build_article_title_lead_writer_agent()
+    atl_agent = build_article_title_lead_writer_agent(provider=_prov)
     max_chars = 80000
     try:
         max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "80000"))
@@ -318,7 +318,13 @@ def generate_article(
         f"{body_text}\n"
     )
     try:
-        save_markdown(article_path, title=title_text, generator=("OpenAI Agents SDK" if _prov == "openai" else _prov), pipeline="DeepArticle", content=article_md)
+        save_markdown(
+            article_path,
+            title=title_text,
+            generator=("OpenAI Agents SDK" if _prov == "openai" else _prov),
+            pipeline="DeepArticle",
+            content=article_md,
+        )
         srvlog("SAVE_OK", f"article_path={article_path}")
     except Exception as e:
         srvlog("SAVE_ERR", f"{type(e).__name__}: {e}")
