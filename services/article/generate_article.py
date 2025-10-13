@@ -311,8 +311,8 @@ def generate_article(
         for j, sub in enumerate(sec.subsections, start=1):
             toc_lines.append(f"  - {i}.{j} {sub.title}")
     body_lines: list[str] = []
-    for sec in outline.sections:
-        body_lines.append(f"\n\n## {sec.title}\n\n")
+    for i, sec in enumerate(outline.sections, start=1):
+        body_lines.append(f"\n\n## Раздел {i}. {sec.title}\n\n")
         # Per-section lead
         try:
             sec_md_parts = []

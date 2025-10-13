@@ -22,7 +22,7 @@
 <input>
 - lang: ru|en|auto
 - topic
-- outline_json: ArticleOutline (актуальная)
+- outline_json: ArticleOutline (структура статьи)
 - section_id: sNN
 - subsection_id: ssNN
 - content_items_json (опционально): массив ContentItem для этого подраздела (id, point). Если передан — раскрой все пункты в тексте, связно и последовательно.
