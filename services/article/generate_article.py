@@ -97,7 +97,7 @@ def generate_article(
 
     # Agents import
     from llm_agents.deep_popular_science_article.module_01_structure.sections_and_subsections import build_sections_and_subsections_agent
-    from llm_agents.deep_popular_science_article.module_01_structure.content_of_subsections import build_subsections_content_agent
+    # content_of_subsections removed: structure module now only builds sections; writing fills content
     from llm_agents.deep_popular_science_article.module_02_writing.subsection_writer import (
         build_subsection_writer_agent,
     )
@@ -111,16 +111,7 @@ def generate_article(
     outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
     log("📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
 
-    content_agent = build_subsections_content_agent()
-    user_content = (
-        "<input>\n"
-        f"<topic>{topic}</topic>\n"
-        f"<lang>{lang}</lang>\n"
-        f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-        "</input>"
-    )
-    outline = Runner.run_sync(content_agent, user_content).final_output  # type: ignore
-    log("📑 Outline · Subsections Content", f"```json\n{outline.model_dump_json()}\n```")
+    # Skip legacy content-of-subsections step (removed in 2-module pipeline)
 
     # Module 2 (research) removed in 2‑модульной архитектуре
     log("🔎 Research · Skipped", "Research module removed (2‑module pipeline)")

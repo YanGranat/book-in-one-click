@@ -85,9 +85,7 @@ def main() -> None:
     from llm_agents.deep_popular_science_article.module_01_structure.sections_and_subsections import (
         build_sections_and_subsections_agent,
     )
-    from llm_agents.deep_popular_science_article.module_01_structure.content_of_subsections import (
-        build_subsections_content_agent,
-    )
+    # content_of_subsections removed in 2‑module pipeline
 
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{args.lang}</lang>\n</input>"
     outline_agent = build_sections_and_subsections_agent()
@@ -95,17 +93,7 @@ def main() -> None:
     outline: ArticleOutline = outline_res.final_output  # type: ignore
     _log_append(logs, "📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
 
-    content_agent = build_subsections_content_agent()
-    user_content = (
-        "<input>\n"
-        f"<topic>{topic}</topic>\n"
-        f"<lang>{args.lang}</lang>\n"
-        f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-        "</input>"
-    )
-    outline_res2 = Runner.run_sync(content_agent, user_content)
-    outline = outline_res2.final_output  # type: ignore
-    _log_append(logs, "📑 Outline · Subsections Content", f"```json\n{outline.model_dump_json()}\n```")
+    # Skip legacy content-of-subsections step (removed)
 
     # Module 2: Writing (2‑модульная архитектура)
     _log_append(logs, "🔎 Research · Skipped", "Research module removed (2‑module pipeline)")
