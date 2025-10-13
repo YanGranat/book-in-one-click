@@ -71,6 +71,11 @@ class TitleProposal(BaseModel):
     title: str
 
 
+class ArticleTitleLead(BaseModel):
+    title: str
+    lead_markdown: str
+
+
 __all__ = [
     "ContentItem",
     "SubsectionOutline",
@@ -83,6 +88,7 @@ __all__ = [
     "DraftChunk",
     "LeadChunk",
     "TitleProposal",
+    "ArticleTitleLead",
 ]
 
 
