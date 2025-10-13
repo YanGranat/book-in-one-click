@@ -178,56 +178,76 @@ def generate_article(
                 _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
         raise RuntimeError(f"Draft generation failed for {sec_obj.id}/{sub_obj.id}")
 
+    # Round-based generation until all subsections are produced, or hard fail
+    max_rounds = 3
+    try:
+        max_rounds = int(os.getenv("ARTICLE_MAX_ROUNDS", "3"))
+    except Exception:
+        max_rounds = 3
+    round_backoff = 6
+    try:
+        round_backoff = int(os.getenv("ARTICLE_ROUND_BACKOFF_S", "6"))
+    except Exception:
+        round_backoff = 6
+
     draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
-    srvlog("DRAFT_START", f"jobs={len(all_subs_writing)} max_workers={max_workers}")
-    if all_subs_writing:
+    remaining = [(sec, sub) for (sec, sub) in all_subs_writing]
+    for r in range(1, max_rounds + 1):
+        if not remaining:
+            break
+        srvlog("DRAFT_ROUND", f"round={r}/{max_rounds} jobs={len(remaining)} max_workers={max_workers}")
+        failed_pairs: list[tuple[str, str]] = []
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            fut_map2 = {ex.submit(_run_subsection_draft, sec, sub): (sec.id, sub.id) for (sec, sub) in all_subs_writing}
-            for fut in as_completed(list(fut_map2.keys())):
-                key = fut_map2[fut]
+            fut_map = {ex.submit(_run_subsection_draft, sec, sub): (sec.id, sub.id) for (sec, sub) in remaining}
+            for fut in as_completed(list(fut_map.keys())):
+                key = fut_map[fut]
                 try:
-                    draft_result_by_key[key] = fut.result()
+                    res = fut.result()
+                    draft_result_by_key[key] = res
                     srvlog("DRAFT_OK", f"{key[0]}/{key[1]}")
                 except Exception as ex:
-                    srvlog("DRAFT_FAIL", f"{key[0]}/{key[1]}: {type(ex).__name__}: {ex}")
-                    # keep going
-    # Recovery pass for failed items (sequential, with retries)
-    missing_keys: list[tuple[str, str]] = []
-    for sec in outline.sections:
-        for sub in sec.subsections:
-            key = (sec.id, sub.id)
-            if key not in draft_result_by_key:
-                missing_keys.append(key)
-    srvlog("RECOVERY", f"missing={len(missing_keys)}")
-    if missing_keys:
-        for sec in outline.sections:
-            for sub in sec.subsections:
-                key = (sec.id, sub.id)
-                if key not in missing_keys:
-                    continue
-                ssw_user_inline = (
-                    "<input>\n"
-                    f"<topic>{topic}</topic>\n"
-                    f"<lang>{lang}</lang>\n"
-                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                    f"<section_id>{sec.id}</section_id>\n"
-                    f"<subsection_id>{sub.id}</subsection_id>\n"
-                    "</input>"
-                )
-                try:
-                    out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
-                    d: DraftChunk = out.final_output  # type: ignore
-                    draft_result_by_key[key] = d
-                    srvlog("RECOVERY_OK", f"{sec.id}/{sub.id}")
-                except Exception as ex:
-                    # Placeholder fallback to avoid empty sections
-                    placeholder_md = (
-                        "Этот подраздел временно не был сгенерирован из-за сетевой ошибки. "
-                        "Попробуйте повторить генерацию позже."
-                    )
-                    d = DraftChunk(subsection_id=sub.id, title=(sub.title or f"{sec.title} - {sub.id}"), markdown=placeholder_md)
-                    draft_result_by_key[key] = d
-                    srvlog("FALLBACK_PLACEHOLDER", f"{sec.id}/{sub.id}: {type(ex).__name__}: {str(ex)[:150]}")
+                    failed_pairs.append(key)
+                    srvlog("DRAFT_FAIL", f"{key[0]}/{key[1]}: {type(ex).__name__}: {str(ex)[:200]}")
+        remaining = []
+        # Next round will try failed only
+        for (sid, ssid) in failed_pairs:
+            # re-find sec/sub objects by ids to preserve structure
+            for sec in outline.sections:
+                if sec.id == sid:
+                    for sub in sec.subsections:
+                        if sub.id == ssid:
+                            remaining.append((sec, sub))
+                            break
+        if remaining and r < max_rounds:
+            _sleep(round_backoff)
+
+    if remaining:
+        # Final sequential attempts (strong retry via sync runner)
+        srvlog("DRAFT_FINAL", f"count={len(remaining)}")
+        still_missing: list[tuple[str, str]] = []
+        for (sec, sub) in remaining:
+            ssw_user_inline = (
+                "<input>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<lang>{lang}</lang>\n"
+                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                f"<section_id>{sec.id}</section_id>\n"
+                f"<subsection_id>{sub.id}</subsection_id>\n"
+                "</input>"
+            )
+            try:
+                out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
+                d: DraftChunk = out.final_output  # type: ignore
+                draft_result_by_key[(sec.id, sub.id)] = d
+                srvlog("FINAL_OK", f"{sec.id}/{sub.id}")
+            except Exception as ex:
+                still_missing.append((sec.id, sub.id))
+                srvlog("FINAL_FAIL", f"{sec.id}/{sub.id}: {type(ex).__name__}: {str(ex)[:200]}")
+
+        if still_missing:
+            # Hard fail: do not finish pipeline with gaps
+            missing_str = ", ".join([f"{sid}/{ssid}" for (sid, ssid) in still_missing])
+            raise RuntimeError(f"Some subsections failed to generate: {missing_str}")
 
     for sec in outline.sections:
         for sub in sec.subsections:
