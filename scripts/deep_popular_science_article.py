@@ -170,7 +170,25 @@ def main() -> None:
     article_path = next_available_filepath(output_dir, base, ".md")
 
     # Build TOC and content
-    toc_lines = ["## Оглавление"]
+    def _section_label(idx: int) -> str | None:
+        lang_l = (args.lang or "auto").strip().lower()
+        if lang_l.startswith("ru"):
+            return f"Раздел {idx}."
+        if lang_l.startswith("en"):
+            return f"Section {idx}."
+        # auto/другой → как раньше: без префикса/нумерации
+        return None
+
+    def _toc_title() -> str:
+        lang_l = (args.lang or "auto").strip().lower()
+        if lang_l.startswith("ru"):
+            return "Оглавление"
+        if lang_l.startswith("en"):
+            return "Table of Contents"
+        # auto/другой → как раньше
+        return "Оглавление"
+
+    toc_lines = [f"## {_toc_title()}"]
     for i, sec in enumerate(outline.sections, start=1):
         toc_lines.append(f"- {i}. {sec.title}")
         for j, sub in enumerate(sec.subsections, start=1):
@@ -180,7 +198,11 @@ def main() -> None:
     # Per-section leads using the same Title&Lead agent (section_id mode)
     atl_agent = build_article_title_lead_writer_agent()
     for idx, sec in enumerate(outline.sections, start=1):
-        body_lines.append(f"\n\n## Раздел {idx}. {sec.title}\n\n")
+        _lbl = _section_label(idx)
+        if _lbl:
+            body_lines.append(f"\n\n## {_lbl} {sec.title}\n\n")
+        else:
+            body_lines.append(f"\n\n## {sec.title}\n\n")
         try:
             sec_md_parts = []
             for sub in sec.subsections:

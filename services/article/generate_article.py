@@ -305,14 +305,36 @@ def generate_article(
     article_path = next_available_filepath(output_dir, base, ".md")
 
     # Build body to feed Title&Lead agent
-    toc_lines = ["## Оглавление"]
+    def _section_label(idx: int) -> str | None:
+        lang_l = (lang or "auto").strip().lower()
+        if lang_l.startswith("ru"):
+            return f"Раздел {idx}."
+        if lang_l.startswith("en"):
+            return f"Section {idx}."
+        # lang=auto или другой язык → как раньше: без префикса и без нумерации
+        return None
+
+    def _toc_title() -> str:
+        lang_l = (lang or "auto").strip().lower()
+        if lang_l.startswith("ru"):
+            return "Оглавление"
+        if lang_l.startswith("en"):
+            return "Table of Contents"
+        # lang=auto или другой язык → как раньше
+        return "Оглавление"
+
+    toc_lines = [f"## {_toc_title()}"]
     for i, sec in enumerate(outline.sections, start=1):
         toc_lines.append(f"- {i}. {sec.title}")
         for j, sub in enumerate(sec.subsections, start=1):
             toc_lines.append(f"  - {i}.{j} {sub.title}")
     body_lines: list[str] = []
     for i, sec in enumerate(outline.sections, start=1):
-        body_lines.append(f"\n\n## Раздел {i}. {sec.title}\n\n")
+        _lbl = _section_label(i)
+        if _lbl:
+            body_lines.append(f"\n\n## {_lbl} {sec.title}\n\n")
+        else:
+            body_lines.append(f"\n\n## {sec.title}\n\n")
         # Per-section lead
         try:
             sec_md_parts = []
