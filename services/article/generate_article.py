@@ -147,6 +147,24 @@ def generate_article(
 
     # Research module removed in 2‑module pipeline
 
+    # Second pass: refine/improve outline with the same agent if necessary
+    try:
+        improve_user = (
+            "<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{lang}</lang>\n"
+            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+            "</input>"
+        )
+        improved_outline: ArticleOutline = Runner.run_sync(outline_agent, improve_user).final_output  # type: ignore
+        # Accept improved outline when it still has sections and not smaller by an extreme margin
+        if improved_outline and improved_outline.sections:
+            outline = improved_outline
+            log("📑 Outline · Improved", f"```json\n{outline.model_dump_json()}\n```")
+            srvlog("OUTLINE_IMPROVED", f"sections={len(outline.sections)}")
+    except Exception as e:
+        srvlog("OUTLINE_IMPROVE_ERR", f"{type(e).__name__}: {e}")
+
     # Module 2 (Writing): Subsections drafts in parallel across all subsections
     ssw_agent = build_subsection_writer_agent(provider=_prov)
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}

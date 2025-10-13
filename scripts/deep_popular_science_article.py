@@ -100,6 +100,22 @@ def main() -> None:
         raise
     _log_append(logs, "📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
 
+    # Improvement pass with outline_json
+    try:
+        improve_user = (
+            "<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{args.lang}</lang>\n"
+            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+            "</input>"
+        )
+        improved_outline: ArticleOutline = Runner.run_sync(outline_agent, improve_user).final_output  # type: ignore
+        if improved_outline and improved_outline.sections:
+            outline = improved_outline
+            _log_append(logs, "📑 Outline · Improved", f"```json\n{outline.model_dump_json()}\n```")
+    except Exception as e:
+        print(f"[CLI][OUTLINE_IMPROVE_ERR] {type(e).__name__}: {e}", file=_sys.stderr)
+
     # Skip legacy content-of-subsections step (removed)
 
     # Module 2: Writing (2‑модульная архитектура)
