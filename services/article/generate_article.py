@@ -165,6 +165,24 @@ def generate_article(
     except Exception as e:
         srvlog("OUTLINE_IMPROVE_ERR", f"{type(e).__name__}: {e}")
 
+    # Third pass: expand content items per subsection (outline_json + expand_content=true)
+    try:
+        expand_user = (
+            "<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{lang}</lang>\n"
+            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+            f"<expand_content>true</expand_content>\n"
+            "</input>"
+        )
+        expanded_outline: ArticleOutline = Runner.run_sync(outline_agent, expand_user).final_output  # type: ignore
+        if expanded_outline and expanded_outline.sections:
+            outline = expanded_outline
+            log("📑 Outline · Expanded Content", f"```json\n{outline.model_dump_json()}\n```")
+            srvlog("OUTLINE_EXPANDED", f"sections={len(outline.sections)}")
+    except Exception as e:
+        srvlog("OUTLINE_EXPAND_ERR", f"{type(e).__name__}: {e}")
+
     # Module 2 (Writing): Subsections drafts in parallel across all subsections
     ssw_agent = build_subsection_writer_agent(provider=_prov)
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
