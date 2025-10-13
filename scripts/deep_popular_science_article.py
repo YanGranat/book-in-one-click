@@ -103,7 +103,6 @@ def main() -> None:
     # Skip legacy content-of-subsections step (removed)
 
     # Module 2: Writing (2‑модульная архитектура)
-    _log_append(logs, "🔎 Research · Skipped", "Research module removed (2‑module pipeline)")
 
     from llm_agents.deep_popular_science_article.module_02_writing.subsection_writer import build_subsection_writer_agent
     from llm_agents.deep_popular_science_article.module_02_writing.article_title_lead_writer import build_article_title_lead_writer_agent
@@ -129,7 +128,7 @@ def main() -> None:
                 raise
             drafts_by_subsection[(sec.id, sub.id)] = d
             _log_append(logs, "✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
-    _log_append(logs, "✨ Refine · Skipped", "Refine module removed (2‑module pipeline)")
+    # Refine module removed in 2‑module pipeline
 
     # Assemble final Markdown
     output_dir = ensure_output_dir(args.out)

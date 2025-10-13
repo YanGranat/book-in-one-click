@@ -132,8 +132,7 @@ def generate_article(
 
     # Skip legacy content-of-subsections step (removed in 2-module pipeline)
 
-    # Module 2 (research) removed in 2‑модульной архитектуре
-    log("🔎 Research · Skipped", "Research module removed (2‑module pipeline)")
+    # Research module removed in 2‑module pipeline
 
     # Module 2 (Writing): Subsections drafts in parallel across all subsections
     ssw_agent = build_subsection_writer_agent()
@@ -151,7 +150,9 @@ def generate_article(
             "</input>"
         )
         try:
-            return Runner.run_sync(ssw_agent, ssw_user_local).final_output  # type: ignore
+            # Create a fresh event loop in the worker thread
+            res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
+            return res.final_output  # type: ignore
         except Exception as ex:
             srvlog("DRAFT_ERR", f"{sec_obj.id}/{sub_obj.id}: {type(ex).__name__}: {ex}")
             raise
@@ -179,8 +180,7 @@ def generate_article(
             log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
     srvlog("DRAFT_SUMMARY", f"ok={len(drafts_by_subsection)} total={len(all_subs_writing)}")
 
-    # Refining module removed in 2‑модульной архитектуре
-    log("✨ Refine · Skipped", "Refine module removed (2‑module pipeline)")
+    # Refining module removed in 2‑module pipeline
 
     # Assemble final Markdown
     output_dir = ensure_output_dir(output_subdir)
