@@ -25,7 +25,7 @@
 - outline_json: ArticleOutline (актуальная)
 - section_id: sNN
 - subsection_id: ssNN
-- content_items_json (опционально): массив ContentItem для этого подраздела (id, point, notes?, examples?[]). Если передан — раскрой все пункты в тексте, связно и последовательно.
+- content_items_json (опционально): массив ContentItem для этого подраздела (id, point). Если передан — раскрой все пункты в тексте, связно и последовательно.
 </input>
 
 <guidelines>

@@ -20,7 +20,7 @@
 - topic: тема
 - lang: ru|en|auto
 - outline_json (опционально): если передан — проанализируй текущую структуру и улучши её: при необходимости удали/добавь/совмести/раздели/переупорядочь/переформулируй разделы и подразделы. Верни улучшенную итоговую структуру.
-- expand_content: true|false (опционально) — если true, верни для КАЖДОГО подраздела список пунктов (ContentItem) «что в нём будет»: id ci01..ciNN, point (краткий тезис), notes (опционально до 1–2 фраз), examples (опционально, массив коротких строк).
+- expand_content: true|false (опционально) — если true, верни для КАЖДОГО подраздела список пунктов (ContentItem) «что в нём будет»: id ci01..ciNN, point (краткий тезис).
 </input>
 
 <guidelines>
@@ -28,7 +28,7 @@
 </guidelines>
 
 <output>
-Верни строго JSON ArticleOutline: {sections:[{id,title,subsections:[{id,title,content_items?:[{id,point,notes?,examples?[]}]}]}]}
+Верни строго JSON ArticleOutline: {sections:[{id,title,subsections:[{id,title,content_items?:[{id,point}]}]}]}
 - id: s01, s02, … для разделов и ss01, ss02, … в рамках каждого раздела (локальная нумерация ok: ss01..ssNN заново в каждом разделе).
 - Если expand_content=true — для каждого подраздела добавь, иначе content_items можно опустить.
 </output>

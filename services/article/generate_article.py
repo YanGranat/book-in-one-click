@@ -197,7 +197,7 @@ def generate_article(
             f"<section_id>{sec_obj.id}</section_id>\n"
             f"<subsection_id>{sub_obj.id}</subsection_id>\n"
             # If content_items exist for this subsection, pass them in
-            f"<content_items_json>{_json.dumps([ci.dict() for ci in (getattr(sub_obj, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
+            f"<content_items_json>{_json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sub_obj, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
             "</input>"
         )
         # Retry inside worker thread
