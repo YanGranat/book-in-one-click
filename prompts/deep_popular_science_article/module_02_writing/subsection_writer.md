@@ -25,6 +25,7 @@
 - outline_json: ArticleOutline (актуальная)
 - section_id: sNN
 - subsection_id: ssNN
+- content_items_json (опционально): массив ContentItem для этого подраздела (id, point, notes?, examples?[]). Если передан — раскрой все пункты в тексте, связно и последовательно.
 </input>
 
 <guidelines>
@@ -86,6 +87,7 @@
 <requirements>
 - Никаких пояснений вне JSON.
 - Учитывай полную структуру, чтобы не повторяться с другими подразделами.
+- Если переданы content_items_json — обязательно покрой все пункты; добавляй связующие объяснения между ними.
 - Верни ровно один DraftChunk для указанного subsection_id (он должен совпадать со входом).
 - Язык вывода: lang=auto → язык topic.
 </requirements>
