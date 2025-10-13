@@ -115,6 +115,7 @@ def generate_article(
     except Exception:
         _par = 4
     max_workers = max(1, min(16, _par))
+    srvlog("CONF_PAR", f"max_workers={max_workers} par_env='{par_env or ''}' max_parallel={max_parallel}")
 
     # Agents import
     from llm_agents.deep_popular_science_article.module_01_structure.sections_and_subsections import build_sections_and_subsections_agent
@@ -131,11 +132,13 @@ def generate_article(
     outline_agent = build_sections_and_subsections_agent(provider=_prov)
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
     try:
+        t0 = time.perf_counter()
+        srvlog("OUTLINE_START", "pass=1 (initial)")
         outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
         log("📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
         sec_count = len(outline.sections)
         sub_count = sum(len(s.subsections) for s in outline.sections)
-        srvlog("OUTLINE_OK", f"sections={sec_count} subsections={sub_count}")
+        srvlog("OUTLINE_OK", f"pass=1 sections={sec_count} subsections={sub_count} dur_ms={int((time.perf_counter()-t0)*1000)}")
         if sec_count == 0:
             raise ValueError("Outline has no sections")
     except Exception as e:
@@ -156,12 +159,14 @@ def generate_article(
             f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
             "</input>"
         )
+        t1 = time.perf_counter()
+        srvlog("OUTLINE_START", "pass=2 (improve)")
         improved_outline: ArticleOutline = Runner.run_sync(outline_agent, improve_user).final_output  # type: ignore
         # Accept improved outline when it still has sections and not smaller by an extreme margin
         if improved_outline and improved_outline.sections:
             outline = improved_outline
             log("📑 Outline · Improved", f"```json\n{outline.model_dump_json()}\n```")
-            srvlog("OUTLINE_IMPROVED", f"sections={len(outline.sections)}")
+            srvlog("OUTLINE_IMPROVED", f"pass=2 sections={len(outline.sections)} dur_ms={int((time.perf_counter()-t1)*1000)}")
     except Exception as e:
         srvlog("OUTLINE_IMPROVE_ERR", f"{type(e).__name__}: {e}")
 
@@ -175,11 +180,13 @@ def generate_article(
             f"<expand_content>true</expand_content>\n"
             "</input>"
         )
+        t2 = time.perf_counter()
+        srvlog("OUTLINE_START", "pass=3 (expand_content)")
         expanded_outline: ArticleOutline = Runner.run_sync(outline_agent, expand_user).final_output  # type: ignore
         if expanded_outline and expanded_outline.sections:
             outline = expanded_outline
             log("📑 Outline · Expanded Content", f"```json\n{outline.model_dump_json()}\n```")
-            srvlog("OUTLINE_EXPANDED", f"sections={len(outline.sections)}")
+            srvlog("OUTLINE_EXPANDED", f"pass=3 sections={len(outline.sections)} dur_ms={int((time.perf_counter()-t2)*1000)}")
     except Exception as e:
         srvlog("OUTLINE_EXPAND_ERR", f"{type(e).__name__}: {e}")
 
@@ -187,6 +194,7 @@ def generate_article(
     ssw_agent = build_subsection_writer_agent(provider=_prov)
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
     all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
+    srvlog("DRAFT_SETUP", f"total_jobs={len(all_subs_writing)} max_workers={max_workers}")
 
     def _run_subsection_draft(sec_obj, sub_obj):
         ssw_user_local = (
@@ -204,7 +212,10 @@ def generate_article(
         backoff_seq = (2, 4, 8)
         for i in range(3):
             try:
+                tloc = time.perf_counter()
+                srvlog("DRAFT_START", f"{sec_obj.id}/{sub_obj.id} attempt={i+1}/3")
                 res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
+                srvlog("DRAFT_DONE", f"{sec_obj.id}/{sub_obj.id} dur_ms={int((time.perf_counter()-tloc)*1000)}")
                 return res.final_output  # type: ignore
             except Exception as ex:
                 srvlog(
@@ -227,9 +238,11 @@ def generate_article(
         round_backoff = int(os.getenv("ARTICLE_ROUND_BACKOFF_S", "6"))
     except Exception:
         round_backoff = 6
+    srvlog("DRAFT_CONF", f"max_rounds={max_rounds} round_backoff_s={round_backoff}")
 
     draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
     remaining = [(sec, sub) for (sec, sub) in all_subs_writing]
+    writing_t0 = time.perf_counter()
     for r in range(1, max_rounds + 1):
         if not remaining:
             break
@@ -295,7 +308,7 @@ def generate_article(
                 continue
             drafts_by_subsection[key] = d
             log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
-    srvlog("DRAFT_SUMMARY", f"ok={len(drafts_by_subsection)} total={len(all_subs_writing)}")
+    srvlog("DRAFT_SUMMARY", f"ok={len(drafts_by_subsection)} total={len(all_subs_writing)} dur_ms={int((time.perf_counter()-writing_t0)*1000)}")
 
     # Refining module removed in 2‑module pipeline
 
@@ -352,6 +365,7 @@ def generate_article(
             except Exception:
                 sec_max_chars = 20000
             used_sec = sec_body_text if len(sec_body_text) <= sec_max_chars else sec_body_text[:sec_max_chars]
+            srvlog("SECTION_LEAD_INPUT", f"sec={sec.id} title_len={len(sec.title or '')} body_len={len(sec_body_text)} used_len={len(used_sec)} max_chars={sec_max_chars}")
             sec_user = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
@@ -360,10 +374,12 @@ def generate_article(
                 f"<section_id>{sec.id}</section_id>\n"
                 "</input>"
             )
+            t_sec = time.perf_counter()
             sec_lead_obj: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user).final_output  # type: ignore
             sec_lead = (sec_lead_obj.lead_markdown or "").strip()
             if sec_lead:
                 body_lines.append(f"{sec_lead}\n\n")
+                srvlog("SECTION_LEAD_OK", f"sec={sec.id} lead_len={len(sec_lead)} dur_ms={int((time.perf_counter()-t_sec)*1000)}")
             else:
                 # Retry with only subsection titles to help agent summarize
                 titles_bullets = "\n".join([f"- {s.title}" for s in sec.subsections])
@@ -376,10 +392,12 @@ def generate_article(
                     "</input>"
                 )
                 try:
+                    t_sec2 = time.perf_counter()
                     sec_lead_obj2: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user2).final_output  # type: ignore
                     sec_lead2 = (sec_lead_obj2.lead_markdown or "").strip()
                     if sec_lead2:
                         body_lines.append(f"{sec_lead2}\n\n")
+                        srvlog("SECTION_LEAD_OK", f"sec={sec.id} retry=1 lead_len={len(sec_lead2)} dur_ms={int((time.perf_counter()-t_sec2)*1000)}")
                     else:
                         srvlog("SECTION_LEAD_EMPTY", f"{sec.id}: lead empty after retries")
                 except Exception as e2:
@@ -410,9 +428,10 @@ def generate_article(
         "</input>"
     )
     try:
+        t_atl = time.perf_counter()
         atl: ArticleTitleLead = _run_with_retries_sync(atl_agent, atl_user).final_output  # type: ignore
         log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
-        srvlog("TITLE_LEAD_OK", f"title_len={len(atl.title or '')} lead_len={len(atl.lead_markdown or '')}")
+        srvlog("TITLE_LEAD_OK", f"title_len={len(atl.title or '')} lead_len={len(atl.lead_markdown or '')} dur_ms={int((time.perf_counter()-t_atl)*1000)}")
     except Exception as e:
         srvlog("TITLE_LEAD_ERR", f"{type(e).__name__}: {e}")
         _tb.print_exc()
@@ -435,7 +454,7 @@ def generate_article(
             pipeline="DeepArticle",
             content=article_md,
         )
-        srvlog("SAVE_OK", f"article_path={article_path}")
+        srvlog("SAVE_OK", f"article_path={article_path} size={len(article_md)}")
     except Exception as e:
         srvlog("SAVE_ERR", f"{type(e).__name__}: {e}")
         _tb.print_exc()
