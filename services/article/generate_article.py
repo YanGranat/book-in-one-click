@@ -313,6 +313,29 @@ def generate_article(
     body_lines: list[str] = []
     for sec in outline.sections:
         body_lines.append(f"\n\n## {sec.title}\n\n")
+        # Per-section lead
+        try:
+            sec_md_parts = []
+            for sub in sec.subsections:
+                d = drafts_by_subsection.get((sec.id, sub.id))
+                sub_title = d.title if d and d.title else sub.title
+                sub_md = d.markdown if d else ""
+                sec_md_parts.append(f"\n### {sub_title}\n\n{sub_md}\n")
+            sec_body_text = "".join(sec_md_parts)
+            sec_user = (
+                "<input>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<lang>{lang}</lang>\n"
+                f"<article_markdown>{sec.title}\n\n{sec_body_text}</article_markdown>\n"
+                f"<section_id>{sec.id}</section_id>\n"
+                "</input>"
+            )
+            sec_lead_obj: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user).final_output  # type: ignore
+            sec_lead = (sec_lead_obj.lead_markdown or "").strip()
+            if sec_lead:
+                body_lines.append(f"{sec_lead}\n\n")
+        except Exception as e:
+            srvlog("SECTION_LEAD_ERR", f"{sec.id}: {type(e).__name__}: {e}")
         for sub in sec.subsections:
             d = drafts_by_subsection.get((sec.id, sub.id))
             sub_title = d.title if d and d.title else sub.title
