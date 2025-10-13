@@ -116,6 +116,23 @@ def main() -> None:
     except Exception as e:
         print(f"[CLI][OUTLINE_IMPROVE_ERR] {type(e).__name__}: {e}", file=_sys.stderr)
 
+    # Expand content items per subsection
+    try:
+        expand_user = (
+            "<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{args.lang}</lang>\n"
+            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+            f"<expand_content>true</expand_content>\n"
+            "</input>"
+        )
+        expanded_outline: ArticleOutline = Runner.run_sync(outline_agent, expand_user).final_output  # type: ignore
+        if expanded_outline and expanded_outline.sections:
+            outline = expanded_outline
+            _log_append(logs, "📑 Outline · Expanded Content", f"```json\n{outline.model_dump_json()}\n```")
+    except Exception as e:
+        print(f"[CLI][OUTLINE_EXPAND_ERR] {type(e).__name__}: {e}", file=_sys.stderr)
+
     # Skip legacy content-of-subsections step (removed)
 
     # Module 2: Writing (2‑модульная архитектура)
@@ -134,6 +151,7 @@ def main() -> None:
                 f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
                 f"<section_id>{sec.id}</section_id>\n"
                 f"<subsection_id>{sub.id}</subsection_id>\n"
+                f"<content_items_json>{json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sub, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
                 "</input>"
             )
             try:
