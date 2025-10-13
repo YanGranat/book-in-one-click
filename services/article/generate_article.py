@@ -329,6 +329,8 @@ def generate_article(
         for j, sub in enumerate(sec.subsections, start=1):
             toc_lines.append(f"  - {i}.{j} {sub.title}")
     body_lines: list[str] = []
+    # Initialize Title & Lead agent once and reuse for section leads and article lead
+    atl_agent = build_article_title_lead_writer_agent(provider=_prov)
     for i, sec in enumerate(outline.sections, start=1):
         _lbl = _section_label(i)
         if _lbl:
@@ -393,7 +395,6 @@ def generate_article(
     body_text = "\n".join(body_lines)
 
     # Title & Lead based on full article content
-    atl_agent = build_article_title_lead_writer_agent(provider=_prov)
     max_chars = 80000
     try:
         max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "80000"))
