@@ -162,13 +162,21 @@ def generate_article(
             f"<subsection_id>{sub_obj.id}</subsection_id>\n"
             "</input>"
         )
-        try:
-            # Create a fresh event loop in the worker thread
-            res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
-            return res.final_output  # type: ignore
-        except Exception as ex:
-            srvlog("DRAFT_ERR", f"{sec_obj.id}/{sub_obj.id}: {type(ex).__name__}: {ex}")
-            raise
+        # Retry inside worker thread
+        backoff_seq = (2, 4, 8)
+        for i in range(3):
+            try:
+                res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
+                return res.final_output  # type: ignore
+            except Exception as ex:
+                srvlog(
+                    "DRAFT_ERR",
+                    f"{sec_obj.id}/{sub_obj.id}: attempt={i+1}/3 {type(ex).__name__}: {str(ex)[:200]}",
+                )
+                if i == 2:
+                    break
+                _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
+        raise RuntimeError(f"Draft generation failed for {sec_obj.id}/{sub_obj.id}")
 
     draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
     srvlog("DRAFT_START", f"jobs={len(all_subs_writing)} max_workers={max_workers}")
@@ -183,6 +191,44 @@ def generate_article(
                 except Exception as ex:
                     srvlog("DRAFT_FAIL", f"{key[0]}/{key[1]}: {type(ex).__name__}: {ex}")
                     # keep going
+    # Recovery pass for failed items (sequential, with retries)
+    missing_keys: list[tuple[str, str]] = []
+    for sec in outline.sections:
+        for sub in sec.subsections:
+            key = (sec.id, sub.id)
+            if key not in draft_result_by_key:
+                missing_keys.append(key)
+    srvlog("RECOVERY", f"missing={len(missing_keys)}")
+    if missing_keys:
+        for sec in outline.sections:
+            for sub in sec.subsections:
+                key = (sec.id, sub.id)
+                if key not in missing_keys:
+                    continue
+                ssw_user_inline = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
+                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    f"<subsection_id>{sub.id}</subsection_id>\n"
+                    "</input>"
+                )
+                try:
+                    out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
+                    d: DraftChunk = out.final_output  # type: ignore
+                    draft_result_by_key[key] = d
+                    srvlog("RECOVERY_OK", f"{sec.id}/{sub.id}")
+                except Exception as ex:
+                    # Placeholder fallback to avoid empty sections
+                    placeholder_md = (
+                        "Этот подраздел временно не был сгенерирован из-за сетевой ошибки. "
+                        "Попробуйте повторить генерацию позже."
+                    )
+                    d = DraftChunk(subsection_id=sub.id, title=(sub.title or f"{sec.title} - {sub.id}"), markdown=placeholder_md)
+                    draft_result_by_key[key] = d
+                    srvlog("FALLBACK_PLACEHOLDER", f"{sec.id}/{sub.id}: {type(ex).__name__}: {str(ex)[:150]}")
+
     for sec in outline.sections:
         for sub in sec.subsections:
             key = (sec.id, sub.id)
