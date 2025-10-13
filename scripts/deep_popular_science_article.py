@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import sys as _sys
+import traceback as _tb
 import json
 import sys
 from pathlib import Path
@@ -89,8 +91,13 @@ def main() -> None:
 
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{args.lang}</lang>\n</input>"
     outline_agent = build_sections_and_subsections_agent()
-    outline_res = Runner.run_sync(outline_agent, user_outline)
-    outline: ArticleOutline = outline_res.final_output  # type: ignore
+    try:
+        outline_res = Runner.run_sync(outline_agent, user_outline)
+        outline: ArticleOutline = outline_res.final_output  # type: ignore
+    except Exception as e:
+        print(f"[CLI][OUTLINE_ERR] {type(e).__name__}: {e}", file=_sys.stderr)
+        _tb.print_exc()
+        raise
     _log_append(logs, "📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
 
     # Skip legacy content-of-subsections step (removed)
@@ -114,7 +121,12 @@ def main() -> None:
                 f"<subsection_id>{sub.id}</subsection_id>\n"
                 "</input>"
             )
-            d: DraftChunk = Runner.run_sync(ssw_agent, ssw_user).final_output  # type: ignore
+            try:
+                d: DraftChunk = Runner.run_sync(ssw_agent, ssw_user).final_output  # type: ignore
+            except Exception as e:
+                print(f"[CLI][DRAFT_ERR] {sec.id}/{sub.id}: {type(e).__name__}: {e}", file=_sys.stderr)
+                _tb.print_exc()
+                raise
             drafts_by_subsection[(sec.id, sub.id)] = d
             _log_append(logs, "✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
     _log_append(logs, "✨ Refine · Skipped", "Refine module removed (2‑module pipeline)")
@@ -152,7 +164,12 @@ def main() -> None:
         f"<article_markdown>{toc_text}\n\n{body_text}</article_markdown>\n"
         "</input>"
     )
-    atl: ArticleTitleLead = Runner.run_sync(atl_agent, atl_user).final_output  # type: ignore
+    try:
+        atl: ArticleTitleLead = Runner.run_sync(atl_agent, atl_user).final_output  # type: ignore
+    except Exception as e:
+        print(f"[CLI][TITLE_LEAD_ERR] {type(e).__name__}: {e}", file=_sys.stderr)
+        _tb.print_exc()
+        raise
     _log_append(logs, "🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
 
     title_text = atl.title or (outline.title or topic)

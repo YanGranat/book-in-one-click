@@ -8,6 +8,8 @@ import os
 import asyncio
 import time
 import json as _json
+import sys as _sys
+import traceback as _tb
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
@@ -86,6 +88,12 @@ def generate_article(
     log_lines: list[str] = []
     def log(section: str, body: str):
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
+
+    def srvlog(tag: str, text: str) -> None:
+        try:
+            print(f"[ARTICLE][{tag}] {text}", file=_sys.stderr)
+        except Exception:
+            pass
     log("🧭 Config", f"provider={_prov}\nlang={lang}\nresearch={bool(enable_research)}\nrefine={bool(enable_refine)}")
     # Determine parallelism (bounded to avoid provider rate limits)
     par_env = (os.getenv("ARTICLE_MAX_PAR", "").strip() or None)
@@ -106,18 +114,28 @@ def generate_article(
     )
 
     # Module 1
+    srvlog("START", f"topic='{topic[:100]}' lang={lang} provider={_prov}")
     outline_agent = build_sections_and_subsections_agent()
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
-    outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
-    log("📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
+    try:
+        outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
+        log("📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
+        sec_count = len(outline.sections)
+        sub_count = sum(len(s.subsections) for s in outline.sections)
+        srvlog("OUTLINE_OK", f"sections={sec_count} subsections={sub_count}")
+        if sec_count == 0:
+            raise ValueError("Outline has no sections")
+    except Exception as e:
+        srvlog("OUTLINE_ERR", f"{type(e).__name__}: {e}")
+        _tb.print_exc()
+        raise
 
     # Skip legacy content-of-subsections step (removed in 2-module pipeline)
 
     # Module 2 (research) removed in 2‑модульной архитектуре
     log("🔎 Research · Skipped", "Research module removed (2‑module pipeline)")
 
-    # Module 3
-    # Writing: Subsections drafts in parallel across all subsections
+    # Module 2 (Writing): Subsections drafts in parallel across all subsections
     ssw_agent = build_subsection_writer_agent()
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
     all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
@@ -132,9 +150,14 @@ def generate_article(
             f"<subsection_id>{sub_obj.id}</subsection_id>\n"
             "</input>"
         )
-        return Runner.run_sync(ssw_agent, ssw_user_local).final_output  # type: ignore
+        try:
+            return Runner.run_sync(ssw_agent, ssw_user_local).final_output  # type: ignore
+        except Exception as ex:
+            srvlog("DRAFT_ERR", f"{sec_obj.id}/{sub_obj.id}: {type(ex).__name__}: {ex}")
+            raise
 
     draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
+    srvlog("DRAFT_START", f"jobs={len(all_subs_writing)} max_workers={max_workers}")
     if all_subs_writing:
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             fut_map2 = {ex.submit(_run_subsection_draft, sec, sub): (sec.id, sub.id) for (sec, sub) in all_subs_writing}
@@ -142,8 +165,10 @@ def generate_article(
                 key = fut_map2[fut]
                 try:
                     draft_result_by_key[key] = fut.result()
-                except Exception:
-                    pass
+                    srvlog("DRAFT_OK", f"{key[0]}/{key[1]}")
+                except Exception as ex:
+                    srvlog("DRAFT_FAIL", f"{key[0]}/{key[1]}: {type(ex).__name__}: {ex}")
+                    # keep going
     for sec in outline.sections:
         for sub in sec.subsections:
             key = (sec.id, sub.id)
@@ -152,6 +177,7 @@ def generate_article(
                 continue
             drafts_by_subsection[key] = d
             log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
+    srvlog("DRAFT_SUMMARY", f"ok={len(drafts_by_subsection)} total={len(all_subs_writing)}")
 
     # Refining module removed in 2‑модульной архитектуре
     log("✨ Refine · Skipped", "Refine module removed (2‑module pipeline)")
@@ -187,8 +213,14 @@ def generate_article(
         f"<article_markdown>{toc_text}\n\n{body_text}</article_markdown>\n"
         "</input>"
     )
-    atl: ArticleTitleLead = Runner.run_sync(atl_agent, atl_user).final_output  # type: ignore
-    log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
+    try:
+        atl: ArticleTitleLead = Runner.run_sync(atl_agent, atl_user).final_output  # type: ignore
+        log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
+        srvlog("TITLE_LEAD_OK", f"title_len={len(atl.title or '')} lead_len={len(atl.lead_markdown or '')}")
+    except Exception as e:
+        srvlog("TITLE_LEAD_ERR", f"{type(e).__name__}: {e}")
+        _tb.print_exc()
+        raise
 
     title_text = atl.title or (outline.title or topic)
     article_md = (
@@ -197,7 +229,13 @@ def generate_article(
         f"{toc_text}\n\n"
         f"{body_text}\n"
     )
-    save_markdown(article_path, title=title_text, generator=("OpenAI Agents SDK" if _prov == "openai" else _prov), pipeline="DeepArticle", content=article_md)
+    try:
+        save_markdown(article_path, title=title_text, generator=("OpenAI Agents SDK" if _prov == "openai" else _prov), pipeline="DeepArticle", content=article_md)
+        srvlog("SAVE_OK", f"article_path={article_path}")
+    except Exception as e:
+        srvlog("SAVE_ERR", f"{type(e).__name__}: {e}")
+        _tb.print_exc()
+        raise
 
     # Save log to filesystem and DB if available
     log_dir = ensure_output_dir(output_subdir)
@@ -269,8 +307,10 @@ def generate_article(
                 except Exception:
                     pass
     except Exception as e:
-        print(f"[ERROR] Failed to record article in DB: {e}")
+        srvlog("DB_ERR", f"{type(e).__name__}: {e}")
+        _tb.print_exc()
 
+    srvlog("DONE", f"path={article_path}")
     if return_log_path:
         return log_path
     return article_path

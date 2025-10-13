@@ -2065,6 +2065,10 @@ def create_dispatcher() -> Dispatcher:
                         return
 
                 await message.answer("Генерирую…" if _is_ru(ui_lang) else "Generating…")
+                try:
+                    print(f"[BOT][ARTICLE][START] uid={message.from_user.id if message.from_user else 0} chat={message.chat.id} topic_len={len(topic)} prov={prov} lang={eff_lang}", file=sys.stderr)
+                except Exception:
+                    pass
                 import asyncio as _asyncio
                 loop = _asyncio.get_running_loop()
                 # 10 часов по умолчанию (можно переопределить GEN_TIMEOUT_S)
@@ -2102,6 +2106,10 @@ def create_dispatcher() -> Dispatcher:
                 )
                 try:
                     article_path = await _asyncio.wait_for(fut, timeout=timeout_s)
+                    try:
+                        print(f"[BOT][ARTICLE][DONE] path={article_path}", file=sys.stderr)
+                    except Exception:
+                        pass
                 except _asyncio.TimeoutError:
                     warn = (
                         f"Превышено время ожидания ({int(timeout_s/60)} мин). Генерация продолжается в фоне; проверьте /results-ui позже."
@@ -2117,8 +2125,13 @@ def create_dispatcher() -> Dispatcher:
                     with open(article_path, "rb") as f:
                         cap = ("Готово (статья): " + Path(article_path).name) if _is_ru(ui_lang) else ("Done (article): " + Path(article_path).name)
                         await message.answer_document(f, caption=cap)
-                except Exception:
-                    pass
+                except Exception as e:
+                    try:
+                        import traceback as _tb
+                        print(f"[BOT][ARTICLE][SEND_ERR] {type(e).__name__}: {e}", file=sys.stderr)
+                        _tb.print_exc()
+                    except Exception:
+                        pass
                 # Send log if enabled
                 try:
                     if message.from_user:
@@ -2132,8 +2145,13 @@ def create_dispatcher() -> Dispatcher:
                                 with open(lp, "rb") as log_f:
                                     log_cap = f"Лог статьи: {lp.name}" if _is_ru(ui_lang) else f"Article log: {lp.name}"
                                     await message.answer_document(log_f, caption=log_cap)
-                except Exception:
-                    pass
+                except Exception as e:
+                    try:
+                        import traceback as _tb
+                        print(f"[BOT][ARTICLE][LOG_SEND_ERR] {type(e).__name__}: {e}", file=sys.stderr)
+                        _tb.print_exc()
+                    except Exception:
+                        pass
                 # Mark job done
                 try:
                     if job_id and SessionLocal is not None:
@@ -2147,6 +2165,12 @@ def create_dispatcher() -> Dispatcher:
                     pass
             except Exception as e:
                 await message.answer((f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"))
+                try:
+                    import traceback as _tb
+                    print(f"[BOT][ARTICLE][ERR] {type(e).__name__}: {e}", file=sys.stderr)
+                    _tb.print_exc()
+                except Exception:
+                    pass
             finally:
                 await state.finish()
                 await unmark_chat_running(chat_id)
