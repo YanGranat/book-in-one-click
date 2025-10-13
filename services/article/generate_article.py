@@ -10,6 +10,7 @@ import time
 import json as _json
 import sys as _sys
 import traceback as _tb
+from time import sleep as _sleep
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
@@ -94,6 +95,18 @@ def generate_article(
             print(f"[ARTICLE][{tag}] {text}", file=_sys.stderr)
         except Exception:
             pass
+
+    def _run_with_retries_sync(agent: Any, user_input: str, *, attempts: int = 3, backoff_seq: tuple[int, ...] = (2, 5, 8)):
+        """Run agent with simple retries on provider transient errors."""
+        for i in range(attempts):
+            try:
+                return Runner.run_sync(agent, user_input)
+            except Exception as e:
+                err_s = str(e)[:300]
+                srvlog("RETRY", f"attempt={i+1}/{attempts} err={type(e).__name__}: {err_s}")
+                if i == attempts - 1:
+                    raise
+                _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
     log("🧭 Config", f"provider={_prov}\nlang={lang}\nresearch={bool(enable_research)}\nrefine={bool(enable_refine)}")
     # Determine parallelism (bounded to avoid provider rate limits)
     par_env = (os.getenv("ARTICLE_MAX_PAR", "").strip() or None)
@@ -206,21 +219,30 @@ def generate_article(
 
     # Title & Lead based on full article content
     atl_agent = build_article_title_lead_writer_agent()
+    max_chars = 80000
+    try:
+        max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "80000"))
+    except Exception:
+        max_chars = 80000
+    used_body = body_text if len(body_text) <= max_chars else body_text[:max_chars]
+    srvlog("TITLE_LEAD_INPUT", f"toc_len={len(toc_text)} body_len={len(body_text)} used_len={len(used_body)} max_chars={max_chars}")
     atl_user = (
         "<input>\n"
         f"<topic>{topic}</topic>\n"
         f"<lang>{lang}</lang>\n"
-        f"<article_markdown>{toc_text}\n\n{body_text}</article_markdown>\n"
+        f"<article_markdown>{toc_text}\n\n{used_body}</article_markdown>\n"
         "</input>"
     )
     try:
-        atl: ArticleTitleLead = Runner.run_sync(atl_agent, atl_user).final_output  # type: ignore
+        atl: ArticleTitleLead = _run_with_retries_sync(atl_agent, atl_user).final_output  # type: ignore
         log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
         srvlog("TITLE_LEAD_OK", f"title_len={len(atl.title or '')} lead_len={len(atl.lead_markdown or '')}")
     except Exception as e:
         srvlog("TITLE_LEAD_ERR", f"{type(e).__name__}: {e}")
         _tb.print_exc()
-        raise
+        # Graceful fallback: use outline title/topic, empty lead
+        atl = ArticleTitleLead(title=(outline.title or topic), lead_markdown="")
+        log("🧾 Title & Lead (fallback)", f"```json\n{atl.model_dump_json()}\n```")
 
     title_text = atl.title or (outline.title or topic)
     article_md = (
