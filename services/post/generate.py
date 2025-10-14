@@ -331,19 +331,30 @@ def generate_post(
                 from llm_agents.post.post_style_2.module_01_writing.writer import build_post_writer_agent  # type: ignore
             else:
                 from llm_agents.post.post_style_1.module_01_writing.writer import build_post_writer_agent  # type: ignore
-            agent = build_post_writer_agent(
-                model=os.getenv("OPENAI_MODEL", "gpt-5"),
-                instructions_override=instructions,
-            )
-            res_local = Runner.run_sync(agent, user_message_local_writer)
+            if style_key == "post_style_2":
+                # For style 2: send only user message (no system instructions)
+                from agents import Agent as _Agent  # type: ignore
+                agent = _Agent(name="Style2 Writer (User-only)", instructions="", model=os.getenv("OPENAI_MODEL", "gpt-5"))
+                # Build user message from writer template, substituting <topic>/<lang>
+                tmpl = (instructions or "").replace("<topic>", topic).replace("<lang>", (lang or "auto").strip())
+                res_local = Runner.run_sync(agent, tmpl)
+            else:
+                agent = build_post_writer_agent(
+                    model=os.getenv("OPENAI_MODEL", "gpt-5"),
+                    instructions_override=instructions,
+                )
+                res_local = Runner.run_sync(agent, user_message_local_writer)
             content_raw = getattr(res_local, "final_output", "")
             if style_key == "post_style_2":
-                # Enforce JSON contract
+                # Second step: title+json agent to wrap content into JSON and enforce no pre/post text
+                from llm_agents.post.post_style_2.module_01_writing.title_json import build_title_json_agent  # type: ignore
+                title_agent = build_title_json_agent(model=os.getenv("OPENAI_MODEL", "gpt-5"))
                 from utils.json_parse import parse_json_best_effort as _pjson
+                tj_res = Runner.run_sync(title_agent, str(content_raw or ""))
+                tj_raw = getattr(tj_res, "final_output", "")
                 try:
-                    obj = _pjson(content_raw)
+                    obj = _pjson(tj_raw)
                     title = str((obj or {}).get("title") or "").strip()
-                    # Support both legacy 'post' and new 'text'
                     body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                     header = f"**{title}**\n\n" if title else ""
                     content = (header + body).strip()
@@ -354,18 +365,24 @@ def generate_post(
         except Exception:
             content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     else:
-        # For non-OpenAI, still try JSON path for style 2
+        # For non-OpenAI Style 2: send user-only prompt and then wrap with title_json via provider runner
         if style_key == "post_style_2":
-            txt = run_with_provider(instructions, user_message_local_writer, speed="heavy")
+            # step 1: writer
+            tmpl = (instructions or "").replace("<topic>", topic).replace("<lang>", (lang or "auto").strip())
+            writer_text = run_with_provider("", tmpl, speed="heavy")
+            # step 2: title json
+            from pathlib import Path as _P
+            tprompt = (_P(__file__).resolve().parents[2] / "prompts" / "post" / "post_style_2" / "module_01_writing" / "title_json.md").read_text(encoding="utf-8")
+            tj = run_with_provider(tprompt, writer_text, speed="heavy")
             try:
                 from utils.json_parse import parse_json_best_effort as _pjson
-                obj = _pjson(txt)
+                obj = _pjson(tj)
                 title = str((obj or {}).get("title") or "").strip()
                 body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                 header = f"**{title}**\n\n" if title else ""
                 content = (header + body).strip()
             except Exception:
-                content = str(txt or "").strip()
+                content = str(writer_text or "").strip()
         else:
             content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("✍️ Writer · Output", content)
