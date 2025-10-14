@@ -551,7 +551,6 @@ def create_dispatcher() -> Dispatcher:
         refine_enabled = False
         fc_enabled = False
         fc_depth = 2
-        post_style = (data.get("post_style") or "post_style_1").strip().lower()
         try:
             if message.from_user:
                 refine_enabled = await get_refine_enabled(message.from_user.id)
@@ -630,12 +629,10 @@ def create_dispatcher() -> Dispatcher:
                 )
             provider_line_ru = (f"- Провайдер: {_prov_name(prov, True)}\n" if is_superadmin else "")
             logs_line_ru = (f"- Логи генерации: {'вкл' if logs_enabled else 'выкл'}\n" if (is_superadmin or is_admin) else "")
-            style_line_ru = f"- Стиль поста: {'Стиль 1' if post_style == 'post_style_1' else 'Стиль 2'}\n"
             settings_block = (
                 "<b>Текущие настройки:</b>\n"
                 f"{provider_line_ru}"
                 f"{logs_line_ru}"
-                f"{style_line_ru}"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Публичные результаты: {'да' if not incognito else 'нет'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
@@ -691,12 +688,10 @@ def create_dispatcher() -> Dispatcher:
                 )
             provider_line_en = (f"- Provider: {_prov_name(prov, False)}\n" if is_superadmin else "")
             logs_line_en = (f"- Generation logs: {'on' if logs_enabled else 'off'}\n" if (is_superadmin or is_admin) else "")
-            style_line_en = f"- Post style: {'Style 1' if post_style == 'post_style_1' else 'Style 2'}\n"
             settings_block = (
                 "<b>Current settings:</b>\n"
                 f"{provider_line_en}"
                 f"{logs_line_en}"
-                f"{style_line_en}"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Public results: {'yes' if not incognito else 'no'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
