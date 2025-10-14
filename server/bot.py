@@ -1269,7 +1269,7 @@ def create_dispatcher() -> Dispatcher:
         except Exception:
             fc_depth_pref = 2
         fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
-        unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+        unit_cost = 10 + fc_extra + (1 if refine_pref else 0)
         total = unit_cost * int(n)
         kb = InlineKeyboardMarkup()
         kb.add(
@@ -1317,7 +1317,7 @@ def create_dispatcher() -> Dispatcher:
                         await dp.bot.send_message(chat_id_series, warn)
                         if _stars_enabled():
                             try:
-                                await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 10⭐)" if ru else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
+                                await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if ru else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
                             except Exception:
                                 pass
                         await state.finish()
@@ -1331,7 +1331,7 @@ def create_dispatcher() -> Dispatcher:
                     await dp.bot.send_message(chat_id_series, warn)
                     if _stars_enabled():
                         try:
-                            await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 10⭐)" if ru else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
+                            await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if ru else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
                         except Exception:
                             pass
                     await state.finish()
@@ -2112,32 +2112,32 @@ def create_dispatcher() -> Dispatcher:
                             async with SessionLocal() as session:
                                 from .db import get_or_create_user
                                 user = await get_or_create_user(session, message.from_user.id)
-                                ok, remaining = await charge_credits(session, user, 100, reason="article")
+                                ok, remaining = await charge_credits(session, user, 250, reason="article")
                                 if ok:
                                     await session.commit()
                                     charged = True
                                 else:
                                     # Not enough credits in DB
-                                    need = max(0, 100 - int(remaining))
+                                    need = max(0, 250 - int(remaining))
                                     warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
                                     await message.answer(warn)
                                     if _stars_enabled():
                                         try:
-                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                                         except Exception:
                                             pass
                                     await state.finish()
                                     await unmark_chat_running(chat_id)
                                     return
                         if not charged and message.from_user:
-                            ok, remaining = await charge_credits_kv(message.from_user.id, 100)  # type: ignore
+                            ok, remaining = await charge_credits_kv(message.from_user.id, 250)  # type: ignore
                             if not ok:
-                                need = max(0, 100 - int(remaining))
+                                need = max(0, 250 - int(remaining))
                                 warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
                                 await message.answer(warn)
                                 if _stars_enabled():
                                     try:
-                                        await message.answer(("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                        await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                                     except Exception:
                                         pass
                                 await state.finish()
@@ -2310,7 +2310,7 @@ def create_dispatcher() -> Dispatcher:
                     fc_enabled_pref = False
                 # Pricing
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
-                unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                unit_cost = 10 + fc_extra + (1 if refine_pref else 0)
 
                 is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
 
@@ -2340,7 +2340,7 @@ def create_dispatcher() -> Dispatcher:
                                         await message.answer(warn)
                                         if _stars_enabled():
                                             try:
-                                                await message.answer(("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                                await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                                             except Exception:
                                                 pass
                                         await state.finish()
@@ -2356,7 +2356,7 @@ def create_dispatcher() -> Dispatcher:
                                     await message.answer(warn)
                                     if _stars_enabled():
                                         try:
-                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                                         except Exception:
                                             pass
                                     await state.finish()
@@ -2392,7 +2392,7 @@ def create_dispatcher() -> Dispatcher:
                             await message.answer(("Недостаточно кредитов. Используйте /credits для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /credits to top up."))
                             if _stars_enabled():
                                 try:
-                                    await message.answer(("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                    await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                                 except Exception:
                                     pass
                             await state.finish()
@@ -2670,7 +2670,7 @@ def create_dispatcher() -> Dispatcher:
                     fc_enabled_pref = False
                     fc_depth_pref = 0
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
-                unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                unit_cost = 10 + fc_extra + (1 if refine_pref else 0)
                 try:
                     import sys as _sys
                     print(f"[FLOW][confirm_show] uid={getattr(getattr(message,'from_user',None),'id',None)} cost={unit_cost} refine={refine_pref} fc={fc_enabled_pref} depth={fc_depth_pref} style={post_style}", file=_sys.stderr, flush=True)
@@ -2731,7 +2731,7 @@ def create_dispatcher() -> Dispatcher:
                 fc_enabled_pref = False
                 fc_depth_pref = 0
             fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
-            unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+            unit_cost = 10 + fc_extra + (1 if refine_pref else 0)
             # Only attempt DB charge when not already marked as charged (non-admin)
             if (not charged) and SessionLocal is not None and message.from_user:
                 async with SessionLocal() as session:
@@ -2769,7 +2769,7 @@ def create_dispatcher() -> Dispatcher:
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                     if _stars_enabled():
                         try:
-                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                         except Exception:
                             pass
                     await state.finish()
@@ -3190,7 +3190,7 @@ def create_dispatcher() -> Dispatcher:
                         except Exception:
                             fc_depth_pref = 2
                     fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
-                    unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                    unit_cost = 10 + fc_extra + (1 if refine_pref else 0)
                     try:
                         import sys as _sys
                         print(f"[FLOW][charge_db] uid={getattr(getattr(query,'from_user',None),'id',None)} cost={unit_cost}", file=_sys.stderr, flush=True)
@@ -3241,7 +3241,7 @@ def create_dispatcher() -> Dispatcher:
                     except Exception:
                         fc_depth_pref = 2
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
-                unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
+                unit_cost = 10 + fc_extra + (1 if refine_pref else 0)
                 try:
                     import sys as _sys
                     print(f"[FLOW][charge_kv] uid={getattr(getattr(query,'from_user',None),'id',None)} cost={unit_cost}", file=_sys.stderr, flush=True)
@@ -3263,7 +3263,7 @@ def create_dispatcher() -> Dispatcher:
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                     if _stars_enabled():
                         try:
-                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                             await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
                         except Exception:
                             pass
@@ -3862,7 +3862,7 @@ def create_dispatcher() -> Dispatcher:
         if _stars_enabled():
             try:
                 await message.answer(
-                    txt + ("\nХотите купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐? (1 credit = 10⭐)"),
+                    txt + ("\nХотите купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐? (1 credit = 1⭐)"),
                     reply_markup=build_buy_keyboard(ui_lang),
                 )
             except Exception:
@@ -3875,7 +3875,7 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = await _resolve_ui_lang(state, message.from_user.id if message.from_user else None)
         if _stars_enabled():
             await message.answer(
-                (("Выберите пакет кредитов (1 кредит = 10⭐):" if _is_ru(ui_lang) else "Choose a credits pack (1 credit = 10⭐):")),
+                (("Выберите пакет кредитов (1 кредит = 1⭐):" if _is_ru(ui_lang) else "Choose a credits pack (1 credit = 1⭐):")),
                 reply_markup=build_buy_keyboard(ui_lang),
             )
         else:
@@ -3896,16 +3896,16 @@ def create_dispatcher() -> Dispatcher:
         if _is_ru(ui_lang):
             await message.answer(
                 "Цены:\n"
-                "- Пост: 1 кредит\n"
-                "- Серия: 1×N кредитов\n"
-                "- Статья: 100 кредитов\n"
+                "- Пост: 10 кредитов\n"
+                "- Серия: 10×N кредитов\n"
+                "- Статья: 250 кредитов\n"
             )
         else:
             await message.answer(
                 "Pricing:\n"
-                "- Post: 1 credit\n"
-                "- Series: 1×N credits\n"
-                "- Article: 100 credits\n"
+                "- Post: 10 credits\n"
+                "- Series: 10×N credits\n"
+                "- Article: 250 credits\n"
             )
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy:stars:"))  # type: ignore
@@ -3923,8 +3923,8 @@ def create_dispatcher() -> Dispatcher:
             await query.answer("Not configured", show_alert=True)
             return
         try:
-            prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 10)]
-            payload = f"credits={pack}&stars={pack*10}"
+            prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 1)]
+            payload = f"credits={pack}&stars={pack*1}"
             title = f"Credits x{pack}"
             description = "Buy generation credits using Telegram Stars"
             await dp.bot.send_invoice(
@@ -4516,9 +4516,9 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 bal = 0
         if _is_ru(ui_lang):
-            txt = [f"Баланс: {int(bal)} кредит(ов).", "", "Цены:", "- Пост: 1 кредит", "- Статья: 100 кредитов", "", "Купить за ⭐ (1 кредит = 10⭐):"]
+            txt = [f"Баланс: {int(bal)} кредит(ов).", "", "Цены:", "- Пост: 10 кредитов", "- Статья: 250 кредитов", "", "Купить за ⭐ (1 кредит = 1⭐):"]
         else:
-            txt = [f"Balance: {int(bal)} credits.", "", "Pricing:", "- Post: 1 credit", "- Article: 100 credits", "", "Buy with ⭐ (1 credit = 10⭐):"]
+            txt = [f"Balance: {int(bal)} credits.", "", "Pricing:", "- Post: 10 credits", "- Article: 250 credits", "", "Buy with ⭐ (1 credit = 1⭐):"]
         try:
             await message.answer("\n".join(txt), reply_markup=build_buy_keyboard(ui_lang))
         except Exception:
