@@ -334,7 +334,7 @@ def generate_post(
             if style_key == "post_style_2":
                 # For style 2: send only user message (no system instructions)
                 from agents import Agent as _Agent, ModelSettings as _MS  # type: ignore
-                agent = _Agent(name="Style2 Writer (User-only)", instructions="", model=os.getenv("OPENAI_MODEL", "gpt-5"))
+                agent = _Agent(name="Style2 Writer (User-only)", instructions="", model=os.getenv("OPENAI_MODEL", "gpt-5-chat-latest"))
                 try:
                     agent.model_settings = _MS(reasoning={"effort": "none"})
                 except Exception:
