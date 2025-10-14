@@ -104,25 +104,6 @@ def generate_post(
                 on_progress(stage)
             except Exception:
                 pass
-    # Helpers (style 2): sanitize disclaimers and derive fallback title
-    def _sanitize_llm_disclaimers(text: str) -> str:
-        try:
-            import re as _re
-            s = text or ""
-            # Remove common disclaimer lines at the start
-            patterns = [
-                r"^\s*я\s+не\s+могу[^\n]*\n?",
-                r"^\s*как\s+модель[^\n]*\n?",
-                r"^\s*не\s+могу\s+писать[^\n]*\n?",
-                r"^\s*as an ai[^\n]*\n?",
-                r"^\s*i\s+can't[^\n]*\n?",
-            ]
-            for p in patterns:
-                s = _re.sub(p, "", s, flags=_re.IGNORECASE)
-            return s.strip()
-        except Exception:
-            return text or ""
-
     def _fallback_title_from_text(text: str) -> str:
         try:
             import re as _re
@@ -370,9 +351,11 @@ def generate_post(
             if style_key == "post_style_2":
                 # For style 2: send only user message (no system instructions)
                 from agents import Agent as _Agent, ModelSettings as _MS  # type: ignore
-                agent = _Agent(name="Style2 Writer (User-only)", instructions="", model=os.getenv("OPENAI_MODEL", "gpt-5-chat-latest"))
+                # Use chat-latest; enable medium reasoning effort
+                model_name = os.getenv("OPENAI_MODEL", "gpt-5-chat-latest")
+                agent = _Agent(name="Style2 Writer (User-only)", instructions="", model=model_name)
                 try:
-                    agent.model_settings = _MS(reasoning={"effort": "none"})
+                    agent.model_settings = _MS(reasoning={"effort": "medium"})
                 except Exception:
                     pass
                 # Build user message from writer template, substituting <topic>/<lang>
@@ -390,23 +373,21 @@ def generate_post(
                 from llm_agents.post.post_style_2.module_01_writing.title_json import build_title_json_agent  # type: ignore
                 title_agent = build_title_json_agent(model=os.getenv("OPENAI_MODEL", "gpt-5"))
                 from utils.json_parse import parse_json_best_effort as _pjson
-                # Add instruction for cleanup: prepend small hint into user payload
-                # Pre-clean disclaimers before sending to title agent to improve quality
-                cleaned = _sanitize_llm_disclaimers(str(content_raw or ""))
-                tj_input = "Очисти LLM-оговорки, если есть, и верни JSON с title/text.\n\n" + cleaned
+                # Send raw writer output as input; title_json agent handles cleanup
+                tj_input = str(content_raw or "")
                 tj_res = Runner.run_sync(title_agent, tj_input)
                 tj_raw = getattr(tj_res, "final_output", "")
                 try:
                     obj = _pjson(tj_raw)
-                    title = str((obj or {}).get("title") or "").strip() or _fallback_title_from_text(cleaned)
-                    body = _sanitize_llm_disclaimers(str((obj or {}).get("text") or (obj or {}).get("post") or "").strip() )
+                    title = str((obj or {}).get("title") or "").strip() or _fallback_title_from_text(str(content_raw or ""))
+                    body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                     header = f"**{title}**\n\n" if title else ""
                     content = (header + body).strip()
                 except Exception:
-                    # Fallback: use cleaned body and derived title
-                    title = _fallback_title_from_text(cleaned)
+                    # Fallback: use raw body and derived title
+                    title = _fallback_title_from_text(str(content_raw or ""))
                     header = f"**{title}**\n\n" if title else ""
-                    content = (header + cleaned).strip()
+                    content = (header + str(content_raw or "")).strip()
             else:
                 content = str(content_raw).strip()
         except Exception:
@@ -422,21 +403,20 @@ def generate_post(
             tprompt = (_P(__file__).resolve().parents[2] / "prompts" / "post" / "post_style_2" / "module_01_writing" / "title_json.md").read_text(encoding="utf-8")
             try:
                 pr_local = ProviderRunner(_prov)
-                tj = pr_local.run_json(tprompt, _sanitize_llm_disclaimers(writer_text or ""), speed="heavy")
+                tj = pr_local.run_json(tprompt, writer_text or "", speed="heavy")
             except Exception:
-                tj = run_with_provider(tprompt, _sanitize_llm_disclaimers(writer_text or ""), speed="heavy")
+                tj = run_with_provider(tprompt, writer_text or "", speed="heavy")
             try:
                 from utils.json_parse import parse_json_best_effort as _pjson
                 obj = _pjson(tj)
                 title = str((obj or {}).get("title") or "").strip() or _fallback_title_from_text(writer_text)
-                body = _sanitize_llm_disclaimers(str((obj or {}).get("text") or (obj or {}).get("post") or "").strip())
+                body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                 header = f"**{title}**\n\n" if title else ""
                 content = (header + body).strip()
             except Exception:
-                cleaned = _sanitize_llm_disclaimers(writer_text or "")
-                title = _fallback_title_from_text(cleaned)
+                title = _fallback_title_from_text(writer_text or "")
                 header = f"**{title}**\n\n" if title else ""
-                content = (header + cleaned).strip()
+                content = (header + (writer_text or "")).strip()
         else:
             content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("✍️ Writer · Output", content)

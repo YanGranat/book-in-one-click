@@ -37,8 +37,6 @@ def get_model(provider: str, tier: str = "heavy") -> str:
     # normalize aliases
     if t == "superfast":
         t = "fast"
-    if t == "medium":
-        t = "heavy"
     cfg = _load_models_config()
     # Optional ENV overrides for compatibility
     if p == "openai":
