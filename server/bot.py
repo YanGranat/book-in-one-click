@@ -139,19 +139,19 @@ def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
     # Packs: 1, 5, 10, 50, 100, 500 credits at 50 stars per credit
     if _is_ru(ui_lang):
-        kb.add(InlineKeyboardButton(text="Купить 1 кредит — 50⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 250⭐", callback_data="buy:stars:5"))
-        kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 500⭐", callback_data="buy:stars:10"))
-        kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 2500⭐", callback_data="buy:stars:50"))
-        kb.add(InlineKeyboardButton(text="Купить 100 кредитов — 5000⭐", callback_data="buy:stars:100"))
-        kb.add(InlineKeyboardButton(text="Купить 500 кредитов — 25000⭐", callback_data="buy:stars:500"))
+        kb.add(InlineKeyboardButton(text="Купить 1 кредит — 10⭐", callback_data="buy:stars:1"))
+        kb.add(InlineKeyboardButton(text="Купить 5 кредитов — 50⭐", callback_data="buy:stars:5"))
+        kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 100⭐", callback_data="buy:stars:10"))
+        kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 500⭐", callback_data="buy:stars:50"))
+        kb.add(InlineKeyboardButton(text="Купить 100 кредитов — 1000⭐", callback_data="buy:stars:100"))
+        kb.add(InlineKeyboardButton(text="Купить 500 кредитов — 5000⭐", callback_data="buy:stars:500"))
     else:
-        kb.add(InlineKeyboardButton(text="Buy 1 credit — 50⭐", callback_data="buy:stars:1"))
-        kb.add(InlineKeyboardButton(text="Buy 5 credits — 250⭐", callback_data="buy:stars:5"))
-        kb.add(InlineKeyboardButton(text="Buy 10 credits — 500⭐", callback_data="buy:stars:10"))
-        kb.add(InlineKeyboardButton(text="Buy 50 credits — 2500⭐", callback_data="buy:stars:50"))
-        kb.add(InlineKeyboardButton(text="Buy 100 credits — 5000⭐", callback_data="buy:stars:100"))
-        kb.add(InlineKeyboardButton(text="Buy 500 credits — 25000⭐", callback_data="buy:stars:500"))
+        kb.add(InlineKeyboardButton(text="Buy 1 credit — 10⭐", callback_data="buy:stars:1"))
+        kb.add(InlineKeyboardButton(text="Buy 5 credits — 50⭐", callback_data="buy:stars:5"))
+        kb.add(InlineKeyboardButton(text="Buy 10 credits — 100⭐", callback_data="buy:stars:10"))
+        kb.add(InlineKeyboardButton(text="Buy 50 credits — 500⭐", callback_data="buy:stars:50"))
+        kb.add(InlineKeyboardButton(text="Buy 100 credits — 1000⭐", callback_data="buy:stars:100"))
+        kb.add(InlineKeyboardButton(text="Buy 500 credits — 5000⭐", callback_data="buy:stars:500"))
     return kb
 
 
