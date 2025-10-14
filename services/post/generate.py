@@ -353,10 +353,6 @@ def generate_post(
                 from agents import Agent as _Agent, ModelSettings as _MS  # type: ignore
                 # Use chat-latest; do NOT set reasoning (unsupported for this model)
                 agent = _Agent(name="Style2 Writer (User-only)", instructions="", model="gpt-5-chat-latest")
-                try:
-                    log("⚙️ Writer · Model", "model=gpt-5-chat-latest")
-                except Exception:
-                    pass
                 # Build user message strictly from writer.md with only <topic> substituted
                 from pathlib import Path as _P
                 _writer_prompt = (
@@ -386,11 +382,15 @@ def generate_post(
                 from llm_agents.post.post_style_2.module_01_writing.title_json import build_title_json_agent  # type: ignore
                 # Force gpt-5 for title agent to support reasoning
                 title_agent = build_title_json_agent(model="gpt-5")
-                try:
-                    log("🧩 Title JSON · Input", f"len={len(str(content_raw or ''))}")
-                except Exception:
-                    pass
-                tj_res = Runner.run_sync(title_agent, str(content_raw or ""))
+                
+                # Pass target language alongside text for potential translation to <lang>
+                tj_payload = (
+                    "<input>\n"
+                    f"<lang>{(lang or 'auto').strip()}</lang>\n"
+                    f"<text>\n{str(content_raw or '')}\n</text>\n"
+                    "</input>"
+                )
+                tj_res = Runner.run_sync(title_agent, tj_payload)
                 tj_raw = getattr(tj_res, "final_output", "")
                 from utils.json_parse import parse_json_best_effort as _pjson
                 try:
@@ -416,7 +416,7 @@ def generate_post(
                             / "title_json.md"
                         ).read_text(encoding="utf-8")
                         pr_local = ProviderRunner(_prov)
-                        tj = pr_local.run_json(tprompt, str(content_raw or ""), speed="heavy")
+                        tj = pr_local.run_json(tprompt, tj_payload, speed="heavy")
                         obj = _pjson(tj)
                         title = str((obj or {}).get("title") or "").strip() or _fallback_title_from_text(str(content_raw or ""))
                         body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
