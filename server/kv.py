@@ -379,6 +379,29 @@ async def get_gen_lang(telegram_id: int) -> str:
         return s
     return "auto"
 
+
+# ---- UI language preference (interface language) ----
+
+async def set_ui_lang(telegram_id: int, ui_lang: str) -> None:
+    r = get_redis()
+    key = f"{kv_prefix()}:ui_lang:{telegram_id}"
+    val = (ui_lang or "ru").strip().lower()
+    norm = "en" if val == "en" else "ru"
+    await r.set(key, norm)
+
+
+async def get_ui_lang(telegram_id: int) -> str:
+    r = get_redis()
+    key = f"{kv_prefix()}:ui_lang:{telegram_id}"
+    val = await r.get(key)
+    try:
+        s = (val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val or "")).strip().lower()
+    except Exception:
+        s = str(val or "").strip().lower()
+    if s in {"ru", "en"}:
+        return s
+    return "ru"
+
 # ---- Refine preference ----
 
 async def set_refine_enabled(telegram_id: int, enabled: bool) -> None:

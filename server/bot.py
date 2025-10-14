@@ -29,6 +29,7 @@ from .bot_commands import ADMIN_IDS, SUPER_ADMIN_ID
 from .credits import ensure_user_with_credits, charge_credits, charge_credits_kv, get_balance_kv_only, refund_credits, refund_credits_kv
 from .kv import set_provider, get_provider, set_logs_enabled, get_logs_enabled, set_incognito, get_incognito
 from .kv import set_gen_lang, get_gen_lang
+from .kv import set_ui_lang, get_ui_lang
 from .kv import set_refine_enabled, get_refine_enabled
 from .kv import push_history, get_history, clear_history, rate_allow
 from .kv import chat_clear
@@ -134,6 +135,21 @@ def _is_ru(ui_lang: str) -> bool:
 
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
+
+async def _resolve_ui_lang(state: FSMContext, user_id: Optional[int]) -> str:
+    try:
+        data = await state.get_data()
+    except Exception:
+        data = {}
+    lang = (data.get("ui_lang") or "").strip()
+    if lang:
+        return lang
+    if user_id:
+        try:
+            return await get_ui_lang(int(user_id))
+        except Exception:
+            pass
+    return "ru"
 
 def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
@@ -855,6 +871,10 @@ def create_dispatcher() -> Dispatcher:
         await query.answer()
         confirm = "Язык интерфейса установлен." if ui_lang == "ru" else "Interface language set."
         await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, confirm)
+        try:
+            await set_ui_lang(query.from_user.id, ui_lang)
+        except Exception:
+            pass
         data = await state.get_data()
         onboarding = bool(data.get("onboarding"))
         if onboarding:
@@ -3854,8 +3874,7 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["buy"])  # type: ignore
     async def cmd_buy(message: types.Message, state: FSMContext):
-        data = await state.get_data()
-        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ui_lang = await _resolve_ui_lang(state, message.from_user.id if message.from_user else None)
         if _stars_enabled():
             await message.answer(
                 (("Выберите пакет кредитов (1 кредит = 10⭐):" if _is_ru(ui_lang) else "Choose a credits pack (1 credit = 10⭐):")),
@@ -4478,8 +4497,7 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message_handler(commands=["credits"])  # type: ignore
     async def cmd_credits(message: types.Message, state: FSMContext):
-        data = await state.get_data()
-        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ui_lang = await _resolve_ui_lang(state, message.from_user.id if message.from_user else None)
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         if is_admin:
             await message.answer("Админ: генерации бесплатны." if _is_ru(ui_lang) else "Admin: generation is free.")
