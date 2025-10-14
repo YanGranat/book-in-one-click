@@ -351,14 +351,10 @@ def generate_post(
             if style_key == "post_style_2":
                 # For style 2: send only user message (no system instructions)
                 from agents import Agent as _Agent, ModelSettings as _MS  # type: ignore
-                # Use chat-latest; enable medium reasoning effort (no ENV override)
+                # Use chat-latest; do NOT set reasoning (unsupported for this model)
                 agent = _Agent(name="Style2 Writer (User-only)", instructions="", model="gpt-5-chat-latest")
                 try:
-                    agent.model_settings = _MS(reasoning={"effort": "medium"})
-                except Exception:
-                    pass
-                try:
-                    log("⚙️ Writer · Model", "model=gpt-5-chat-latest; reasoning=medium")
+                    log("⚙️ Writer · Model", "model=gpt-5-chat-latest")
                 except Exception:
                     pass
                 # Build user message from writer template, substituting <topic>/<lang>
@@ -375,7 +371,12 @@ def generate_post(
                 # Second step: run dedicated agent built on title_json.md prompt (SDK path),
                 # which removes disclaimers and returns strict JSON {title, text}.
                 from llm_agents.post.post_style_2.module_01_writing.title_json import build_title_json_agent  # type: ignore
-                title_agent = build_title_json_agent(model=os.getenv("OPENAI_MODEL", "gpt-5"))
+                # Force gpt-5 for title agent to support reasoning
+                title_agent = build_title_json_agent(model="gpt-5")
+                try:
+                    log("🧩 Title JSON · Input", f"len={len(str(content_raw or ''))}")
+                except Exception:
+                    pass
                 tj_res = Runner.run_sync(title_agent, str(content_raw or ""))
                 tj_raw = getattr(tj_res, "final_output", "")
                 from utils.json_parse import parse_json_best_effort as _pjson
