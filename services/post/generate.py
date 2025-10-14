@@ -333,8 +333,12 @@ def generate_post(
                 from llm_agents.post.post_style_1.module_01_writing.writer import build_post_writer_agent  # type: ignore
             if style_key == "post_style_2":
                 # For style 2: send only user message (no system instructions)
-                from agents import Agent as _Agent  # type: ignore
+                from agents import Agent as _Agent, ModelSettings as _MS  # type: ignore
                 agent = _Agent(name="Style2 Writer (User-only)", instructions="", model=os.getenv("OPENAI_MODEL", "gpt-5"))
+                try:
+                    agent.model_settings = _MS(reasoning={"effort": "none"})
+                except Exception:
+                    pass
                 # Build user message from writer template, substituting <topic>/<lang>
                 tmpl = (instructions or "").replace("<topic>", topic).replace("<lang>", (lang or "auto").strip())
                 res_local = Runner.run_sync(agent, tmpl)
@@ -350,7 +354,9 @@ def generate_post(
                 from llm_agents.post.post_style_2.module_01_writing.title_json import build_title_json_agent  # type: ignore
                 title_agent = build_title_json_agent(model=os.getenv("OPENAI_MODEL", "gpt-5"))
                 from utils.json_parse import parse_json_best_effort as _pjson
-                tj_res = Runner.run_sync(title_agent, str(content_raw or ""))
+                # Add instruction for cleanup: prepend small hint into user payload
+                tj_input = "Очисти LLM-оговорки, если есть, и верни JSON с title/text.\n\n" + str(content_raw or "")
+                tj_res = Runner.run_sync(title_agent, tj_input)
                 tj_raw = getattr(tj_res, "final_output", "")
                 try:
                     obj = _pjson(tj_raw)
