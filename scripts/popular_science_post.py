@@ -17,13 +17,7 @@ from utils.env import ensure_project_root_on_syspath as ensure_root, load_env_fr
 from utils.slug import safe_filename_base
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from orchestrator import progress
-from llm_agents.post.module_02_review.identify_points import build_identify_points_agent
-from llm_agents.post.module_02_review.iterative_research import build_iterative_research_agent
-from llm_agents.post.module_02_review.recommendation import build_recommendation_agent
-from llm_agents.post.module_02_review.sufficiency import build_sufficiency_agent
-from llm_agents.post.module_02_review.query_synthesizer import build_query_synthesizer_agent
-from llm_agents.post.module_03_rewriting.rewrite import build_rewrite_agent
-from llm_agents.post.module_03_rewriting.refine import build_refine_agent
+# Legacy agent imports removed in favor of unified services.post.generate
 from pipelines.post.pipeline import build_instructions as build_post_instructions
 
 
@@ -53,6 +47,7 @@ def main() -> None:
     parser.add_argument("--topic", type=str, default="", help="Topic to generate about")
     parser.add_argument("--lang", type=str, default="auto", help="Language: auto|ru|en")
     parser.add_argument("--provider", type=str, default="openai", help="LLM provider: openai|gemini|claude")
+    parser.add_argument("--style", type=str, default="post_style_1", help="Post style: post_style_1|post_style_2")
     parser.add_argument("--out", type=str, default="post", help="Output subdirectory")
     parser.add_argument("--no-factcheck", action="store_true", help="Disable fact-check step")
     parser.add_argument("--factcheck-max-items", type=int, default=0, help="Limit number of points to research (0=all)")
@@ -128,6 +123,7 @@ def main() -> None:
                 topic,
                 lang=args.lang,
                 provider=args.provider,
+                style=(args.style or "post_style_1"),
                 factcheck=not args.no_factcheck,
                 research_iterations=args.research_iterations,
                 research_concurrency=args.research_concurrency,
@@ -141,6 +137,7 @@ def main() -> None:
                 topic,
                 lang=args.lang,
                 provider=args.provider,
+                style=(args.style or "post_style_1"),
                 factcheck=not args.no_factcheck,
                 research_iterations=args.research_iterations,
                 research_concurrency=args.research_concurrency,
@@ -152,6 +149,7 @@ def main() -> None:
                 topic,
                 lang=args.lang,
                 provider=args.provider,
+                style=(args.style or "post_style_1"),
                 factcheck=not args.no_factcheck,
                 research_iterations=args.research_iterations,
                 research_concurrency=args.research_concurrency,

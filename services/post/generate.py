@@ -44,6 +44,7 @@ def generate_post(
     *,
     lang: str = "auto",
     provider: str = "openai",  # openai|gemini|claude
+    style: str = "post_style_1",  # post_style_1 | post_style_2
     factcheck: bool = True,
     factcheck_max_items: int = 0,
     research_iterations: int = 2,
@@ -111,9 +112,14 @@ def generate_post(
     log_lines = []
     def log(section: str, body: str):
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
-    log("🧭 Config", f"provider={_prov}\nlang={lang}")
+    # Normalize style
+    style_key = (style or "post_style_1").strip().lower()
+    if style_key not in {"post_style_1", "post_style_2"}:
+        style_key = "post_style_1"
 
-    instructions = instructions_override or build_post_instructions(topic, lang)
+    log("🧭 Config", f"provider={_prov}\nlang={lang}\nstyle={style_key}")
+
+    instructions = instructions_override or build_post_instructions(topic, lang, style_key)
     # Defaults for variables referenced by nested functions in non-OpenAI factcheck path
     pref: list[str] = []
     p_iter: Optional[str] = None
@@ -321,7 +327,10 @@ def generate_post(
     # Use explicit Agent for OpenAI via writer module; others use provider runner
     if _prov == "openai":
         try:
-            from llm_agents.post.module_01_writing.writer import build_post_writer_agent
+            if style_key == "post_style_2":
+                from llm_agents.post.post_style_2.module_01_writing.writer import build_post_writer_agent  # type: ignore
+            else:
+                from llm_agents.post.post_style_1.module_01_writing.writer import build_post_writer_agent  # type: ignore
             agent = build_post_writer_agent(
                 model=os.getenv("OPENAI_MODEL", "gpt-5"),
                 instructions_override=instructions,
@@ -382,13 +391,25 @@ def generate_post(
             )
 
     report = None
+    # Style 2: skip fact-check entirely
+    if factcheck and style_key == "post_style_2":
+        try:
+            log("ℹ️ Fact-check skipped", "Style 2 does not support fact-checking")
+        except Exception:
+            pass
+        factcheck = False
+
     if factcheck:
         if _prov == "openai":
             # Preserve original OpenAI Agents SDK flow (with WebSearchTool)
-            from llm_agents.post.module_02_review.identify_points import build_identify_points_agent
-            from llm_agents.post.module_02_review.iterative_research import build_iterative_research_agent
-            from llm_agents.post.module_02_review.recommendation import build_recommendation_agent
-            from llm_agents.post.module_02_review.sufficiency import build_sufficiency_agent
+            if style_key == "post_style_2":
+                # Safety: should not happen due to guard above
+                report = None
+            else:
+                from llm_agents.post.post_style_1.module_02_review.identify_points import build_identify_points_agent  # type: ignore
+                from llm_agents.post.post_style_1.module_02_review.iterative_research import build_iterative_research_agent  # type: ignore
+                from llm_agents.post.post_style_1.module_02_review.recommendation import build_recommendation_agent  # type: ignore
+                from llm_agents.post.post_style_1.module_02_review.sufficiency import build_sufficiency_agent  # type: ignore
             from utils.config import load_config
 
             _emit("factcheck:init")
@@ -509,16 +530,24 @@ def generate_post(
             from pathlib import Path
 
             _emit("factcheck:init")
-            base = Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_02_review"
-            p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
-            plan = run_json_with_provider(
+            if style_key == "post_style_2":
+                # Non-OpenAI path also skips FC for style 2
+                try:
+                    log("ℹ️ Fact-check skipped", "Style 2 does not support fact-checking")
+                except Exception:
+                    pass
+                points = []
+            else:
+                base = Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_02_review"
+                p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
+                plan = run_json_with_provider(
                 p_ident
                 + "\n\n<format>\nВерни строго JSON-объект ResearchPlan без пояснений.\n</format>\n",
                 f"<post>\n{content}\n</post>\n<lang>{lang}</lang>",
                 ResearchPlan,
                 speed="fast",
             )
-            points = plan.points or []
+                points = plan.points or []
             # Fallback: if Gemini/Claude produced empty plan, retry on heavy model with strict JSON requirement and min points
             if not points:
                 try:
@@ -548,10 +577,13 @@ def generate_post(
 
             cfg = load_config(__file__)
             pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
-            p_iter = (base / "iterative_research.md").read_text(encoding="utf-8")
-            p_suff = (base / "sufficiency.md").read_text(encoding="utf-8")
-            p_rec = (base / "recommendation.md").read_text(encoding="utf-8")
-            p_qs = (base / "query_synthesizer.md").read_text(encoding="utf-8")
+            if style_key == "post_style_1":
+                p_iter = (base / "iterative_research.md").read_text(encoding="utf-8")
+                p_suff = (base / "sufficiency.md").read_text(encoding="utf-8")
+                p_rec = (base / "recommendation.md").read_text(encoding="utf-8")
+                p_qs = (base / "query_synthesizer.md").read_text(encoding="utf-8")
+            else:
+                p_iter = p_suff = p_rec = p_qs = None
 
             async def _run_with_retries(agent, inp: str, attempts: int = 3, base_delay: float = 1.0):
                 for i in range(attempts):
@@ -566,7 +598,7 @@ def generate_post(
                 # Query synthesis
                 cfg_pref = ",".join(pref)
                 qp = run_json_with_provider(
-                    p_qs,
+                    (p_qs or ""),
                     f"<input>\n<point>{p.model_dump_json()}</point>\n<preferred_domains>{cfg_pref}</preferred_domains>\n</input>",
                     QueryPack,
                     speed="fast",
@@ -619,7 +651,7 @@ def generate_post(
 
                 rr = _TmpReport(p.id, notes)
                 rec = run_json_with_provider(
-                    p_rec or "",
+                    (p_rec or ""),
                     f"<input>\n<point>{p.model_dump_json()}</point>\n<report>{rr.model_dump_json()}</report>\n<lang>{lang}</lang>\n</input>",
                     Recommendation,
                     speed="fast",
@@ -677,7 +709,10 @@ def generate_post(
         if needs_rewrite:
             _emit("rewrite:init")
             from pathlib import Path
-            p_rewrite = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "rewrite.md").read_text(encoding="utf-8")
+            if style_key == "post_style_1":
+                p_rewrite = (Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_03_rewriting" / "rewrite.md").read_text(encoding="utf-8")
+            else:
+                p_rewrite = ""
             rw_input = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
@@ -692,9 +727,9 @@ def generate_post(
             log("🛠️ Rewrite · Output", final_content)
 
     from pathlib import Path
-    if use_refine:
+    if use_refine and style_key == "post_style_1":
         _emit("refine:init")
-        p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
+        p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
         refine_input = (
             "<input>\n"
             f"<topic>{topic}</topic>\n"
@@ -707,7 +742,7 @@ def generate_post(
         final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
         log("✨ Refine · Output", final_content)
     else:
-        log("✨ Refine · Skipped", "Refine step disabled by configuration")
+        log("✨ Refine · Skipped", "Refine disabled by configuration or unsupported by style")
 
     # Save final (optional)
     _emit("save:init")
@@ -732,6 +767,7 @@ def generate_post(
         f"# 🧾 Generation Log\n\n"
         f"- provider: {_prov}\n"
         f"- lang: {lang}\n"
+        f"- style: {style_key}\n"
         f"- model_heavy: {os.getenv('OPENAI_MODEL' if _prov=='openai' else ('GEMINI_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}\n"
         f"- model_fast: {os.getenv('OPENAI_FAST_MODEL' if _prov=='openai' else ('GEMINI_FAST_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}\n"
         f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"

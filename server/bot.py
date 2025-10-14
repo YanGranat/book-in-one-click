@@ -112,6 +112,7 @@ class GenerateStates(StatesGroup):
     ChoosingDepth = State()
     ChoosingRefine = State()
     ChoosingGenType = State()
+    ChoosingPostStyle = State()
     ChoosingSeriesPreset = State()
     ChoosingSeriesCount = State()
 
@@ -353,6 +354,16 @@ def build_gentype_keyboard(ui_lang: str, *, allow_series: bool) -> InlineKeyboar
     return kb
 
 
+def build_post_style_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    ru = _is_ru(ui_lang)
+    kb.add(
+        InlineKeyboardButton(text=("Стиль 1" if ru else "Style 1"), callback_data="set:post_style:post_style_1"),
+        InlineKeyboardButton(text=("Стиль 2" if ru else "Style 2"), callback_data="set:post_style:post_style_2"),
+    )
+    return kb
+
+
 def _stars_enabled() -> bool:
     # Enable Stars only when explicitly configured via env
     flag = os.getenv("TELEGRAM_STARS_ENABLED", "").strip().lower()
@@ -540,6 +551,7 @@ def create_dispatcher() -> Dispatcher:
         refine_enabled = False
         fc_enabled = False
         fc_depth = 2
+        post_style = (data.get("post_style") or "post_style_1").strip().lower()
         try:
             if message.from_user:
                 refine_enabled = await get_refine_enabled(message.from_user.id)
@@ -618,10 +630,12 @@ def create_dispatcher() -> Dispatcher:
                 )
             provider_line_ru = (f"- Провайдер: {_prov_name(prov, True)}\n" if is_superadmin else "")
             logs_line_ru = (f"- Логи генерации: {'вкл' if logs_enabled else 'выкл'}\n" if (is_superadmin or is_admin) else "")
+            style_line_ru = f"- Стиль поста: {'Стиль 1' if post_style == 'post_style_1' else 'Стиль 2'}\n"
             settings_block = (
                 "<b>Текущие настройки:</b>\n"
                 f"{provider_line_ru}"
                 f"{logs_line_ru}"
+                f"{style_line_ru}"
                 f"- Язык генерации: {_lang_human(gen_lang, True)}\n"
                 f"- Публичные результаты: {'да' if not incognito else 'нет'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>GitHub проекта</a>"
@@ -677,10 +691,12 @@ def create_dispatcher() -> Dispatcher:
                 )
             provider_line_en = (f"- Provider: {_prov_name(prov, False)}\n" if is_superadmin else "")
             logs_line_en = (f"- Generation logs: {'on' if logs_enabled else 'off'}\n" if (is_superadmin or is_admin) else "")
+            style_line_en = f"- Post style: {'Style 1' if post_style == 'post_style_1' else 'Style 2'}\n"
             settings_block = (
                 "<b>Current settings:</b>\n"
                 f"{provider_line_en}"
                 f"{logs_line_en}"
+                f"{style_line_en}"
                 f"- Generation language: {_lang_human(gen_lang, False)}\n"
                 f"- Public results: {'yes' if not incognito else 'no'}"
                 + "\n\n<a href='https://github.com/YanGranat/book-in-one-click'>Project GitHub</a>"
@@ -1079,18 +1095,39 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Недоступно." if ru else "Not available."))
             return
         if kind == "post":
-            # Superadmin: ask FC, then depth, then refine, then topic
-            if is_superadmin:
-                await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="post", next_after_fc="post")
-                prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
-                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
-                return
-            # Admins/users: ask topic directly
-            await state.update_data(gen_article=False, series_mode=None, series_count=None)
-            prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
-            await GenerateStates.WaitingTopic.set()
+            # Ask for post style for all roles first
+            await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="post")
+            prompt = "Выберите стиль поста:" if ru else "Choose post style:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_post_style_keyboard(ui_lang))
+            await GenerateStates.ChoosingPostStyle.set()
             return
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:post_style:"), state=GenerateStates.ChoosingPostStyle)  # type: ignore
+    async def cb_post_style(query: types.CallbackQuery, state: FSMContext):
+        style = (query.data or "").split(":")[-1]
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ru = _is_ru(ui_lang)
+        await query.answer()
+        # Persist style in FSM
+        await state.update_data(post_style=style)
+        # Role checks
+        is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+        # For Style 1 and superadmin: ask FC -> Depth -> Refine -> Topic
+        if style == "post_style_1" and is_superadmin:
+            await state.update_data(next_after_fc="post")
+            prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+            return
+        # For Style 2 or non-superadmin: go directly to topic
+        prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+        await GenerateStates.WaitingTopic.set()
+
+        # end of post flow branch; other branches below
+        return
+
         if kind == "article":
             # Articles only support OpenAI for now (due to OpenAI Agents SDK dependency)
             await state.update_data(series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
@@ -2570,11 +2607,20 @@ def create_dispatcher() -> Dispatcher:
                     fc_depth_pref = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
                 except Exception:
                     fc_depth_pref = 2
+                # Style-dependent pricing: Style 2 ignores FC/Refine
+                try:
+                    post_style = (data.get("post_style") or "post_style_1").strip().lower()
+                except Exception:
+                    post_style = "post_style_1"
+                if post_style == "post_style_2":
+                    refine_pref = False
+                    fc_enabled_pref = False
+                    fc_depth_pref = 0
                 fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
                 unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
                 try:
                     import sys as _sys
-                    print(f"[FLOW][confirm_show] uid={getattr(getattr(message,'from_user',None),'id',None)} cost={unit_cost} refine={refine_pref} fc={fc_enabled_pref} depth={fc_depth_pref}", file=_sys.stderr, flush=True)
+                    print(f"[FLOW][confirm_show] uid={getattr(getattr(message,'from_user',None),'id',None)} cost={unit_cost} refine={refine_pref} fc={fc_enabled_pref} depth={fc_depth_pref} style={post_style}", file=_sys.stderr, flush=True)
                 except Exception:
                     pass
                 confirm_txt = (
@@ -2622,6 +2668,15 @@ def create_dispatcher() -> Dispatcher:
                 fc_depth_pref = await get_factcheck_depth(message.from_user.id) if message.from_user else 2
             except Exception:
                 fc_depth_pref = 2
+            # Style-dependent pricing: Style 2 ignores FC/Refine
+            try:
+                post_style = (data.get("post_style") or "post_style_1").strip().lower()
+            except Exception:
+                post_style = "post_style_1"
+            if post_style == "post_style_2":
+                refine_pref = False
+                fc_enabled_pref = False
+                fc_depth_pref = 0
             fc_extra = (3 if int(fc_depth_pref or 0) >= 3 else 1) if fc_enabled_pref else 0
             unit_cost = 1 + fc_extra + (1 if refine_pref else 0)
             # Only attempt DB charge when not already marked as charged (non-admin)
@@ -2691,6 +2746,7 @@ def create_dispatcher() -> Dispatcher:
                         "topic": topic,
                         "lang": (data.get("gen_lang") or "auto"),
                         "provider": (data.get("provider") or "openai"),
+                        "style": (data.get("post_style") or "post_style_1"),
                         "factcheck": bool(data.get("factcheck")),
                         "depth": int(data.get("research_iterations") or 0) if bool(data.get("factcheck")) else 0,
                         "refine": bool(await get_refine_enabled(message.from_user.id) if message.from_user else False),
@@ -2778,6 +2834,7 @@ def create_dispatcher() -> Dispatcher:
                 "topic": topic,
                 "provider": prov or "openai",
                 "lang": eff_lang,
+                "style": (data.get("post_style") or "post_style_1"),
                 "incognito": (await get_incognito(message.from_user.id)) if message.from_user else False,
                 "refine": refine_enabled,
             }
@@ -2809,6 +2866,12 @@ def create_dispatcher() -> Dispatcher:
                     pass
 
             timeout_s = int(os.getenv("GEN_TIMEOUT_S", "2400"))
+            # Respect style: force fc off for style 2
+            post_style = (data.get("post_style") or "post_style_1").strip().lower()
+            if post_style == "post_style_2":
+                fc_enabled_state = False
+                depth = None
+
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
@@ -2816,6 +2879,7 @@ def create_dispatcher() -> Dispatcher:
                         topic,
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
+                        style=post_style,
                         factcheck=True,
                         factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "7")),
                         research_iterations=int(depth or 2),
@@ -2832,6 +2896,7 @@ def create_dispatcher() -> Dispatcher:
                         topic,
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
+                        style=post_style,
                         factcheck=False,
                         job_meta=job_meta,
                         on_progress=_on_progress,
@@ -3188,7 +3253,7 @@ def create_dispatcher() -> Dispatcher:
             eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
             try:
                 import sys as _sys
-                print(f"[FLOW][gen_start] uid={getattr(getattr(query,'from_user',None),'id',None)} topic_len={len(topic)} lang={eff_lang} prov={prov}", file=_sys.stderr, flush=True)
+                print(f"[FLOW][gen_start] uid={getattr(getattr(query,'from_user',None),'id',None)} topic_len={len(topic)} lang={eff_lang} prov={prov} style={post_style}", file=_sys.stderr, flush=True)
             except Exception:
                 pass
             
@@ -3200,8 +3265,9 @@ def create_dispatcher() -> Dispatcher:
                         refine_enabled = await get_refine_enabled(query.from_user.id)
                 except Exception:
                     refine_enabled = False
-            
-            # Fact-check decision (superadmin only)
+            # Style selection (mandatory before topic)
+            post_style = (data.get("post_style") or "post_style_1").strip().lower()
+            # Fact-check decision (superadmin only) and style-aware
             fc_enabled_state = False
             depth = None
             if is_superadmin_local:
@@ -3220,6 +3286,11 @@ def create_dispatcher() -> Dispatcher:
                         depth = 2
                 if not fc_enabled_state:
                     depth = None
+            # Force off for style 2
+            if post_style == "post_style_2":
+                refine_enabled = False
+                fc_enabled_state = False
+                depth = None
             # Create Job (running) and ensure User exists
             job_id = 0
             db_user_id = None  # Track User.id for job_meta
@@ -3235,6 +3306,7 @@ def create_dispatcher() -> Dispatcher:
                             "topic": topic,
                             "lang": eff_lang,
                             "provider": prov or "openai",
+                            "style": post_style,
                             "factcheck": bool(fc_enabled_state),
                             "depth": int(depth or 0) if fc_enabled_state else 0,
                             "refine": bool(refine_enabled),
@@ -3254,6 +3326,7 @@ def create_dispatcher() -> Dispatcher:
                 "topic": topic,
                 "provider": prov or "openai",
                 "lang": eff_lang,
+                "style": post_style,
                 "incognito": (await get_incognito(query.from_user.id)) if query.from_user else False,
                 "refine": refine_enabled,
             }
@@ -3264,13 +3337,13 @@ def create_dispatcher() -> Dispatcher:
             if fc_enabled_state:
                 fut = loop.run_in_executor(
                     None,
-                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=True, factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "3")), research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
+                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), style=post_style, factcheck=True, factcheck_max_items=int(os.getenv("FC_MAX_ITEMS", "3")), research_iterations=int(depth or 2), job_meta=job_meta, use_refine=refine_enabled),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
             else:
                 fut = loop.run_in_executor(
                     None,
-                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), factcheck=False, job_meta=job_meta, use_refine=refine_enabled),
+                    lambda: generate_post(topic, lang=eff_lang, provider=((prov if prov != "auto" else "openai") or "openai"), style=post_style, factcheck=False, job_meta=job_meta, use_refine=refine_enabled),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
             with open(path, "rb") as f:
