@@ -1120,16 +1120,21 @@ def create_dispatcher() -> Dispatcher:
         # For Style 1 and superadmin: ask FC -> Depth -> Refine -> Topic
         if style == "post_style_1" and is_superadmin:
             await state.update_data(next_after_fc="post")
-            prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
-            return
+                prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
+                await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+                return
         # For Style 2 or non-superadmin: go directly to topic
-        prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
-        await GenerateStates.WaitingTopic.set()
+        # Ensure no residual FC/refine flow flags leak in
+        try:
+            await state.update_data(next_after_fc=None, fc_ready=False)
+        except Exception:
+            pass
+            prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+            await GenerateStates.WaitingTopic.set()
 
         # end of post flow branch; other branches below
-        return
+            return
 
         if kind == "article":
             # Articles only support OpenAI for now (due to OpenAI Agents SDK dependency)
@@ -3293,7 +3298,7 @@ def create_dispatcher() -> Dispatcher:
             if post_style == "post_style_2":
                 refine_enabled = False
                 fc_enabled_state = False
-                depth = None
+                    depth = None
             # Create Job (running) and ensure User exists
             job_id = 0
             db_user_id = None  # Track User.id for job_meta
