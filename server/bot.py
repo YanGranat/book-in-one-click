@@ -17,6 +17,24 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardRemove
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 
+def _stars_per_credit() -> int:
+    try:
+        return max(1, int(os.getenv("STARS_PER_CREDIT", "1")))
+    except Exception:
+        return 1
+
+def _stars_buy_prompt(ui_lang: str) -> str:
+    spc = _stars_per_credit()
+    return (f"Купить кредиты за ⭐? (1 кредит = {spc}⭐)" if _is_ru(ui_lang) else f"Buy credits with ⭐? (1 credit = {spc}⭐)")
+
+def _stars_select_prompt(ui_lang: str) -> str:
+    spc = _stars_per_credit()
+    return (f"Выберите пакет кредитов (1 кредит = {spc}⭐):" if _is_ru(ui_lang) else f"Choose a credits pack (1 credit = {spc}⭐):")
+
+def _stars_info_line(ui_lang: str) -> str:
+    spc = _stars_per_credit()
+    return (f"Купить за ⭐ (1 кредит = {spc}⭐):" if _is_ru(ui_lang) else f"Buy with ⭐ (1 credit = {spc}⭐):")
+
 from utils.env import load_env_from_root
 # i18n and language detection
 from utils.lang import detect_lang_from_text
@@ -152,21 +170,14 @@ async def _resolve_ui_lang(state: FSMContext, user_id: Optional[int]) -> str:
 
 def build_buy_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup()
-    # Packs: 10, 50, 250, 500, 1000, 2500 credits at 1 star per credit
-    if _is_ru(ui_lang):
-        kb.add(InlineKeyboardButton(text="Купить 10 кредитов — 10⭐", callback_data="buy:stars:10"))
-        kb.add(InlineKeyboardButton(text="Купить 50 кредитов — 50⭐", callback_data="buy:stars:50"))
-        kb.add(InlineKeyboardButton(text="Купить 250 кредитов — 250⭐", callback_data="buy:stars:250"))
-        kb.add(InlineKeyboardButton(text="Купить 500 кредитов — 500⭐", callback_data="buy:stars:500"))
-        kb.add(InlineKeyboardButton(text="Купить 1000 кредитов — 1000⭐", callback_data="buy:stars:1000"))
-        kb.add(InlineKeyboardButton(text="Купить 2500 кредитов — 2500⭐", callback_data="buy:stars:2500"))
-    else:
-        kb.add(InlineKeyboardButton(text="Buy 10 credits — 10⭐", callback_data="buy:stars:10"))
-        kb.add(InlineKeyboardButton(text="Buy 50 credits — 50⭐", callback_data="buy:stars:50"))
-        kb.add(InlineKeyboardButton(text="Buy 250 credits — 250⭐", callback_data="buy:stars:250"))
-        kb.add(InlineKeyboardButton(text="Buy 500 credits — 500⭐", callback_data="buy:stars:500"))
-        kb.add(InlineKeyboardButton(text="Buy 1000 credits — 1000⭐", callback_data="buy:stars:1000"))
-        kb.add(InlineKeyboardButton(text="Buy 2500 credits — 2500⭐", callback_data="buy:stars:2500"))
+    # Packs derived; stars computed from STARS_PER_CREDIT
+    spc = _stars_per_credit()
+    packs = [10, 50, 250, 500, 1000, 2500]
+    ru = _is_ru(ui_lang)
+    for p in packs:
+        stars = p * spc
+        text = (f"Купить {p} кредитов — {stars}⭐" if ru else f"Buy {p} credits — {stars}⭐")
+        kb.add(InlineKeyboardButton(text=text, callback_data=f"buy:stars:{p}"))
     return kb
 
 
@@ -1318,7 +1329,7 @@ def create_dispatcher() -> Dispatcher:
                         await dp.bot.send_message(chat_id_series, warn)
                         if _stars_enabled():
                             try:
-                                await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if ru else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
+                                await dp.bot.send_message(chat_id_series, _stars_buy_prompt("ru" if ru else "en"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
                             except Exception:
                                 pass
                         await state.finish()
@@ -1333,7 +1344,7 @@ def create_dispatcher() -> Dispatcher:
                     await dp.bot.send_message(chat_id_series, warn)
                     if _stars_enabled():
                         try:
-                            await dp.bot.send_message(chat_id_series, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if ru else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
+                            await dp.bot.send_message(chat_id_series, _stars_buy_prompt("ru" if ru else "en"), reply_markup=build_buy_keyboard("ru" if ru else "en"))
                         except Exception:
                             pass
                     await state.finish()
@@ -2139,7 +2150,7 @@ def create_dispatcher() -> Dispatcher:
                                     await message.answer(warn)
                                     if _stars_enabled():
                                         try:
-                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                            await message.answer(_stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                                         except Exception:
                                             pass
                                     await state.finish()
@@ -2153,7 +2164,7 @@ def create_dispatcher() -> Dispatcher:
                                 await message.answer(warn)
                                 if _stars_enabled():
                                     try:
-                                        await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                        await message.answer(_stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                                     except Exception:
                                         pass
                                 await state.finish()
@@ -2375,7 +2386,7 @@ def create_dispatcher() -> Dispatcher:
                                         await message.answer(warn)
                                         if _stars_enabled():
                                             try:
-                                                await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                                await message.answer(_stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                                             except Exception:
                                                 pass
                                         await state.finish()
@@ -2391,7 +2402,7 @@ def create_dispatcher() -> Dispatcher:
                                     await message.answer(warn)
                                     if _stars_enabled():
                                         try:
-                                            await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                            await message.answer(_stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                                         except Exception:
                                             pass
                                     await state.finish()
@@ -2427,7 +2438,7 @@ def create_dispatcher() -> Dispatcher:
                             await message.answer(("Недостаточно кредитов. Используйте /credits для пополнения." if _is_ru(ui_lang) else "Insufficient credits. Use /credits to top up."))
                             if _stars_enabled():
                                 try:
-                                    await message.answer(("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                    await message.answer(_stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                                 except Exception:
                                     pass
                             await state.finish()
@@ -2813,7 +2824,7 @@ def create_dispatcher() -> Dispatcher:
                         await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                         if _stars_enabled():
                             try:
-                                await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                await dp.bot.send_message(chat_id, _stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                             except Exception:
                                 pass
                         await state.finish()
@@ -2831,7 +2842,7 @@ def create_dispatcher() -> Dispatcher:
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                     if _stars_enabled():
                         try:
-                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                            await dp.bot.send_message(chat_id, _stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                         except Exception:
                             pass
                     await state.finish()
@@ -3285,7 +3296,7 @@ def create_dispatcher() -> Dispatcher:
                         await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                         if _stars_enabled():
                             try:
-                                await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 50⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 50⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                                await dp.bot.send_message(chat_id, _stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                             except Exception:
                                 pass
                         await state.finish()
@@ -3332,8 +3343,8 @@ def create_dispatcher() -> Dispatcher:
                     await dp.bot.send_message(chat_id, warn, reply_markup=ReplyKeyboardRemove())
                     if _stars_enabled():
                         try:
-                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 1⭐)"), reply_markup=build_buy_keyboard(ui_lang))
-                            await dp.bot.send_message(chat_id, ("Купить кредиты за ⭐? (1 кредит = 10⭐)" if _is_ru(ui_lang) else "Buy credits with ⭐? (1 credit = 10⭐)"), reply_markup=build_buy_keyboard(ui_lang))
+                            await dp.bot.send_message(chat_id, _stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
+                            await dp.bot.send_message(chat_id, _stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
                         except Exception:
                             pass
                     await state.finish()
@@ -3931,7 +3942,7 @@ def create_dispatcher() -> Dispatcher:
         if _stars_enabled():
             try:
                 await message.answer(
-                    txt + ("\nХотите купить кредиты за ⭐? (1 кредит = 1⭐)" if _is_ru(ui_lang) else "\nWant to buy credits with ⭐? (1 credit = 1⭐)"),
+                    txt + ("\n" + _stars_buy_prompt(ui_lang)),
                     reply_markup=build_buy_keyboard(ui_lang),
                 )
             except Exception:
@@ -3944,7 +3955,7 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = await _resolve_ui_lang(state, message.from_user.id if message.from_user else None)
         if _stars_enabled():
             await message.answer(
-                (("Выберите пакет кредитов (1 кредит = 1⭐):" if _is_ru(ui_lang) else "Choose a credits pack (1 credit = 1⭐):")),
+                (_stars_select_prompt(ui_lang)),
                 reply_markup=build_buy_keyboard(ui_lang),
             )
         else:
@@ -3992,8 +4003,9 @@ def create_dispatcher() -> Dispatcher:
             await query.answer("Not configured", show_alert=True)
             return
         try:
-            prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * 1)]
-            payload = f"credits={pack}&stars={pack*1}"
+            spc = _stars_per_credit()
+            prices = [LabeledPrice(label=f"Credits x{pack}", amount=pack * spc)]
+            payload = f"credits={pack}&stars={pack*spc}"
             title = f"Credits x{pack}"
             description = "Buy generation credits using Telegram Stars"
             await dp.bot.send_invoice(
@@ -4585,9 +4597,9 @@ def create_dispatcher() -> Dispatcher:
             except Exception:
                 bal = 0
         if _is_ru(ui_lang):
-            txt = [f"Баланс: {int(bal)} кредит(ов).", "", "Цены:", "- Пост: 10 кредитов", "- Статья: 250 кредитов", "", "Купить за ⭐ (1 кредит = 1⭐):"]
+            txt = [f"Баланс: {int(bal)} кредит(ов).", "", "Цены:", "- Пост: 10 кредитов", "- Статья: 250 кредитов", "", _stars_info_line(ui_lang)]
         else:
-            txt = [f"Balance: {int(bal)} credits.", "", "Pricing:", "- Post: 10 credits", "- Article: 250 credits", "", "Buy with ⭐ (1 credit = 1⭐):"]
+            txt = [f"Balance: {int(bal)} credits.", "", "Pricing:", "- Post: 10 credits", "- Article: 250 credits", "", _stars_info_line(ui_lang)]
         try:
             await message.answer("\n".join(txt), reply_markup=build_buy_keyboard(ui_lang))
         except Exception:
