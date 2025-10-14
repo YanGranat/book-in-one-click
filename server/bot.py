@@ -32,6 +32,7 @@ from .kv import set_gen_lang, get_gen_lang
 from .kv import set_ui_lang, get_ui_lang
 from .kv import set_refine_enabled, get_refine_enabled
 from .kv import push_history, get_history, clear_history, rate_allow
+from .kv import usage_get_daily, usage_inc_daily
 from .kv import chat_clear
 from .kv import is_chat_running, mark_chat_running, unmark_chat_running
 # Chat runner
@@ -1176,7 +1177,7 @@ def create_dispatcher() -> Dispatcher:
         # end of post flow branch; other branches below
         return
 
-        if kind == "article":
+        if False and kind == "article":
             # Articles only support OpenAI for now (due to OpenAI Agents SDK dependency)
             await state.update_data(series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
             prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
@@ -1321,6 +1322,7 @@ def create_dispatcher() -> Dispatcher:
                             except Exception:
                                 pass
                         await state.finish()
+                        await unmark_chat_running(chat_id_series)
                         return
             if not charged and query.from_user:
                 ok, remaining = await charge_credits_kv(query.from_user.id, int(total))
@@ -1335,11 +1337,13 @@ def create_dispatcher() -> Dispatcher:
                         except Exception:
                             pass
                     await state.finish()
+                    await unmark_chat_running(chat_id_series)
                     return
         except SQLAlchemyError:
             await query.answer()
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Временная ошибка БД. Попробуйте позже." if ru else "Temporary DB error. Try later."))
             await state.finish()
+            await unmark_chat_running(chat_id_series)
             return
         # Mark precharged and ask for topic
         await state.update_data(series_mode="fixed", series_count=int(count), series_precharged_amount=int(total))
@@ -2082,6 +2086,18 @@ def create_dispatcher() -> Dispatcher:
                 # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
                 eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
 
+                # Admin/article limits
+                try:
+                    if message.from_user and message.from_user.id in ADMIN_IDS:
+                        used_articles = await usage_get_daily(message.from_user.id, "article")
+                        if used_articles >= int(os.getenv("LIMIT_ADMIN_ARTICLES_PER_DAY", "10")):
+                            await message.answer("Дневной лимит статей для админа исчерпан." if _is_ru(ui_lang) else "Admin daily articles limit exceeded.")
+                            await state.finish(); await unmark_chat_running(chat_id); return
+                        if used_articles >= int(int(os.getenv("LIMIT_ADMIN_ARTICLES_PER_DAY", "10")) * 0.9):
+                            await message.answer("Внимание: использовано 90% суточного лимита статей (админ)." if _is_ru(ui_lang) else "Warning: 90% of admin daily articles limit used.")
+                except Exception:
+                    pass
+
                 # Create Job row (article) and ensure User exists
                 job_id = 0
                 db_user_id = None
@@ -2217,6 +2233,13 @@ def create_dispatcher() -> Dispatcher:
                         _tb.print_exc()
                     except Exception:
                         pass
+                # Increment usage
+                try:
+                    if message.from_user:
+                        await usage_inc_daily(message.from_user.id, "article", 1)
+                except Exception:
+                    pass
+
                 # Send log if enabled
                 try:
                     if message.from_user:
@@ -2285,6 +2308,18 @@ def create_dispatcher() -> Dispatcher:
                 gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
                 # Preserve 'auto' to let prompts choose language by topic; don't coerce to ru/en here
                 eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
+
+                # Admin/series limits
+                try:
+                    if message.from_user and message.from_user.id in ADMIN_IDS:
+                        used_series = await usage_get_daily(message.from_user.id, "series")
+                        if used_series >= int(os.getenv("LIMIT_ADMIN_SERIES_PER_DAY", "20")):
+                            await message.answer("Дневной лимит серий для админа исчерпан." if _is_ru(ui_lang) else "Admin daily series limit exceeded.")
+                            await state.finish(); await unmark_chat_running(chat_id); return
+                        if used_series >= int(int(os.getenv("LIMIT_ADMIN_SERIES_PER_DAY", "20")) * 0.9):
+                            await message.answer("Внимание: использовано 90% суточного лимита серий (админ)." if _is_ru(ui_lang) else "Warning: 90% of admin daily series limit used.")
+                except Exception:
+                    pass
 
                 # Preferences
                 try:
@@ -2517,6 +2552,13 @@ def create_dispatcher() -> Dispatcher:
                 )
                 aggregate_path = await _asyncio.wait_for(fut, timeout=timeout_s)
 
+                # Increment usage counter (series)
+                try:
+                    if message.from_user:
+                        await usage_inc_daily(message.from_user.id, "series", 1)
+                except Exception:
+                    pass
+
                 # Send aggregate result
                 try:
                     with open(aggregate_path, "rb") as f:
@@ -2645,6 +2687,17 @@ def create_dispatcher() -> Dispatcher:
         # NOTE: Don't mark chat as running yet - only after confirmation
         is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
         if not is_admin:
+            # Daily per-category limits (non-admin users)
+            try:
+                used_posts = await usage_get_daily(message.from_user.id, "post")
+                # 90% warning and hard cap
+                if used_posts >= int(os.getenv("LIMIT_USER_POSTS_PER_DAY", "100")):
+                    await message.answer("Дневной лимит постов исчерпан." if _is_ru(ui_lang) else "Daily posts limit exceeded.")
+                    return
+                if used_posts >= int(int(os.getenv("LIMIT_USER_POSTS_PER_DAY", "100")) * 0.9):
+                    await message.answer("Внимание: использовано 90% суточного лимита постов." if _is_ru(ui_lang) else "Warning: 90% of daily posts limit used.")
+            except Exception:
+                pass
             try:
                 ui_lang_local = (data.get("ui_lang") or "ru").strip()
                 # Compute dynamic price for single post
@@ -2705,9 +2758,18 @@ def create_dispatcher() -> Dispatcher:
         from sqlalchemy.exc import SQLAlchemyError
         try:
             charged = False
-            # Admins generate for free
+            # Admins generate for free; also enforce admin daily caps
             if message.from_user and message.from_user.id in ADMIN_IDS:
                 charged = True
+                try:
+                    used_posts = await usage_get_daily(message.from_user.id, "post")
+                    if used_posts >= int(os.getenv("LIMIT_ADMIN_POSTS_PER_DAY", "100")):
+                        await message.answer("Дневной лимит постов для админа исчерпан." if _is_ru(ui_lang) else "Admin daily posts limit exceeded.")
+                        await state.finish(); await unmark_chat_running(chat_id); return
+                    if used_posts >= int(int(os.getenv("LIMIT_ADMIN_POSTS_PER_DAY", "100")) * 0.9):
+                        await message.answer("Внимание: использовано 90% суточного лимита постов (админ)." if _is_ru(ui_lang) else "Warning: 90% of admin daily posts limit used.")
+                except Exception:
+                    pass
             # Compute price based on current preferences
             try:
                 refine_pref = await get_refine_enabled(message.from_user.id) if message.from_user else False
@@ -2957,6 +3019,13 @@ def create_dispatcher() -> Dispatcher:
                     ),
                 )
                 path = await asyncio.wait_for(fut, timeout=timeout_s)
+            # Increment usage counter (post)
+            try:
+                if message.from_user:
+                    await usage_inc_daily(message.from_user.id, "post", 1)
+            except Exception:
+                pass
+
             # Send main result
             with open(path, "rb") as f:
                 cap = f"Готово: {path.name}" if _is_ru(ui_lang) else f"Done: {path.name}"

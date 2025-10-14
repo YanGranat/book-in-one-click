@@ -249,6 +249,60 @@ async def rate_allow(telegram_id: int, scope: str = "gen", per_hour: int = 10, p
         return True
 
 
+# ---- Daily usage counters per category (e.g., post/series/article) ----
+
+def _today_ymd() -> str:
+    try:
+        import time as _t
+        return _t.strftime("%Y%m%d", _t.gmtime())
+    except Exception:
+        return "00000000"
+
+
+async def usage_get_daily(telegram_id: int, category: str) -> int:
+    r = get_redis()
+    ymd = _today_ymd()
+    key = f"{kv_prefix()}:usage:{(category or 'misc').strip().lower()}:d:{int(telegram_id)}:{ymd}"
+    try:
+        val = await r.get(key)
+        if val is None:
+            return 0
+        return int(val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else int(val))
+    except Exception:
+        try:
+            return int(val) if val is not None else 0  # type: ignore[name-defined]
+        except Exception:
+            return 0
+
+
+async def usage_inc_daily(telegram_id: int, category: str, inc: int = 1) -> int:
+    r = get_redis()
+    ymd = _today_ymd()
+    key = f"{kv_prefix()}:usage:{(category or 'misc').strip().lower()}:d:{int(telegram_id)}:{ymd}"
+    try:
+        newv = await r.incrby(key, int(inc))
+        # Keep for 3 days; date is baked in key so rollover is natural
+        try:
+            await r.expire(key, 60 * 60 * 24 * 3)
+        except Exception:
+            pass
+        return int(newv)
+    except Exception:
+        # Fallback to set/get path
+        try:
+            cur = await r.get(key)
+            curi = int(cur.decode("utf-8")) if isinstance(cur, (bytes, bytearray)) else int(cur or 0)
+        except Exception:
+            curi = 0
+        newi = curi + int(inc)
+        try:
+            await r.set(key, str(newi))
+            await r.expire(key, 60 * 60 * 24 * 3)
+        except Exception:
+            pass
+        return int(newi)
+
+
 async def get_balance_kv(telegram_id: int) -> int:
     r = get_redis()
     key = f"{kv_prefix()}:credits:{telegram_id}"
