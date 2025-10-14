@@ -199,18 +199,20 @@ def main() -> None:
     atl_agent = build_article_title_lead_writer_agent()
     for idx, sec in enumerate(outline.sections, start=1):
         _lbl = _section_label(idx)
+        if body_lines:
+            body_lines.append("")
         if _lbl:
-            body_lines.append(f"\n\n## {_lbl} {sec.title}\n\n")
+            body_lines.append(f"## {_lbl} {sec.title}")
         else:
-            body_lines.append(f"\n\n## {sec.title}\n\n")
+            body_lines.append(f"## {sec.title}")
         try:
             sec_md_parts = []
             for sub in sec.subsections:
                 d = drafts_by_subsection.get((sec.id, sub.id))
                 sub_title = d.title if d and d.title else sub.title
-                sub_md = d.markdown if d else ""
-                sec_md_parts.append(f"\n### {sub_title}\n\n{sub_md}\n")
-            sec_body_text = "".join(sec_md_parts)
+                sub_md = (d.markdown if d else "").strip()
+                sec_md_parts.append(f"### {sub_title}\n\n{sub_md}")
+            sec_body_text = "\n\n".join(sec_md_parts)
             sec_user = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
@@ -222,14 +224,19 @@ def main() -> None:
             sec_lead_obj = Runner.run_sync(atl_agent, sec_user).final_output  # type: ignore
             sec_lead = (getattr(sec_lead_obj, "lead_markdown", "") or "").strip()
             if sec_lead:
-                body_lines.append(f"{sec_lead}\n\n")
+                body_lines.append("")
+                body_lines.append(sec_lead)
         except Exception as e:
             print(f"[CLI][SECTION_LEAD_ERR] {sec.id}: {type(e).__name__}: {e}", file=_sys.stderr)
         for sub in sec.subsections:
             d = drafts_by_subsection.get((sec.id, sub.id))
             sub_title = d.title if d and d.title else sub.title
-            sub_md = d.markdown if d else ""
-            body_lines.append(f"\n### {sub_title}\n\n{sub_md}\n")
+            sub_md = (d.markdown if d else "").strip()
+            body_lines.append("")
+            body_lines.append(f"### {sub_title}")
+            if sub_md:
+                body_lines.append("")
+                body_lines.append(sub_md)
 
     toc_text = os.linesep.join(toc_lines)
     body_text = os.linesep.join(body_lines)
@@ -252,9 +259,10 @@ def main() -> None:
     _log_append(logs, "🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
 
     title_text = atl.title or (outline.title or topic)
+    lead_text = (atl.lead_markdown or "").strip()
     article_md = (
         f"# {title_text}\n\n"
-        f"{atl.lead_markdown}\n\n"
+        f"{lead_text}\n\n"
         f"{toc_text}\n\n"
         f"{body_text}\n"
     )
