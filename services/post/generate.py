@@ -357,8 +357,17 @@ def generate_post(
                     log("⚙️ Writer · Model", "model=gpt-5-chat-latest")
                 except Exception:
                     pass
-                # Build user message from writer template, substituting <topic>/<lang>
-                tmpl = (instructions or "").replace("<topic>", topic).replace("<lang>", (lang or "auto").strip())
+                # Build user message strictly from writer.md with only <topic> substituted
+                from pathlib import Path as _P
+                _writer_prompt = (
+                    _P(__file__).resolve().parents[2]
+                    / "prompts"
+                    / "post"
+                    / "post_style_2"
+                    / "module_01_writing"
+                    / "writer.md"
+                ).read_text(encoding="utf-8")
+                tmpl = _writer_prompt.replace("<topic>", topic)
                 res_local = Runner.run_sync(agent, tmpl)
             else:
                 agent = build_post_writer_agent(
@@ -425,6 +434,9 @@ def generate_post(
             else:
                 content = str(content_raw).strip()
         except Exception:
+            # For style 2, do not fallback; surface the error to the caller
+            if style_key == "post_style_2":
+                raise
             content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     else:
         # For non-OpenAI Style 2: send user-only prompt and then wrap with title_json via provider runner
