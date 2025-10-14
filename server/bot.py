@@ -1104,6 +1104,28 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_post_style_keyboard(ui_lang))
             await GenerateStates.ChoosingPostStyle.set()
             return
+        if kind == "series":
+            # Series available only for admins/superadmins; ask preset
+            await state.update_data(gen_article=False, active_flow="series")
+            kb = InlineKeyboardMarkup()
+            kb.add(
+                InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
+                InlineKeyboardButton(text="5", callback_data="set:series_preset:5"),
+            )
+            kb.add(
+                InlineKeyboardButton(text=("Авто" if ru else "Auto"), callback_data="set:series_preset:auto"),
+                InlineKeyboardButton(text=("Кастом" if ru else "Custom"), callback_data="set:series_preset:custom"),
+            )
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Сколько постов?" if ru else "How many posts?"), reply_markup=kb)
+            await GenerateStates.ChoosingSeriesPreset.set()
+            return
+        if kind == "article":
+            # Article flow: mark and ask for topic
+            await state.update_data(series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
+            prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+            await GenerateStates.WaitingTopic.set()
+            return
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:post_style:"), state=GenerateStates.ChoosingPostStyle)  # type: ignore
     async def cb_post_style(query: types.CallbackQuery, state: FSMContext):
         style = (query.data or "").split(":")[-1]
