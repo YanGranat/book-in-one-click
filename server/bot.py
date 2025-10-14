@@ -1124,9 +1124,9 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
             return
         # For Style 2 or non-superadmin: go directly to topic
-        # Ensure no residual FC/refine flow flags leak in
+        # Ensure no residual FC/refine flow flags leak in and mark FC as handled for onboarding
         try:
-            await state.update_data(next_after_fc=None, fc_ready=False)
+            await state.update_data(next_after_fc=None, fc_ready=True, factcheck=False, research_iterations=0)
         except Exception:
             pass
         prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
@@ -2561,7 +2561,12 @@ def create_dispatcher() -> Dispatcher:
             # Ask FC only for superadmin; others proceed without FC
             from .bot_commands import SUPER_ADMIN_ID
             is_super = bool(message.from_user and SUPER_ADMIN_ID is not None and int(message.from_user.id) == int(SUPER_ADMIN_ID))
-            if is_super:
+            # Skip FC prompt if Style 2 selected
+            try:
+                post_style_cur = (data.get("post_style") or "post_style_1").strip().lower()
+            except Exception:
+                post_style_cur = "post_style_1"
+            if is_super and post_style_cur == "post_style_1":
                 prompt = "Включить факт-чекинг?" if _is_ru(ui_lang) else "Enable fact-checking?"
                 await message.answer(prompt, reply_markup=build_yesno_inline("fc", ui_lang))
                 return
