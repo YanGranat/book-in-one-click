@@ -343,7 +343,8 @@ def generate_post(
                 try:
                     obj = _pjson(content_raw)
                     title = str((obj or {}).get("title") or "").strip()
-                    body = str((obj or {}).get("post") or "").strip()
+                    # Support both legacy 'post' and new 'text'
+                    body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                     header = f"**{title}**\n\n" if title else ""
                     content = (header + body).strip()
                 except Exception:
@@ -360,7 +361,7 @@ def generate_post(
                 from utils.json_parse import parse_json_best_effort as _pjson
                 obj = _pjson(txt)
                 title = str((obj or {}).get("title") or "").strip()
-                body = str((obj or {}).get("post") or "").strip()
+                body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                 header = f"**{title}**\n\n" if title else ""
                 content = (header + body).strip()
             except Exception:
