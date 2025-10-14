@@ -369,41 +369,55 @@ def generate_post(
                 res_local = Runner.run_sync(agent, user_message_local_writer)
             content_raw = getattr(res_local, "final_output", "")
             if style_key == "post_style_2":
-                # Second step: title+json via provider JSON mode to ensure strict JSON and cleanup
-                from pathlib import Path as _P
-                tprompt = (
-                    _P(__file__).resolve().parents[2]
-                    / "prompts"
-                    / "post"
-                    / "post_style_2"
-                    / "module_01_writing"
-                    / "title_json.md"
-                ).read_text(encoding="utf-8")
-                try:
-                    pr_local = ProviderRunner(_prov)
-                    tj = pr_local.run_json(tprompt, str(content_raw or ""), speed="heavy")
-                except Exception:
-                    tj = run_with_provider(tprompt, str(content_raw or ""), speed="heavy")
+                # Second step: run dedicated agent built on title_json.md prompt (SDK path),
+                # which removes disclaimers and returns strict JSON {title, text}.
+                from llm_agents.post.post_style_2.module_01_writing.title_json import build_title_json_agent  # type: ignore
+                title_agent = build_title_json_agent(model=os.getenv("OPENAI_MODEL", "gpt-5"))
+                tj_res = Runner.run_sync(title_agent, str(content_raw or ""))
+                tj_raw = getattr(tj_res, "final_output", "")
                 from utils.json_parse import parse_json_best_effort as _pjson
                 try:
-                    obj = _pjson(tj)
+                    obj = _pjson(tj_raw)
                     title = str((obj or {}).get("title") or "").strip() or _fallback_title_from_text(str(content_raw or ""))
                     body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                     header = f"**{title}**\n\n" if title else ""
                     content = (header + body).strip()
                     try:
-                        log("🧩 Title JSON · Parsed", f"title={title!r}, body_len={len(body)}")
+                        log("🧩 Title JSON · Agent", f"title={title!r}, body_len={len(body)}")
                     except Exception:
                         pass
                 except Exception as e:
-                    # Fallback: use raw body and derived title
-                    title = _fallback_title_from_text(str(content_raw or ""))
-                    header = f"**{title}**\n\n" if title else ""
-                    content = (header + str(content_raw or "")).strip()
+                    # Provider JSON fallback if SDK agent output isn't clean JSON
                     try:
-                        log("⚠️ Title JSON · Fallback", f"reason={type(e).__name__}: {str(e)[:160]}")
-                    except Exception:
-                        pass
+                        from pathlib import Path as _P
+                        tprompt = (
+                            _P(__file__).resolve().parents[2]
+                            / "prompts"
+                            / "post"
+                            / "post_style_2"
+                            / "module_01_writing"
+                            / "title_json.md"
+                        ).read_text(encoding="utf-8")
+                        pr_local = ProviderRunner(_prov)
+                        tj = pr_local.run_json(tprompt, str(content_raw or ""), speed="heavy")
+                        obj = _pjson(tj)
+                        title = str((obj or {}).get("title") or "").strip() or _fallback_title_from_text(str(content_raw or ""))
+                        body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
+                        header = f"**{title}**\n\n" if title else ""
+                        content = (header + body).strip()
+                        try:
+                            log("🧩 Title JSON · Fallback(JSON)", f"title={title!r}, body_len={len(body)}")
+                        except Exception:
+                            pass
+                    except Exception as e2:
+                        # Final fallback: derive a title and use raw body
+                        title = _fallback_title_from_text(str(content_raw or ""))
+                        header = f"**{title}**\n\n" if title else ""
+                        content = (header + str(content_raw or "")).strip()
+                        try:
+                            log("⚠️ Title JSON · Fallback(Text)", f"reason={type(e).__name__}/{type(e2).__name__}")
+                        except Exception:
+                            pass
             else:
                 content = str(content_raw).strip()
         except Exception:
