@@ -351,11 +351,14 @@ def generate_post(
             if style_key == "post_style_2":
                 # For style 2: send only user message (no system instructions)
                 from agents import Agent as _Agent, ModelSettings as _MS  # type: ignore
-                # Use chat-latest; enable medium reasoning effort
-                model_name = os.getenv("OPENAI_MODEL", "gpt-5-chat-latest")
-                agent = _Agent(name="Style2 Writer (User-only)", instructions="", model=model_name)
+                # Use chat-latest; enable medium reasoning effort (no ENV override)
+                agent = _Agent(name="Style2 Writer (User-only)", instructions="", model="gpt-5-chat-latest")
                 try:
                     agent.model_settings = _MS(reasoning={"effort": "medium"})
+                except Exception:
+                    pass
+                try:
+                    log("⚙️ Writer · Model", "model=gpt-5-chat-latest; reasoning=medium")
                 except Exception:
                     pass
                 # Build user message from writer template, substituting <topic>/<lang>
