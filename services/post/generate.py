@@ -820,7 +820,8 @@ def generate_post(
         final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
         log("✨ Refine · Output", final_content)
     else:
-        log("✨ Refine · Skipped", "Refine disabled by configuration or unsupported by style")
+        if style_key != "post_style_2":
+            log("✨ Refine · Skipped", "Refine disabled by configuration or unsupported by style")
 
     # Save final (optional)
     _emit("save:init")
@@ -846,8 +847,6 @@ def generate_post(
         f"- provider: {_prov}\n"
         f"- lang: {lang}\n"
         f"- style: {style_key}\n"
-        f"- model_heavy: {os.getenv('OPENAI_MODEL' if _prov=='openai' else ('GEMINI_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}\n"
-        f"- model_fast: {os.getenv('OPENAI_FAST_MODEL' if _prov=='openai' else ('GEMINI_FAST_MODEL' if _prov in {'gemini','google'} else 'ANTHROPIC_MODEL'))}\n"
         f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
         f"- finished_at: {finished_at.strftime('%Y-%m-%d %H:%M')}\n"
         f"- duration: {duration_s:.1f}s\n"

@@ -17,17 +17,22 @@ def _load_prompt() -> str:
 
 
 def try_import_sdk():
-    from agents import Agent  # type: ignore
+    from agents import Agent, ModelSettings  # type: ignore
     from schemas import JsonSchema as AgentOutputSchema  # type: ignore
-    return Agent, AgentOutputSchema
+    return Agent, AgentOutputSchema, ModelSettings
 
 
 def build_title_json_agent(model: str | None = None) -> Any:
-    Agent, AgentOutputSchema = try_import_sdk()
-    return Agent(
+    Agent, AgentOutputSchema, ModelSettings = try_import_sdk()
+    a = Agent(
         name="Style2 Title+JSON Formatter",
         instructions=_load_prompt(),
         model=model or "gpt-5",
     )
+    try:
+        a.model_settings = ModelSettings(reasoning={"effort": "low"})
+    except Exception:
+        pass
+    return a
 
 
