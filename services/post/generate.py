@@ -336,11 +336,37 @@ def generate_post(
                 instructions_override=instructions,
             )
             res_local = Runner.run_sync(agent, user_message_local_writer)
-            content = getattr(res_local, "final_output", "")
+            content_raw = getattr(res_local, "final_output", "")
+            if style_key == "post_style_2":
+                # Enforce JSON contract
+                from utils.json_parse import parse_json_best_effort as _pjson
+                try:
+                    obj = _pjson(content_raw)
+                    title = str((obj or {}).get("title") or "").strip()
+                    body = str((obj or {}).get("post") or "").strip()
+                    header = f"**{title}**\n\n" if title else ""
+                    content = (header + body).strip()
+                except Exception:
+                    content = str(content_raw).strip()
+            else:
+                content = str(content_raw).strip()
         except Exception:
             content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     else:
-        content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
+        # For non-OpenAI, still try JSON path for style 2
+        if style_key == "post_style_2":
+            txt = run_with_provider(instructions, user_message_local_writer, speed="heavy")
+            try:
+                from utils.json_parse import parse_json_best_effort as _pjson
+                obj = _pjson(txt)
+                title = str((obj or {}).get("title") or "").strip()
+                body = str((obj or {}).get("post") or "").strip()
+                header = f"**{title}**\n\n" if title else ""
+                content = (header + body).strip()
+            except Exception:
+                content = str(txt or "").strip()
+        else:
+            content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
     log("✍️ Writer · Output", content)
     if not content:
         raise RuntimeError("Empty result from writer agent")
