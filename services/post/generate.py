@@ -387,6 +387,7 @@ def generate_post(
                 tj_payload = (
                     "<input>\n"
                     f"<lang>{(lang or 'auto').strip()}</lang>\n"
+                    f"<topic>{topic}</topic>\n"
                     f"<text>\n{str(content_raw or '')}\n</text>\n"
                     "</input>"
                 )
@@ -455,11 +456,18 @@ def generate_post(
             # step 2: title json (prefer provider JSON mode for non-OpenAI)
             from pathlib import Path as _P
             tprompt = (_P(__file__).resolve().parents[2] / "prompts" / "post" / "post_style_2" / "module_01_writing" / "title_json.md").read_text(encoding="utf-8")
+            tj_payload = (
+                "<input>\n"
+                f"<lang>{(lang or 'auto').strip()}</lang>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<text>\n{str(writer_text or '')}\n</text>\n"
+                "</input>"
+            )
             try:
                 pr_local = ProviderRunner(_prov)
-                tj = pr_local.run_json(tprompt, writer_text or "", speed="heavy")
+                tj = pr_local.run_json(tprompt, tj_payload, speed="heavy")
             except Exception:
-                tj = run_with_provider(tprompt, writer_text or "", speed="heavy")
+                tj = run_with_provider(tprompt, tj_payload, speed="heavy")
             try:
                 from utils.json_parse import parse_json_best_effort as _pjson
                 obj = _pjson(tj)
