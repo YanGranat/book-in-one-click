@@ -1094,12 +1094,12 @@ def create_dispatcher() -> Dispatcher:
             await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="post")
             prompt = (
                 "Выберите стиль поста:\n"
-                "- Стиль 1 — структурированный образовательный; есть факт‑чек и редактура.\n"
-                "- Стиль 2 — динамичный публицистический; без факт‑чека и редактуры."
+                "• Стиль 1 - структурированный образовательный.\n"
+                "• Стиль 2 - объяснение в стиле Джона Оливера."
                 if ru else
                 "Choose post style:\n"
-                "- Style 1 — structured educational; fact‑check and refine available.\n"
-                "- Style 2 — dynamic opinionated; no fact‑check, no refine."
+                "• Style 1 - structured educational.\n"
+                "• Style 2 - John Oliver-style explanation."
             )
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_post_style_keyboard(ui_lang))
             await GenerateStates.ChoosingPostStyle.set()
