@@ -75,8 +75,6 @@ except Exception:
             d = int(depth)
         except Exception:
             d = 1
-        if d not in (1, 2, 3):
-            d = 1
         r = _KV.get_redis()
         await r.set(f"{_KV.kv_prefix()}:fc_depth:{telegram_id}", str(d))
 
