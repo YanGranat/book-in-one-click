@@ -376,6 +376,10 @@ def generate_post(
                 )
                 res_local = Runner.run_sync(agent, user_message_local_writer)
             content_raw = getattr(res_local, "final_output", "")
+            try:
+                log("✍️ Writer · Raw", f"len={len(str(content_raw or ''))}")
+            except Exception:
+                pass
             if style_key == "post_style_2":
                 # Second step: run dedicated agent built on title_json.md prompt (SDK path),
                 # which removes disclaimers and returns strict JSON {title, text}.
@@ -444,6 +448,10 @@ def generate_post(
             # step 1: writer
             tmpl = (instructions or "").replace("<topic>", topic).replace("<lang>", (lang or "auto").strip())
             writer_text = run_with_provider("", tmpl, speed="heavy")
+            try:
+                log("✍️ Writer · Raw", f"len={len(str(writer_text or ''))}")
+            except Exception:
+                pass
             # step 2: title json (prefer provider JSON mode for non-OpenAI)
             from pathlib import Path as _P
             tprompt = (_P(__file__).resolve().parents[2] / "prompts" / "post" / "post_style_2" / "module_01_writing" / "title_json.md").read_text(encoding="utf-8")
@@ -465,7 +473,7 @@ def generate_post(
                 content = (header + (writer_text or "")).strip()
         else:
             content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
-    log("✍️ Writer · Output", content)
+    log("📦 Final · Output", content)
     if not content:
         raise RuntimeError("Empty result from writer agent")
 
