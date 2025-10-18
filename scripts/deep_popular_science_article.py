@@ -232,9 +232,16 @@ def main() -> None:
 
     toc_lines = [f"## {_toc_title()}"]
     for i, sec in enumerate(outline.sections, start=1):
-        toc_lines.append(f"{i}. {sec.title}")
-        for j, sub in enumerate(sec.subsections, start=1):
-            toc_lines.append(f"  {i}.{j} {sub.title}")
+        if style_key == "article_style_2":
+            _lbl = _section_label(i)
+            if _lbl:
+                toc_lines.append(f"{_lbl} {sec.title}")
+            else:
+                toc_lines.append(f"{i}. {sec.title}")
+        else:
+            toc_lines.append(f"{i}. {sec.title}")
+            for j, sub in enumerate(sec.subsections, start=1):
+                toc_lines.append(f"  {i}.{j} {sub.title}")
 
     body_lines: list[str] = []
     # Per-section leads using the same Title&Lead agent (section_id mode)
@@ -259,20 +266,20 @@ def main() -> None:
                     sub_md = (d.markdown if d else "").strip()
                     sec_md_parts.append(f"### {sub_title}\n\n{sub_md}")
                 sec_body_text = "\n\n".join(sec_md_parts)
-            sec_user = (
-                "<input>\n"
-                f"<topic>{topic}</topic>\n"
-                f"<lang>{args.lang}</lang>\n"
-                f"<article_markdown>{sec.title}\n\n{sec_body_text}</article_markdown>\n"
-                f"<section_id>{sec.id}</section_id>\n"
-                + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
-                + "</input>"
-            )
-            sec_lead_obj = Runner.run_sync(atl_agent, sec_user).final_output  # type: ignore
-            sec_lead = (getattr(sec_lead_obj, "lead_markdown", "") or "").strip()
-            if sec_lead:
-                body_lines.append("")
-                body_lines.append(sec_lead)
+            if style_key != "article_style_2":
+                sec_user = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{args.lang}</lang>\n"
+                    f"<article_markdown>{sec.title}\n\n{sec_body_text}</article_markdown>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    + "</input>"
+                )
+                sec_lead_obj = Runner.run_sync(atl_agent, sec_user).final_output  # type: ignore
+                sec_lead = (getattr(sec_lead_obj, "lead_markdown", "") or "").strip()
+                if sec_lead:
+                    body_lines.append("")
+                    body_lines.append(sec_lead)
         except Exception as e:
             print(f"[CLI][SECTION_LEAD_ERR] {sec.id}: {type(e).__name__}: {e}", file=_sys.stderr)
         # Append full section body for style 2

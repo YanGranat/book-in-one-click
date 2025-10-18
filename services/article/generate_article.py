@@ -262,8 +262,7 @@ def generate_article(
     if style_key == "article_style_2":
         ssw_agent = build_section_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_sections = [sec for sec in outline.sections]
-        logger.info(f"Writing style: section-level (style 2)")
-        logger.parallel_start("Writing sections", total_jobs=len(all_sections), max_workers=max_workers)
+        logger.info(f"Writing style: section-level (style 2, sequential)")
     else:
         ssw_agent = build_subsection_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
@@ -348,20 +347,17 @@ def generate_article(
         if style_key == "article_style_2":
             if not remaining_secs:
                 break
-            logger.step(f"Parallel writing round {r}/{max_rounds}", current=r, total=max_rounds)
-            logger.info(f"Processing {len(remaining_secs)} sections with {max_workers} workers")
+            logger.step(f"Sequential writing round {r}/{max_rounds}", current=r, total=max_rounds)
+            logger.info(f"Processing {len(remaining_secs)} sections sequentially")
             failed_secs: list[str] = []
-            with ThreadPoolExecutor(max_workers=max_workers) as ex:
-                fut_map = {ex.submit(_run_section_draft, sec): sec.id for sec in remaining_secs}
-                for fut in as_completed(list(fut_map.keys())):
-                    sid = fut_map[fut]
-                    try:
-                        res = fut.result()
-                        section_result_by_id[sid] = res
-                        logger.debug(f"Section {sid} written successfully")
-                    except Exception as ex:
-                        failed_secs.append(sid)
-                        logger.debug(f"Section {sid} failed: {type(ex).__name__}")
+            for sec in remaining_secs:
+                try:
+                    res = _run_section_draft(sec)
+                    section_result_by_id[sec.id] = res
+                    logger.debug(f"Section {sec.id} written successfully")
+                except Exception as ex:
+                    failed_secs.append(sec.id)
+                    logger.debug(f"Section {sec.id} failed: {type(ex).__name__}")
             succeeded = len(remaining_secs) - len(failed_secs)
             logger.info(f"Round {r} complete: {succeeded} succeeded, {len(failed_secs)} failed")
             remaining_secs = [sec for sec in outline.sections if sec.id in set(failed_secs)]
@@ -529,14 +525,21 @@ def generate_article(
 
     toc_lines = [f"## {_toc_title()}"]
     for i, sec in enumerate(outline.sections, start=1):
-        toc_lines.append(f"{i}. {sec.title}")
-        for j, sub in enumerate(sec.subsections, start=1):
-            toc_lines.append(f"  {i}.{j} {sub.title}")
+        if style_key == "article_style_2":
+            _lbl = _section_label(i)
+            if _lbl:
+                toc_lines.append(f"{_lbl} {sec.title}")
+            else:
+                toc_lines.append(f"{i}. {sec.title}")
+        else:
+            toc_lines.append(f"{i}. {sec.title}")
+            for j, sub in enumerate(sec.subsections, start=1):
+                toc_lines.append(f"  {i}.{j} {sub.title}")
     body_lines: list[str] = []
     # Initialize Title & Lead agent once and reuse for section leads and article lead
     atl_agent = build_article_title_lead_writer_agent(provider=_prov)
     
-    logger.step("Generating section leads", current=1, total=len(outline.sections)+1)
+    logger.step("Generating sections", current=1, total=len(outline.sections)+1)
     for i, sec in enumerate(outline.sections, start=1):
         _lbl = _section_label(i)
         if body_lines:
@@ -547,9 +550,14 @@ def generate_article(
             body_lines.append(f"## {sec.title}")
         try:
             if style_key == "article_style_2":
+                # Style 2: no per-section leads, only append section body
                 d = drafts_by_section.get(sec.id)
                 sec_body_text = (getattr(d, "markdown", "") or "").strip()
+                if sec_body_text:
+                    body_lines.append("")
+                    body_lines.append(sec_body_text)
             else:
+                # Style 1: generate section lead and then append subsections
                 sec_md_parts = []
                 for sub in sec.subsections:
                     d = drafts_by_subsection.get((sec.id, sub.id))
@@ -557,31 +565,29 @@ def generate_article(
                     sub_md = (d.markdown if d else "").strip()
                     sec_md_parts.append(f"### {sub_title}\n\n{sub_md}")
                 sec_body_text = "\n\n".join(sec_md_parts)
-            try:
-                sec_max_chars = int(os.getenv("SECTION_LEAD_MAX_CHARS", "2000000"))
-            except Exception:
-                sec_max_chars = 2000000
-            used_sec = sec_body_text if len(sec_body_text) <= sec_max_chars else sec_body_text[:sec_max_chars]
-            logger.debug(f"Generating lead for section {sec.id}: body_len={len(sec_body_text)}, used_len={len(used_sec)}")
-            sec_user = (
-                "<input>\n"
-                f"<topic>{topic}</topic>\n"
-                f"<lang>{lang}</lang>\n"
-                f"<article_markdown>{sec.title}\n\n{used_sec}</article_markdown>\n"
-                f"<section_id>{sec.id}</section_id>\n"
-                + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
-                + "</input>"
-            )
-            t_sec = time.perf_counter()
-            sec_lead_obj: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user).final_output  # type: ignore
-            sec_lead = (sec_lead_obj.lead_markdown or "").strip()
-            if sec_lead:
-                body_lines.append("")
-                body_lines.append(sec_lead)
-                duration = time.perf_counter() - t_sec
-                logger.debug(f"Section lead {sec.id} generated: {len(sec_lead)} chars in {int(duration*1000)}ms")
-            else:
-                if style_key != "article_style_2":
+                try:
+                    sec_max_chars = int(os.getenv("SECTION_LEAD_MAX_CHARS", "2000000"))
+                except Exception:
+                    sec_max_chars = 2000000
+                used_sec = sec_body_text if len(sec_body_text) <= sec_max_chars else sec_body_text[:sec_max_chars]
+                logger.debug(f"Generating lead for section {sec.id}: body_len={len(sec_body_text)}, used_len={len(used_sec)}")
+                sec_user = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
+                    f"<article_markdown>{sec.title}\n\n{used_sec}</article_markdown>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    "</input>"
+                )
+                t_sec = time.perf_counter()
+                sec_lead_obj: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user).final_output  # type: ignore
+                sec_lead = (sec_lead_obj.lead_markdown or "").strip()
+                if sec_lead:
+                    body_lines.append("")
+                    body_lines.append(sec_lead)
+                    duration = time.perf_counter() - t_sec
+                    logger.debug(f"Section lead {sec.id} generated: {len(sec_lead)} chars in {int(duration*1000)}ms")
+                else:
                     logger.debug(f"Section lead {sec.id} empty, retrying with bullet titles")
                     titles_bullets = "\n".join([f"- {s.title}" for s in sec.subsections])
                     sec_user2 = (
@@ -605,23 +611,19 @@ def generate_article(
                             logger.warning(f"Section lead {sec.id} empty after retry")
                     except Exception as e2:
                         logger.warning(f"Section lead {sec.id} retry failed: {type(e2).__name__}")
-            # Append the full section body for style 2
-            if style_key == "article_style_2":
-                if sec_body_text:
+                # Append subsections content
+                for sub in sec.subsections:
+                    d = drafts_by_subsection.get((sec.id, sub.id))
+                    sub_title = d.title if d and d.title else sub.title
+                    sub_md = (d.markdown if d else "").strip()
                     body_lines.append("")
-                    body_lines.append(sec_body_text)
+                    body_lines.append(f"### {sub_title}")
+                    if sub_md:
+                        body_lines.append("")
+                        body_lines.append(sub_md)
         except Exception as e:
             logger.error(f"Failed to generate section lead for {sec.id}", exception=e)
-        if style_key != "article_style_2":
-            for sub in sec.subsections:
-                d = drafts_by_subsection.get((sec.id, sub.id))
-                sub_title = d.title if d and d.title else sub.title
-                sub_md = (d.markdown if d else "").strip()
-                body_lines.append("")
-                body_lines.append(f"### {sub_title}")
-                if sub_md:
-                    body_lines.append("")
-                    body_lines.append(sub_md)
+        
     toc_text = "\n".join(toc_lines)
     body_text = "\n".join(body_lines)
 
