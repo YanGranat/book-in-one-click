@@ -9,7 +9,7 @@ from utils.models import get_model
 
 def _load_prompt() -> str:
     prompt_path = (
-        Path(__file__).resolve().parents[5]
+        Path(__file__).resolve().parents[4]
         / "prompts"
         / "deep_popular_science_article"
         / "deep_popular_science_article_style_2"
