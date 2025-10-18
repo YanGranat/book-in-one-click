@@ -1234,38 +1234,10 @@ def create_dispatcher() -> Dispatcher:
             pass
         # Persist article style in FSM and proceed to topic
         await state.update_data(article_style=style, series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
-            prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
-            await GenerateStates.WaitingTopic.set()
-            return
-        # Series branch: no FC/Refine for series
-        if is_superadmin:
-            await state.update_data(gen_article=False, series_mode=None, series_count=None)
-            kb = InlineKeyboardMarkup()
-            kb.add(
-                InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
-                InlineKeyboardButton(text="5", callback_data="set:series_preset:5"),
-            )
-            kb.add(
-                InlineKeyboardButton(text=("Авто" if ru else "Auto"), callback_data="set:series_preset:auto"),
-                InlineKeyboardButton(text=("Кастом" if ru else "Custom"), callback_data="set:series_preset:custom"),
-            )
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Сколько постов?" if ru else "How many posts?"), reply_markup=kb)
-            await GenerateStates.ChoosingSeriesPreset.set()
-            return
-        # Admins: ask preset 2/5/auto/custom immediately
-        kb = InlineKeyboardMarkup()
-        kb.add(
-            InlineKeyboardButton(text="2", callback_data="set:series_preset:2"),
-            InlineKeyboardButton(text="5", callback_data="set:series_preset:5"),
-        )
-        kb.add(
-            InlineKeyboardButton(text=("Авто" if ru else "Auto"), callback_data="set:series_preset:auto"),
-            InlineKeyboardButton(text=("Кастом" if ru else "Custom"), callback_data="set:series_preset:custom"),
-        )
-        await state.update_data(series_mode=None, series_count=None)
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Сколько постов?" if ru else "How many posts?"), reply_markup=kb)
-        await GenerateStates.ChoosingSeriesPreset.set()
+        prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+        await GenerateStates.WaitingTopic.set()
+        return
 
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:series_preset:"), state=GenerateStates.ChoosingSeriesPreset)  # type: ignore
     async def cb_series_preset(query: types.CallbackQuery, state: FSMContext):
