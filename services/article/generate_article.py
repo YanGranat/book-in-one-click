@@ -479,7 +479,6 @@ def generate_article(
                 f"<lang>{lang}</lang>\n"
                 f"<article_markdown>{sec.title}\n\n{used_sec}</article_markdown>\n"
                 f"<section_id>{sec.id}</section_id>\n"
-                f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
                 "</input>"
             )
             t_sec = time.perf_counter()
@@ -540,7 +539,6 @@ def generate_article(
         f"<topic>{topic}</topic>\n"
         f"<lang>{lang}</lang>\n"
         f"<article_markdown>{toc_text}\n\n{used_body}</article_markdown>\n"
-        f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
         "</input>"
     )
     try:
