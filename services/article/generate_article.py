@@ -124,7 +124,7 @@ def generate_article(
         style_key = "article_style_1"
     if style_key == "article_style_2":
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_01_structure.sections_and_subsections import (  # type: ignore
-            build_sections_and_subsections_agent,
+            build_sections_agent,
         )
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.subsection_writer import (  # type: ignore
             build_section_writer_agent,
@@ -134,7 +134,7 @@ def generate_article(
         )
     else:
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_01_structure.sections_and_subsections import (  # type: ignore
-            build_sections_and_subsections_agent,
+            build_sections_agent,
         )
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_02_writing.subsection_writer import (  # type: ignore
             build_subsection_writer_agent,
@@ -149,7 +149,7 @@ def generate_article(
         print(f"[ARTICLE][CONF] style={style}", file=_sys.stderr)
     except Exception:
         pass
-    outline_agent = build_sections_and_subsections_agent(provider=_prov)
+    outline_agent = build_sections_agent(provider=_prov)
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
     try:
         t0 = time.perf_counter()

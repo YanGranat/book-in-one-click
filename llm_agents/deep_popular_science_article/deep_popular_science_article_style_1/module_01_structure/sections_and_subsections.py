@@ -31,7 +31,7 @@ def try_import_sdk():
     return Agent, AgentOutputSchema
 
 
-def build_sections_and_subsections_agent(model: str | None = None, provider: str | None = None) -> Any:
+def build_sections_agent(model: str | None = None, provider: str | None = None) -> Any:
     Agent, AgentOutputSchema = try_import_sdk()
     eff_provider = (provider or "openai").strip().lower()
     eff_model = model or get_model(eff_provider, "medium")

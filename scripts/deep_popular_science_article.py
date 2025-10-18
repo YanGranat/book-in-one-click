@@ -91,7 +91,7 @@ def main() -> None:
         style_key = "article_style_1"
     if style_key == "article_style_2":
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_01_structure.sections_and_subsections import (  # type: ignore
-            build_sections_and_subsections_agent,
+            build_sections_agent,
         )
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.subsection_writer import (  # type: ignore
             build_section_writer_agent,
@@ -101,7 +101,7 @@ def main() -> None:
         )
     else:
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_01_structure.sections_and_subsections import (  # type: ignore
-            build_sections_and_subsections_agent,
+            build_sections_agent,
         )
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_02_writing.subsection_writer import (  # type: ignore
             build_subsection_writer_agent,
@@ -112,7 +112,7 @@ def main() -> None:
     # content_of_subsections removed in 2‑module pipeline
 
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{args.lang}</lang>\n</input>"
-    outline_agent = build_sections_and_subsections_agent()
+    outline_agent = build_sections_agent()
     try:
         outline_res = Runner.run_sync(outline_agent, user_outline)
         outline: ArticleOutline = outline_res.final_output  # type: ignore
