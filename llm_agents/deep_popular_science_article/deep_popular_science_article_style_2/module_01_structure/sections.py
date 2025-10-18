@@ -15,14 +15,8 @@ def _load_prompt() -> str:
         / "deep_popular_science_article_style_2"
         / "module_01_structure"
     )
-    # Prefer sections_and_subsections.md; fallback to sections.md if present
-    p1 = base_dir / "sections_and_subsections.md"
-    if p1.exists():
-        return p1.read_text(encoding="utf-8")
-    p2 = base_dir / "sections.md"
-    if p2.exists():
-        return p2.read_text(encoding="utf-8")
-    return p1.read_text(encoding="utf-8")
+    prompt_path = base_dir / "sections.md"
+    return prompt_path.read_text(encoding="utf-8")
 
 
 def try_import_sdk():

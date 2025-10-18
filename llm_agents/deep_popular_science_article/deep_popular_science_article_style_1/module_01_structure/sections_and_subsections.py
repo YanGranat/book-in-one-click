@@ -15,14 +15,8 @@ def _load_prompt() -> str:
         / "deep_popular_science_article_style_1"
         / "module_01_structure"
     )
-    # Keep compatibility if someone renames in future
-    p1 = base_dir / "sections_and_subsections.md"
-    if p1.exists():
-        return p1.read_text(encoding="utf-8")
-    p2 = base_dir / "sections.md"
-    if p2.exists():
-        return p2.read_text(encoding="utf-8")
-    return p1.read_text(encoding="utf-8")
+    # Style 1 strictly uses sections_and_subsections.md
+    return (base_dir / "sections_and_subsections.md").read_text(encoding="utf-8")
 
 
 def try_import_sdk():
