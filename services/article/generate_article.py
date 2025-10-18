@@ -89,10 +89,15 @@ def generate_article(
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
     
+    # Normalize and validate style key early (used in logs below)
+    style_key = (style or "article_style_1").strip().lower()
+    if style_key not in {"article_style_1", "article_style_2"}:
+        style_key = "article_style_1"
+    
     # Initialize structured logger
     logger = create_logger("article", show_debug=bool(os.getenv("DEBUG_LOGS")))
     logger.info(f"Starting article generation: '{topic[:100]}'")
-    logger.info(f"Configuration: provider={_prov}, lang={lang}, style={style}")
+    logger.info(f"Configuration: provider={_prov}, lang={lang}, style={style_key}")
     
     log_lines: list[str] = []
     def log(section: str, body: str):
@@ -132,7 +137,6 @@ def generate_article(
     logger.info(f"Parallelism configured: {max_workers} workers")
 
     # Agents import per style
-    style_key = (style or "article_style_1").strip().lower()
     if style_key not in {"article_style_1", "article_style_2"}:
         style_key = "article_style_1"
     if style_key == "article_style_2":
