@@ -2227,7 +2227,7 @@ def create_dispatcher() -> Dispatcher:
                         provider=((prov if prov != "auto" else "openai") or "openai"),
                         style=(data.get("article_style") or "article_style_1"),
                         output_subdir="deep_article",
-                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "db_user_id": db_user_id, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
+                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "db_user_id": db_user_id, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag, "provider_in": prov},
                         enable_research=False,
                         enable_refine=False,
                     ),

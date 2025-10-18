@@ -701,9 +701,10 @@ def generate_article(
     log_path = log_dir / f"{safe_filename_base(topic)}_article_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
     finished_at = datetime.utcnow()
     duration_s = max(0.0, time.perf_counter() - started_perf)
+    provider_in = (job_meta or {}).get("provider_in") if isinstance(job_meta, dict) else None
     header = (
         f"# 🧾 Article Generation Log\n\n"
-        f"- provider: {_prov}\n"
+        f"- provider: {provider_in or _prov}\n"
         f"- style: {style_key}\n"
         f"- lang: {lang}\n"
         f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
