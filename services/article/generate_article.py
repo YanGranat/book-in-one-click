@@ -216,11 +216,11 @@ def generate_article(
     if style_key == "article_style_2":
         ssw_agent = build_section_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_sections = [sec for sec in outline.sections]
-    srvlog("DRAFT_SETUP", f"style=2 total_jobs={len(all_sections)} max_workers={max_workers}")
-    try:
-        print(f"[ARTICLE][STYLE2][SECTIONS]={len(all_sections)}", file=_sys.stderr)
-    except Exception:
-        pass
+        srvlog("DRAFT_SETUP", f"style=2 total_jobs={len(all_sections)} max_workers={max_workers}")
+        try:
+            print(f"[ARTICLE][STYLE2][SECTIONS]={len(all_sections)}", file=_sys.stderr)
+        except Exception:
+            pass
     else:
         ssw_agent = build_subsection_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
