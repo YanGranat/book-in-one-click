@@ -1167,6 +1167,14 @@ def create_dispatcher() -> Dispatcher:
                 else "Choose article style:\n\n• Style 1 - sections with subsections.\n• Style 2 - sections only + main idea."
             )
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_article_style_keyboard(ui_lang))
+            try:
+                import sys as _sys
+                print(
+                    f"[FLOW][ARTICLE][STYLE_PROMPT] uid={query.from_user.id if query.from_user else 0} chat={query.message.chat.id if query.message else 0}",
+                    file=_sys.stderr,
+                )
+            except Exception:
+                pass
             await GenerateStates.ChoosingArticleStyle.set()
             return
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:post_style:"), state=GenerateStates.ChoosingPostStyle)  # type: ignore
@@ -1216,6 +1224,14 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         ru = _is_ru(ui_lang)
         await query.answer()
+        try:
+            import sys as _sys
+            print(
+                f"[FLOW][ARTICLE][STYLE_SELECTED] uid={query.from_user.id if query.from_user else 0} chat={query.message.chat.id if query.message else 0} style={style}",
+                file=_sys.stderr,
+            )
+        except Exception:
+            pass
         # Persist article style in FSM and proceed to topic
         await state.update_data(article_style=style, series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
         prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
@@ -2244,6 +2260,14 @@ def create_dispatcher() -> Dispatcher:
                         enable_refine=False,
                     ),
                 )
+                try:
+                    import sys as _sys
+                    print(
+                        f"[FLOW][ARTICLE][CALL] uid={message.from_user.id if message.from_user else 0} chat={message.chat.id} style={(data.get('article_style') or 'article_style_1')} prov={prov} lang={eff_lang}",
+                        file=_sys.stderr,
+                    )
+                except Exception:
+                    pass
                 try:
                     article_path = await _asyncio.wait_for(fut, timeout=timeout_s)
                     try:

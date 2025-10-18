@@ -145,6 +145,10 @@ def generate_article(
 
     # Module 1
     srvlog("START", f"topic='{topic[:100]}' lang={lang} provider={_prov}")
+    try:
+        print(f"[ARTICLE][CONF] style={style}", file=_sys.stderr)
+    except Exception:
+        pass
     outline_agent = build_sections_and_subsections_agent(provider=_prov)
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
     try:
@@ -212,11 +216,19 @@ def generate_article(
     if style_key == "article_style_2":
         ssw_agent = build_section_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_sections = [sec for sec in outline.sections]
-        srvlog("DRAFT_SETUP", f"style=2 total_jobs={len(all_sections)} max_workers={max_workers}")
+    srvlog("DRAFT_SETUP", f"style=2 total_jobs={len(all_sections)} max_workers={max_workers}")
+    try:
+        print(f"[ARTICLE][STYLE2][SECTIONS]={len(all_sections)}", file=_sys.stderr)
+    except Exception:
+        pass
     else:
         ssw_agent = build_subsection_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
         srvlog("DRAFT_SETUP", f"style=1 total_jobs={len(all_subs_writing)} max_workers={max_workers}")
+        try:
+            print(f"[ARTICLE][STYLE1][SUBS]={len(all_subs_writing)}", file=_sys.stderr)
+        except Exception:
+            pass
 
     def _run_subsection_draft(sec_obj, sub_obj):
         ssw_user_local = (
