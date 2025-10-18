@@ -521,6 +521,11 @@ def generate_article(
                             srvlog("SECTION_LEAD_EMPTY", f"{sec.id}: lead empty after retries")
                     except Exception as e2:
                         srvlog("SECTION_LEAD_RETRY_ERR", f"{sec.id}: {type(e2).__name__}: {e2}")
+            # Append the full section body for style 2
+            if style_key == "article_style_2":
+                if sec_body_text:
+                    body_lines.append("")
+                    body_lines.append(sec_body_text)
         except Exception as e:
             srvlog("SECTION_LEAD_ERR", f"{sec.id}: {type(e).__name__}: {e}")
         if style_key != "article_style_2":

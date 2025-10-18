@@ -275,6 +275,10 @@ def main() -> None:
                 body_lines.append(sec_lead)
         except Exception as e:
             print(f"[CLI][SECTION_LEAD_ERR] {sec.id}: {type(e).__name__}: {e}", file=_sys.stderr)
+        # Append full section body for style 2
+        if style_key == "article_style_2" and sec_body_text:
+            body_lines.append("")
+            body_lines.append(sec_body_text)
         if style_key != "article_style_2":
             for sub in sec.subsections:
                 d = drafts_by_subsection.get((sec.id, sub.id))
