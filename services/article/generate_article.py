@@ -58,6 +58,11 @@ def generate_article(
         raise ValueError("Topic must be a non-empty string")
 
     _prov = (provider or "openai").strip().lower()
+    provider_in = None
+    try:
+        provider_in = (str((job_meta or {}).get("provider_in", "")).strip().lower() or None) if isinstance(job_meta, dict) else None
+    except Exception:
+        provider_in = None
     if _prov == "openai":
         if not os.getenv("OPENAI_API_KEY"):
             raise RuntimeError("OPENAI_API_KEY not found in environment")
@@ -97,7 +102,7 @@ def generate_article(
     # Initialize structured logger
     logger = create_logger("article", show_debug=bool(os.getenv("DEBUG_LOGS")))
     logger.info(f"Starting article generation: '{topic[:100]}'")
-    logger.info(f"Configuration: provider={_prov}, lang={lang}, style={style_key}")
+    logger.info(f"Configuration: provider_in={(provider_in or provider)}, resolved={_prov}, lang={lang}, style={style_key}")
     
     log_lines: list[str] = []
     def log(section: str, body: str):
@@ -122,7 +127,7 @@ def generate_article(
                     raise
     # Log generation configuration
     log_summary("⚙️", "Конфигурация генерации", [
-        f"Провайдер: {_prov}",
+        f"Провайдер: {provider_in or provider}",
         f"Язык: {lang}",
         f"Стиль: {style_key}",
         f"Тема: {topic[:100]}{'...' if len(topic) > 100 else ''}"
@@ -755,7 +760,7 @@ def generate_article(
                         kind="article",
                         path=rel_doc,
                         topic=topic,
-                        provider=_prov,
+                        provider=(provider_in or provider),
                         lang=lang,
                         content=article_md,
                         hidden=1 if ((job_meta or {}).get("incognito") is True) else 0,
