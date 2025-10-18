@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.models import get_model
+from utils.logging import create_logger
 from services.providers.runner import ProviderRunner
 from utils.slug import safe_filename_base
 from utils.web import build_search_context
@@ -126,15 +127,33 @@ def generate_post(
     from datetime import datetime
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
+    
+    # Initialize structured logger
+    logger = create_logger("post", show_debug=bool(os.getenv("DEBUG_LOGS")))
+    logger.info(f"Starting post generation: '{topic[:100]}'")
+    logger.info(f"Configuration: provider={_prov}, lang={lang}, style={style_key}")
+    
     log_lines = []
     def log(section: str, body: str):
+        """Log to markdown file - keep it readable and high-level."""
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
+    
+    def log_summary(emoji: str, title: str, items: list[str]):
+        """Log a clean summary without technical details."""
+        content = "\n".join(f"- {item}" for item in items if item)
+        log_lines.append(f"---\n\n## {emoji} {title}\n\n{content}\n")
     # Normalize style
     style_key = (style or "post_style_1").strip().lower()
     if style_key not in {"post_style_1", "post_style_2"}:
         style_key = "post_style_1"
 
-    log("🧭 Config", f"provider={_prov}\nlang={lang}\nstyle={style_key}")
+    # Log generation configuration
+    log_summary("⚙️", "Конфигурация генерации", [
+        f"Провайдер: {_prov}",
+        f"Язык: {lang}",
+        f"Стиль: {style_key}",
+        f"Тема: {topic[:100]}{'...' if len(topic) > 100 else ''}"
+    ])
 
     instructions = instructions_override or build_post_instructions(topic, lang, style_key)
     # Defaults for variables referenced by nested functions in non-OpenAI factcheck path
@@ -339,7 +358,7 @@ def generate_post(
         f"{series_block}"
         f"</input>"
     )
-    # Log writer input for transparency (plain text; UI preserves newlines)
+    # Log writer input for transparency (full prompt for tracking evolution)
     log("⬇️ Writer · Input", user_message_local_writer)
     # Use explicit Agent for OpenAI via writer module; others use provider runner
     if _prov == "openai":
@@ -372,6 +391,7 @@ def generate_post(
                 )
                 res_local = Runner.run_sync(agent, user_message_local_writer)
             content_raw = getattr(res_local, "final_output", "")
+            # Log raw writer output for tracking
             try:
                 log("✍️ Writer · Raw", f"len={len(str(content_raw or ''))}")
             except Exception:
@@ -400,6 +420,7 @@ def generate_post(
                     body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                     header = f"**{title}**\n\n" if title else ""
                     content = (header + body).strip()
+                    # Log title extraction for tracking
                     try:
                         log("🧩 Title JSON · Agent", f"title={title!r}, body_len={len(body)}")
                     except Exception:
@@ -423,6 +444,7 @@ def generate_post(
                         body = str((obj or {}).get("text") or (obj or {}).get("post") or "").strip()
                         header = f"**{title}**\n\n" if title else ""
                         content = (header + body).strip()
+                        # Log fallback extraction
                         try:
                             log("🧩 Title JSON · Fallback(JSON)", f"title={title!r}, body_len={len(body)}")
                         except Exception:
@@ -432,6 +454,7 @@ def generate_post(
                         title = _fallback_title_from_text(str(content_raw or ""))
                         header = f"**{title}**\n\n" if title else ""
                         content = (header + str(content_raw or "")).strip()
+                        # Log final fallback reason
                         try:
                             log("⚠️ Title JSON · Fallback(Text)", f"reason={type(e).__name__}/{type(e2).__name__}")
                         except Exception:
@@ -449,6 +472,7 @@ def generate_post(
             # step 1: writer
             tmpl = (instructions or "").replace("<topic>", topic).replace("<lang>", (lang or "auto").strip())
             writer_text = run_with_provider("", tmpl, speed="heavy")
+            # Log raw writer output for tracking
             try:
                 log("✍️ Writer · Raw", f"len={len(str(writer_text or ''))}")
             except Exception:
@@ -481,9 +505,21 @@ def generate_post(
                 content = (header + (writer_text or "")).strip()
         else:
             content = run_with_provider(instructions, user_message_local_writer, speed="heavy")
+    # Log final writer output for tracking evolution
     log("📦 Final · Output", content)
+    
     if not content:
         raise RuntimeError("Empty result from writer agent")
+    
+    # Log writing summary
+    content_lines = content.count('\n') + 1
+    content_chars = len(content)
+    log_summary("✍️", "Первый черновик готов", [
+        f"Длина: {content_chars} символов",
+        f"Строк: {content_lines}",
+        f"Первые 150 символов:",
+        f"_{content[:150]}..._"
+    ])
 
     # Define helper classes at function scope to ensure instances persist across blocks
     class _SimpleItem:
@@ -533,10 +569,6 @@ def generate_post(
     report = None
     # Style 2: skip fact-check entirely
     if factcheck and style_key == "post_style_2":
-        try:
-            log("ℹ️ Fact-check skipped", "Style 2 does not support fact-checking")
-        except Exception:
-            pass
         factcheck = False
 
     if factcheck:
@@ -553,22 +585,30 @@ def generate_post(
             from utils.config import load_config
 
             _emit("factcheck:init")
+            logger.stage("Fact-Checking", total_stages=4, current_stage=2)
+            logger.info(f"Fact-checking enabled: max {factcheck_max_items} points, {research_iterations} iterations")
             identify_agent = build_identify_points_agent()
             identify_result = Runner.run_sync(identify_agent, f"<post>\n{content}\n</post>\n<lang>{lang}</lang>")
             plan = identify_result.final_output  # type: ignore
             points = plan.points or []
             if factcheck_max_items and factcheck_max_items > 0:
                 points = points[: factcheck_max_items]
+            
+            # Log fact-check plan for OpenAI
             try:
                 log("🔎 Fact-check · Plan (OpenAI)", f"points={len(points)}")
             except Exception:
                 pass
             
             if not points:
-                log("ℹ️ Fact-check skipped", "No risky points identified")
+                log_summary("ℹ️", "Факт-чек пропущен", [
+                    "Рискованных утверждений не обнаружено"
+                ])
                 report = None
             else:
+                # Log agent initialization
                 log("🔧 Building agents", f"Starting fact-check for {len(points)} points")
+                logger.step(f"Verifying {len(points)} points with web search")
                 research_agent = build_iterative_research_agent()
                 suff_agent = build_sufficiency_agent()
                 rec_agent = build_recommendation_agent()
@@ -624,23 +664,29 @@ def generate_post(
                 # Bound concurrency by research_concurrency to avoid provider rate limits
                 max_workers = max(1, int(research_concurrency))
                 log("🔍 Processing points", f"total={len(points)}, workers={max_workers}")
+                logger.parallel_start(f"Checking {len(points)} points", total_jobs=len(points), max_workers=max_workers)
                 results = []
+                fc_t0 = time.perf_counter()
                 with ThreadPoolExecutor(max_workers=max_workers) as pool:
                     future_map = {pool.submit(process_point_sync, p): p for p in points}
                     for fut in as_completed(list(future_map.keys())):
                         try:
                             result = fut.result()
                             results.append(result)
+                            # Log each processed point for tracking
                             log("✓ Point processed", f"{result[0].id}: {result[0].text[:60]}...")
                         except Exception as e:
                             # Skip failed point; continue others
                             p_failed = future_map[fut]
                             log("✗ Point failed", f"{p_failed.id}: {str(e)[:200]}")
                             pass
+                fc_duration = time.perf_counter() - fc_t0
                 log("🔍 Processing complete", f"successful={len(results)}/{len(points)}")
+                logger.parallel_complete(succeeded=len(results), failed=len(points)-len(results), duration=fc_duration)
 
                 simple_items = []
                 kept_count = 0
+                issues_by_action = {"clarify": 0, "rewrite": 0, "remove": 0}
                 for (p, r, notes) in results:
                     action = getattr(r, "action", "keep")
                     if action == "keep":
@@ -648,23 +694,42 @@ def generate_post(
                         continue
                     if r.action == "clarify":
                         verdict = "uncertain"
+                        issues_by_action["clarify"] += 1
                     elif r.action == "rewrite" or r.action == "remove":
                         verdict = "fail"
+                        issues_by_action[r.action] += 1
                     else:
                         verdict = "fail"
                     reason = getattr(r, "explanation", "") or ""
                     simple_items.append(_SimpleItem(p.text, verdict, reason))
+                    # Log each issue for tracking
                     log("⚠️ Issue found", f"action={action}, point={p.text[:60]}...")
 
                 if kept_count > 0:
                     log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
-                
+
                 report = _SimpleReport(simple_items) if simple_items else None
                 
+                # Log fact-check summary JSON for tracking
                 if report is not None:
                     log("factcheck_summary", report.model_dump_json())
                 else:
                     log("✅ Fact-check complete", "No issues found, skipping rewrite")
+                
+                # Log readable summary
+                if report is not None:
+                    issues_str = ", ".join([f"{k}: {v}" for k, v in issues_by_action.items() if v > 0])
+                    log_summary("🔍", "Результат факт-чека", [
+                        f"Проверено утверждений: {len(results)}",
+                        f"Подтверждено: {kept_count}",
+                        f"Требуют внимания: {len(simple_items)}",
+                        f"  ({issues_str})" if issues_str else ""
+                    ])
+                else:
+                    log_summary("✅", "Факт-чек пройден", [
+                        f"Проверено утверждений: {len(results)}",
+                        "Все утверждения подтверждены"
+                    ])
         else:
             from utils.config import load_config
             from pathlib import Path
@@ -701,6 +766,7 @@ def generate_post(
                     )
                     plan_heavy = run_json_with_provider(strict_ident, f"<post>\n{content}\n</post>\n<lang>{lang}</lang>", ResearchPlan, speed="heavy")
                     points = plan_heavy.points or []
+                    # Log fallback plan
                     try:
                         log("🔎 Fact-check · Plan (fallback)", f"points={len(points)}")
                     except Exception:
@@ -710,10 +776,17 @@ def generate_post(
                     points = []
             if factcheck_max_items and factcheck_max_items > 0:
                 points = points[: factcheck_max_items]
+            
+            # Log fact-check plan JSON for tracking
             try:
                 log("🔎 Fact-check · Plan", f"```json\n{plan.model_dump_json()}\n```")
             except Exception:
                 log("🔎 Fact-check · Plan", f"points={len(points)}")
+            
+            if not points:
+                log_summary("ℹ️", "Факт-чек пропущен", [
+                    "Рискованных утверждений не обнаружено"
+                ])
 
             cfg = load_config(__file__)
             pref = (cfg.get("research", {}) or {}).get("preferred_domains", [])
@@ -755,6 +828,7 @@ def generate_post(
                 except Exception:
                     _max_chars = 1600
                 web_ctx = build_search_context(queries, per_query=max(1, _per_q), max_chars=max(200, _max_chars))
+                # Log web queries and sources for tracking
                 if queries:
                     log("🌐 Web · Queries", "\n".join([f"- {q}" for q in queries]))
                 # Extract sources (best-effort)
@@ -807,19 +881,26 @@ def generate_post(
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
+            if points:
+                logger.step(f"Verifying {len(points)} points with web search")
+            
             for p in points or []:
                 try:
                     result = loop.run_until_complete(process_point_async(p))
                     results.append(result)
+                    # Log each processed point for tracking
                     log("✓ Point processed", f"{p.id}: {p.text[:60]}...")
                 except Exception as e:
+                    # Log failed points
                     log("✗ Point failed", f"{p.id}: {str(e)[:200]}")
                     pass
-
+            
+            # Log processing complete
             log("🔍 Processing complete", f"successful={len(results)}/{len(points or [])}")
 
             simple_items = []
             kept_count = 0
+            issues_by_action = {"clarify": 0, "rewrite": 0, "remove": 0}
             for (p, r, notes) in results:
                 action = getattr(r, "action", "keep")
                 if action == "keep":
@@ -827,20 +908,40 @@ def generate_post(
                     continue  # confirmed parts не передаём в переписывание
                 if r.action == "clarify":
                     verdict = "uncertain"
+                    issues_by_action["clarify"] += 1
                 elif r.action == "rewrite" or r.action == "remove":
                     verdict = "fail"
+                    issues_by_action[r.action] += 1
                 else:
                     verdict = "fail"
                 reason = getattr(r, "explanation", "") or ""
                 simple_items.append(_SimpleItem(p.text, verdict, reason))
-
+        
+            # Log points confirmed
             if kept_count > 0:
                 log("✅ Points confirmed", f"{kept_count} point(s) passed fact-check")
         
             report = _SimpleReport(simple_items) if simple_items else None
         
+            # Log fact-check summary JSON for tracking
             if report is not None:
                 log("factcheck_summary", report.model_dump_json())
+        
+            # Log readable summary for non-OpenAI
+            if points:
+                if report is not None and simple_items:
+                    issues_str = ", ".join([f"{k}: {v}" for k, v in issues_by_action.items() if v > 0])
+                    log_summary("🔍", "Результат факт-чека", [
+                        f"Проверено утверждений: {len(results)}",
+                        f"Подтверждено: {kept_count}",
+                        f"Требуют внимания: {len(simple_items)}",
+                        f"  ({issues_str})" if issues_str else ""
+                    ])
+                else:
+                    log_summary("✅", "Факт-чек пройден", [
+                        f"Проверено утверждений: {len(results)}",
+                        "Все утверждения подтверждены"
+                    ])
 
     # Rewrite and refine
     final_content = content
@@ -848,6 +949,8 @@ def generate_post(
         needs_rewrite = any(i.verdict != "pass" for i in report.items)
         if needs_rewrite:
             _emit("rewrite:init")
+            logger.stage("Rewriting Content", total_stages=4, current_stage=3)
+            logger.info(f"Rewriting needed for {sum(1 for i in report.items if i.verdict != 'pass')} points")
             from pathlib import Path
             if style_key == "post_style_1":
                 p_rewrite = (Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_03_rewriting" / "rewrite.md").read_text(encoding="utf-8")
@@ -861,14 +964,22 @@ def generate_post(
                 f"<critique_json>\n\n{report.model_dump_json()}\n\n</critique_json>\n"
                 "</input>"
             )
-            # Log rewrite input and output (plain text)
+            # Log rewrite input for tracking evolution
             log("⬇️ Rewrite · Input", rw_input)
+            logger.step(f"Rewriting content based on {len(report.items)} critique points")
             final_content = run_with_provider(p_rewrite, rw_input, speed="heavy") or content
+            # Log rewrite output
             log("🛠️ Rewrite · Output", final_content)
+            log_summary("🛠️", "Контент переписан", [
+                f"Исправлено проблем: {sum(1 for i in report.items if i.verdict != 'pass')}",
+                f"Новая длина: {len(final_content)} символов"
+            ])
 
     from pathlib import Path
     if use_refine and style_key == "post_style_1":
         _emit("refine:init")
+        logger.stage("Final Refinement", total_stages=4, current_stage=4)
+        logger.step("Polishing content for publication")
         p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
         refine_input = (
             "<input>\n"
@@ -877,16 +988,22 @@ def generate_post(
             f"<post>\n\n{final_content}\n\n</post>\n"
             "</input>"
         )
-        # Log refine input and output (plain text)
+        # Log refine input for tracking evolution
         log("⬇️ Refine · Input", refine_input)
         final_content = run_with_provider(p_refine, refine_input, speed="heavy") or final_content
+        # Log refine output
         log("✨ Refine · Output", final_content)
+        log_summary("✨", "Контент отполирован", [
+            f"Финальная длина: {len(final_content)} символов",
+            "Пост готов к публикации"
+        ])
     else:
         if style_key != "post_style_2":
             log("✨ Refine · Skipped", "Refine disabled by configuration or unsupported by style")
 
     # Save final (optional)
     _emit("save:init")
+    logger.step("Saving post to file")
     filepath = None
     if not disable_file_save:
         output_dir = ensure_output_dir(output_subdir)
@@ -1089,6 +1206,8 @@ def generate_post(
         print(f"[INFO] Log available on filesystem: {log_path}")
         # Continue execution - log file is still created even if DB fails
     _emit("done")
+    logger.total_duration()
+    logger.success(f"Post generation complete{f': {filepath.name}' if filepath else ''}", show_duration=False)
     if return_content:
         # Return the content string instead of path
         return final_content  # type: ignore[return-value]

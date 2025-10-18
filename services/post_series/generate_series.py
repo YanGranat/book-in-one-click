@@ -25,6 +25,7 @@ import json
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from utils.slug import safe_filename_base
+from utils.logging import create_logger
 from schemas.series import PostIdea, PostIdeaList, ListSufficiency, ExtendResponse, PrioritizedList
 from services.providers.runner import ProviderRunner
 
@@ -172,18 +173,53 @@ def generate_series(
     from datetime import datetime
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
+    
+    # Initialize structured logger
+    logger = create_logger("series", show_debug=bool(os.getenv("DEBUG_LOGS")))
+    logger.info(f"Starting series generation: '{topic[:100]}'")
+    logger.info(f"Configuration: provider={_prov}, lang={lang}, mode={mode}, count={count}")
+    
     log_lines: list[str] = []
     def log(section: str, body: str):
+        """Log to markdown file - keep it readable and high-level."""
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
+    
+    def log_summary(emoji: str, title: str, items: list[str]):
+        """Log a clean summary without technical details."""
+        content = "\n".join(f"- {item}" for item in items if item)
+        log_lines.append(f"---\n\n## {emoji} {title}\n\n{content}\n")
 
-    log("🧭 Config", f"provider={_prov}\nlang={lang}\nmode={mode}\ncount={count}\nmax_iterations={max_iterations}\noutput_mode={output_mode}\nfactcheck={bool(factcheck)}\nrefine={bool(refine)}")
+    # Log generation configuration
+    log_summary("⚙️", "Конфигурация генерации", [
+        f"Провайдер: {_prov}",
+        f"Язык: {lang}",
+        f"Режим: {mode}",
+        f"Постов в серии: {count}",
+        f"Тема: {topic[:100]}{'...' if len(topic) > 100 else ''}"
+    ])
 
     # 1) Build initial ideas
+    logger.stage("Planning Series", total_stages=2, current_stage=1)
+    logger.step("Generating initial post ideas")
     p_builder = _load_prompt("module_01_planning/builder.md")
     user_builder = f"<input>\n<topic>{topic}</topic>\n<lang>{(lang or 'auto').strip()}</lang>\n</input>"
     plan = pr.run_json(p_builder, user_builder, PostIdeaList, speed="fast")
     ideas: list[PostIdea] = _dedupe(plan.items or [])
+    logger.success(f"Generated {len(ideas)} initial post ideas", show_duration=False)
+    
+    # Log full ideas JSON for tracking evolution
     log("🧱 Builder · Ideas", f"```json\n{PostIdeaList(items=ideas).model_dump_json()}\n```")
+    
+    # Log readable summary
+    idea_titles = [f"**{idea.title}**" for idea in ideas[:10]]
+    if len(ideas) > 10:
+        idea_titles.append(f"...и ещё {len(ideas) - 10} идей")
+    log_summary("💡", "Начальные идеи для постов", [
+        f"Всего идей: {len(ideas)}",
+        "",
+        "Основные темы:",
+        *idea_titles
+    ])
 
     # 2) Iterate sufficiency/extend
     iterations = max(0, int(max_iterations))
@@ -192,9 +228,13 @@ def generate_series(
         suff_user = f"<input>\n<topic>{topic}</topic>\n<ideas_json>{PostIdeaList(items=ideas).model_dump_json()}</ideas_json>\n<lang>{(lang or 'auto').strip()}</lang>\n</input>"
         speed = "heavy" if i + 1 > int(sufficiency_heavy_after) else "fast"
         suff = pr.run_json(p_suff, suff_user, ListSufficiency, speed=speed)
+        # Log sufficiency check for tracking
         log("🧪 Sufficiency", f"```json\n{suff.model_dump_json()}\n```")
         if suff.done:
+            logger.step(f"Coverage check (iteration {i+1}): sufficient")
             break
+        else:
+            logger.step(f"Coverage check (iteration {i+1}): extending")
         missing = suff.missing_areas or []
         p_ext = _load_prompt("module_01_planning/extend.md")
         needed = 0
@@ -216,7 +256,9 @@ def generate_series(
                 ni.id = _next_id(cur)
             cur.append(ni)
         ideas = _dedupe(cur)
+        # Log extension for tracking
         log("➕ Extend", f"added={len(new_items)} total={len(ideas)}")
+        logger.success(f"Added {len(new_items)} ideas, total: {len(ideas)}", show_duration=False)
 
     # 3) Selection for fixed/auto
     selected: list[PostIdea] = []
@@ -239,18 +281,31 @@ def generate_series(
         # Auto: take all planned ideas
         selected = ideas[:]
 
-    # Log final selected topics for transparency
+    # Log full selected topics JSON for tracking
     try:
         log("🗂️ Selected · Topics", f"```json\n{PostIdeaList(items=selected).model_dump_json()}\n```")
     except Exception:
         pass
+    
+    # Log readable summary
+    selected_titles = [f"**{idea.title}**" for idea in selected]
+    log_summary("📋", "Выбранные темы для серии", [
+        f"Постов в серии: {len(selected)}",
+        "",
+        "Посты:",
+        *[f"{i+1}. {title}" for i, title in enumerate(selected_titles)]
+    ])
 
     # 4) Write posts sequentially
+    logger.stage("Writing Posts", total_stages=2, current_stage=2)
+    logger.info(f"Writing {len(selected)} posts for series")
     from services.post.generate import generate_post as generate_single_post
     posts_contents: list[tuple[PostIdea, str, Optional[Path]]] = []
     done_ids: list[str] = []
     for idx, idea in enumerate(selected, start=1):
         _emit(f"write:{idx}")
+        logger.step(f"Writing post: {idea.title}", current=idx, total=len(selected))
+        # Log topic being written
         log("✍️ Writer · Topic", f"{idea.id}: {idea.title}")
         # series writer prompt override
         p_writer = _load_prompt("module_02_writing/writer.md")
@@ -276,12 +331,13 @@ def generate_series(
                 disable_sidecar_log=True,
                 return_content=True,
             )
-            # Log per-post output into series log for completeness
+            # Log post output for tracking evolution
             try:
                 log("✍️ Writer · Output", f"## {idea.title}\n\n{content}")
             except Exception:
                 pass
             posts_contents.append((idea, content, None))
+            logger.success(f"Post written: {idea.title[:50]}, {len(content)} chars", show_duration=False)
         else:
             path = generate_single_post(
                 idea.title,
@@ -301,10 +357,12 @@ def generate_series(
             )
             # Read content back to include inline in aggregate and in series log
             content = Path(path).read_text(encoding="utf-8") if isinstance(path, Path) else Path(path).read_text(encoding="utf-8")
+            # Log post output for tracking evolution
             try:
                 log("✍️ Writer · Output", f"## {idea.title}\n\n{content}")
             except Exception:
                 pass
+            logger.success(f"Post written: {idea.title[:50]}, {len(content)} chars", show_duration=False)
             posts_contents.append((idea, content, path if isinstance(path, Path) else Path(path)))
         done_ids.append(idea.id)
 
@@ -422,6 +480,8 @@ def generate_series(
         print(f"[ERROR] Failed to record series in DB: {e}")
         print(f"[INFO] Series log available on filesystem: {log_path}")
 
+    logger.total_duration()
+    logger.success(f"Series generation complete: {len(selected)} posts written", show_duration=False)
     return aggregate_path
 
 

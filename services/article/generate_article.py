@@ -15,6 +15,7 @@ from time import sleep as _sleep
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from utils.slug import safe_filename_base
+from utils.logging import create_logger
 from services.providers.runner import ProviderRunner
 
 from schemas.article import ArticleOutline, DraftChunk, ArticleTitleLead
@@ -87,15 +88,21 @@ def generate_article(
     from datetime import datetime
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
+    
+    # Initialize structured logger
+    logger = create_logger("article", show_debug=bool(os.getenv("DEBUG_LOGS")))
+    logger.info(f"Starting article generation: '{topic[:100]}'")
+    logger.info(f"Configuration: provider={_prov}, lang={lang}, style={style}")
+    
     log_lines: list[str] = []
     def log(section: str, body: str):
+        """Log to markdown file - keep it readable and high-level."""
         log_lines.append(f"---\n\n## {section}\n\n{body}\n")
-
-    def srvlog(tag: str, text: str) -> None:
-        try:
-            print(f"[ARTICLE][{tag}] {text}", file=_sys.stderr)
-        except Exception:
-            pass
+    
+    def log_summary(emoji: str, title: str, items: list[str]):
+        """Log a clean summary without technical details."""
+        content = "\n".join(f"- {item}" for item in items if item)
+        log_lines.append(f"---\n\n## {emoji} {title}\n\n{content}\n")
 
     def _run_with_retries_sync(agent: Any, user_input: str, *, attempts: int = 3, backoff_seq: tuple[int, ...] = (2, 5, 8)):
         """Run agent with simple retries on provider transient errors."""
@@ -103,12 +110,18 @@ def generate_article(
             try:
                 return Runner.run_sync(agent, user_input)
             except Exception as e:
-                err_s = str(e)[:300]
-                srvlog("RETRY", f"attempt={i+1}/{attempts} err={type(e).__name__}: {err_s}")
-                if i == attempts - 1:
+                if i < attempts - 1:
+                    logger.retry(i + 1, attempts, reason=f"{type(e).__name__}: {str(e)[:100]}")
+                    _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
+                else:
                     raise
-                _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
-    log("🧭 Config", f"provider={_prov}\nlang={lang}\nresearch={bool(enable_research)}\nrefine={bool(enable_refine)}")
+    # Log generation configuration
+    log_summary("⚙️", "Конфигурация генерации", [
+        f"Провайдер: {_prov}",
+        f"Язык: {lang}",
+        f"Стиль: {style_key}",
+        f"Тема: {topic[:100]}{'...' if len(topic) > 100 else ''}"
+    ])
     # Determine parallelism (bounded to avoid provider rate limits)
     par_env = (os.getenv("ARTICLE_MAX_PAR", "").strip() or None)
     try:
@@ -116,7 +129,7 @@ def generate_article(
     except Exception:
         _par = 4
     max_workers = max(1, min(16, _par))
-    srvlog("CONF_PAR", f"max_workers={max_workers} par_env='{par_env or ''}' max_parallel={max_parallel}")
+    logger.info(f"Parallelism configured: {max_workers} workers")
 
     # Agents import per style
     style_key = (style or "article_style_1").strip().lower()
@@ -143,26 +156,40 @@ def generate_article(
             build_article_title_lead_writer_agent,
         )
 
-    # Module 1
-    srvlog("START", f"topic='{topic[:100]}' lang={lang} provider={_prov}")
-    try:
-        print(f"[ARTICLE][CONF] style={style}", file=_sys.stderr)
-    except Exception:
-        pass
+    # Module 1: Structure Generation
+    logger.stage("Structure Generation", total_stages=3, current_stage=1)
+    
     outline_agent = build_sections_agent(provider=_prov)
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
     try:
         t0 = time.perf_counter()
-        srvlog("OUTLINE_START", "pass=1 (initial)")
+        logger.step("Generating initial outline (pass 1 of 3)")
         outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
-        log("📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
         sec_count = len(outline.sections)
         sub_count = sum(len(s.subsections) for s in outline.sections)
-        srvlog("OUTLINE_OK", f"pass=1 sections={sec_count} subsections={sub_count} dur_ms={int((time.perf_counter()-t0)*1000)}")
+        duration = time.perf_counter() - t0
+        
+        # Log full outline JSON for tracking evolution
+        log("📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
+        
+        # Log readable summary
+        outline_items = [f"**{sec.title}**" for sec in outline.sections[:5]]
+        if len(outline.sections) > 5:
+            outline_items.append(f"...и ещё {len(outline.sections) - 5} разделов")
+        log_summary("📋", "Структура статьи создана", [
+            f"Разделов: {sec_count}",
+            f"Подразделов: {sub_count}",
+            "",
+            "Основные разделы:",
+            *outline_items
+        ])
+        
+        logger.success(f"Initial outline generated: {sec_count} sections, {sub_count} subsections", show_duration=False)
+        logger.debug(f"Outline generation took {int(duration*1000)}ms")
         if sec_count == 0:
             raise ValueError("Outline has no sections")
     except Exception as e:
-        srvlog("OUTLINE_ERR", f"{type(e).__name__}: {e}")
+        logger.error("Failed to generate initial outline", exception=e)
         _tb.print_exc()
         raise
 
@@ -180,15 +207,22 @@ def generate_article(
             "</input>"
         )
         t1 = time.perf_counter()
-        srvlog("OUTLINE_START", "pass=2 (improve)")
+        logger.step("Refining outline (pass 2 of 3)")
         improved_outline: ArticleOutline = Runner.run_sync(outline_agent, improve_user).final_output  # type: ignore
         # Accept improved outline when it still has sections and not smaller by an extreme margin
         if improved_outline and improved_outline.sections:
             outline = improved_outline
+            duration = time.perf_counter() - t1
+            # Log full improved outline
             log("📑 Outline · Improved", f"```json\n{outline.model_dump_json()}\n```")
-            srvlog("OUTLINE_IMPROVED", f"pass=2 sections={len(outline.sections)} dur_ms={int((time.perf_counter()-t1)*1000)}")
+            log_summary("✨", "Структура улучшена", [
+                f"Итого разделов: {len(outline.sections)}",
+                f"Итого подразделов: {sum(len(s.subsections) for s in outline.sections)}"
+            ])
+            logger.success(f"Outline refined: {len(outline.sections)} sections", show_duration=False)
+            logger.debug(f"Refine took {int(duration*1000)}ms")
     except Exception as e:
-        srvlog("OUTLINE_IMPROVE_ERR", f"{type(e).__name__}: {e}")
+        logger.warning(f"Outline refinement failed: {type(e).__name__}: {str(e)[:100]}")
 
     # Third pass: expand content items per subsection (outline_json + expand_content=true)
     try:
@@ -201,34 +235,38 @@ def generate_article(
             "</input>"
         )
         t2 = time.perf_counter()
-        srvlog("OUTLINE_START", "pass=3 (expand_content)")
+        logger.step("Expanding content points (pass 3 of 3)")
         expanded_outline: ArticleOutline = Runner.run_sync(outline_agent, expand_user).final_output  # type: ignore
         if expanded_outline and expanded_outline.sections:
             outline = expanded_outline
+            duration = time.perf_counter() - t2
+            total_content_items = sum(len(getattr(sub, 'content_items', []) or []) for sec in outline.sections for sub in sec.subsections)
+            # Log full expanded outline with content items
             log("📑 Outline · Expanded Content", f"```json\n{outline.model_dump_json()}\n```")
-            srvlog("OUTLINE_EXPANDED", f"pass=3 sections={len(outline.sections)} dur_ms={int((time.perf_counter()-t2)*1000)}")
+            log_summary("📝", "Контент-пункты добавлены", [
+                f"Детализировано подразделов: {sum(len(s.subsections) for s in outline.sections)}",
+                f"Контент-пунктов для раскрытия: {total_content_items}"
+            ])
+            logger.success(f"Content points expanded: {len(outline.sections)} sections ready", show_duration=False)
+            logger.debug(f"Expansion took {int(duration*1000)}ms")
     except Exception as e:
-        srvlog("OUTLINE_EXPAND_ERR", f"{type(e).__name__}: {e}")
+        logger.warning(f"Content expansion failed: {type(e).__name__}: {str(e)[:100]}")
 
-    # Module 2 (Writing)
+    # Module 2: Writing Content
+    logger.stage("Content Writing", total_stages=3, current_stage=2)
+    
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
     drafts_by_section: dict[str, Any] = {}
     if style_key == "article_style_2":
         ssw_agent = build_section_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_sections = [sec for sec in outline.sections]
-        srvlog("DRAFT_SETUP", f"style=2 total_jobs={len(all_sections)} max_workers={max_workers}")
-        try:
-            print(f"[ARTICLE][STYLE2][SECTIONS]={len(all_sections)}", file=_sys.stderr)
-        except Exception:
-            pass
+        logger.info(f"Writing style: section-level (style 2)")
+        logger.parallel_start("Writing sections", total_jobs=len(all_sections), max_workers=max_workers)
     else:
         ssw_agent = build_subsection_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
-        srvlog("DRAFT_SETUP", f"style=1 total_jobs={len(all_subs_writing)} max_workers={max_workers}")
-        try:
-            print(f"[ARTICLE][STYLE1][SUBS]={len(all_subs_writing)}", file=_sys.stderr)
-        except Exception:
-            pass
+        logger.info(f"Writing style: subsection-level (style 1)")
+        logger.parallel_start("Writing subsections", total_jobs=len(all_subs_writing), max_workers=max_workers)
 
     def _run_subsection_draft(sec_obj, sub_obj):
         ssw_user_local = (
@@ -245,12 +283,13 @@ def generate_article(
         for i in range(3):
             try:
                 tloc = time.perf_counter()
-                srvlog("DRAFT_START", f"{sec_obj.id}/{sub_obj.id} attempt={i+1}/3")
+                logger.debug(f"Writing subsection {sec_obj.id}/{sub_obj.id} (attempt {i+1}/3)")
                 res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
-                srvlog("DRAFT_DONE", f"{sec_obj.id}/{sub_obj.id} dur_ms={int((time.perf_counter()-tloc)*1000)}")
+                duration = time.perf_counter() - tloc
+                logger.debug(f"Subsection {sec_obj.id}/{sub_obj.id} completed in {int(duration*1000)}ms")
                 return res.final_output  # type: ignore
             except Exception as ex:
-                srvlog("DRAFT_ERR", f"{sec_obj.id}/{sub_obj.id}: attempt={i+1}/3 {type(ex).__name__}: {str(ex)[:200]}")
+                logger.debug(f"Subsection {sec_obj.id}/{sub_obj.id} failed (attempt {i+1}/3): {type(ex).__name__}")
                 if i == 2:
                     break
                 _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
@@ -271,12 +310,13 @@ def generate_article(
         for i in range(3):
             try:
                 tloc = time.perf_counter()
-                srvlog("DRAFT_START", f"{sec_obj.id} attempt={i+1}/3")
+                logger.debug(f"Writing section {sec_obj.id} (attempt {i+1}/3)")
                 res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
-                srvlog("DRAFT_DONE", f"{sec_obj.id} dur_ms={int((time.perf_counter()-tloc)*1000)}")
+                duration = time.perf_counter() - tloc
+                logger.debug(f"Section {sec_obj.id} completed in {int(duration*1000)}ms")
                 return res.final_output  # type: ignore
             except Exception as ex:
-                srvlog("DRAFT_ERR", f"{sec_obj.id}: attempt={i+1}/3 {type(ex).__name__}: {str(ex)[:200]}")
+                logger.debug(f"Section {sec_obj.id} failed (attempt {i+1}/3): {type(ex).__name__}")
                 if i == 2:
                     break
                 _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
@@ -293,7 +333,7 @@ def generate_article(
         round_backoff = int(os.getenv("ARTICLE_ROUND_BACKOFF_S", "6"))
     except Exception:
         round_backoff = 6
-    srvlog("DRAFT_CONF", f"max_rounds={max_rounds} round_backoff_s={round_backoff}")
+    logger.info(f"Round configuration: max {max_rounds} rounds, {round_backoff}s backoff between rounds")
 
     draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
     section_result_by_id: dict[str, Any] = {}
@@ -306,7 +346,8 @@ def generate_article(
         if style_key == "article_style_2":
             if not remaining_secs:
                 break
-            srvlog("DRAFT_ROUND", f"round={r}/{max_rounds} jobs={len(remaining_secs)} max_workers={max_workers}")
+            logger.step(f"Parallel writing round {r}/{max_rounds}", current=r, total=max_rounds)
+            logger.info(f"Processing {len(remaining_secs)} sections with {max_workers} workers")
             failed_secs: list[str] = []
             with ThreadPoolExecutor(max_workers=max_workers) as ex:
                 fut_map = {ex.submit(_run_section_draft, sec): sec.id for sec in remaining_secs}
@@ -315,17 +356,21 @@ def generate_article(
                     try:
                         res = fut.result()
                         section_result_by_id[sid] = res
-                        srvlog("DRAFT_OK", f"{sid}")
+                        logger.debug(f"Section {sid} written successfully")
                     except Exception as ex:
                         failed_secs.append(sid)
-                        srvlog("DRAFT_FAIL", f"{sid}: {type(ex).__name__}: {str(ex)[:200]}")
+                        logger.debug(f"Section {sid} failed: {type(ex).__name__}")
+            succeeded = len(remaining_secs) - len(failed_secs)
+            logger.info(f"Round {r} complete: {succeeded} succeeded, {len(failed_secs)} failed")
             remaining_secs = [sec for sec in outline.sections if sec.id in set(failed_secs)]
             if remaining_secs and r < max_rounds:
+                logger.info(f"Retrying {len(remaining_secs)} failed sections after {round_backoff}s")
                 _sleep(round_backoff)
         else:
             if not remaining:
                 break
-            srvlog("DRAFT_ROUND", f"round={r}/{max_rounds} jobs={len(remaining)} max_workers={max_workers}")
+            logger.step(f"Parallel writing round {r}/{max_rounds}", current=r, total=max_rounds)
+            logger.info(f"Processing {len(remaining)} subsections with {max_workers} workers")
             failed_pairs: list[tuple[str, str]] = []
             with ThreadPoolExecutor(max_workers=max_workers) as ex:
                 fut_map = {ex.submit(_run_subsection_draft, sec, sub): (sec.id, sub.id) for (sec, sub) in remaining}
@@ -334,10 +379,12 @@ def generate_article(
                     try:
                         res = fut.result()
                         draft_result_by_key[key] = res
-                        srvlog("DRAFT_OK", f"{key[0]}/{key[1]}")
+                        logger.debug(f"Subsection {key[0]}/{key[1]} written successfully")
                     except Exception as ex:
                         failed_pairs.append(key)
-                        srvlog("DRAFT_FAIL", f"{key[0]}/{key[1]}: {type(ex).__name__}: {str(ex)[:200]}")
+                        logger.debug(f"Subsection {key[0]}/{key[1]} failed: {type(ex).__name__}")
+            succeeded = len(remaining) - len(failed_pairs)
+            logger.info(f"Round {r} complete: {succeeded} succeeded, {len(failed_pairs)} failed")
             remaining = []
             for (sid, ssid) in failed_pairs:
                 for sec in outline.sections:
@@ -347,13 +394,14 @@ def generate_article(
                                 remaining.append((sec, sub))
                                 break
             if remaining and r < max_rounds:
+                logger.info(f"Retrying {len(remaining)} failed subsections after {round_backoff}s")
                 _sleep(round_backoff)
 
     if style_key == "article_style_2":
         if remaining_secs:
-            srvlog("DRAFT_FINAL", f"count={len(remaining_secs)}")
+            logger.step(f"Final sequential attempt for {len(remaining_secs)} failed sections")
             still_missing_s: list[str] = []
-            for sec in remaining_secs:
+            for i, sec in enumerate(remaining_secs, 1):
                 ssw_user_inline = (
                     "<input>\n"
                     f"<topic>{topic}</topic>\n"
@@ -364,21 +412,22 @@ def generate_article(
                     "</input>"
                 )
                 try:
+                    logger.debug(f"Final attempt for section {sec.id} ({i}/{len(remaining_secs)})")
                     out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
                     d = out.final_output  # type: ignore
                     section_result_by_id[sec.id] = d
-                    srvlog("FINAL_OK", f"{sec.id}")
+                    logger.debug(f"Section {sec.id} recovered successfully")
                 except Exception as ex:
                     still_missing_s.append(sec.id)
-                    srvlog("FINAL_FAIL", f"{sec.id}: {type(ex).__name__}: {str(ex)[:200]}")
+                    logger.error(f"Section {sec.id} failed permanently", exception=ex)
             if still_missing_s:
                 missing_str = ", ".join(still_missing_s)
                 raise RuntimeError(f"Some sections failed to generate: {missing_str}")
     else:
         if 'remaining' in locals() and remaining:
-            srvlog("DRAFT_FINAL", f"count={len(remaining)}")
+            logger.step(f"Final sequential attempt for {len(remaining)} failed subsections")
             still_missing: list[tuple[str, str]] = []
-            for (sec, sub) in remaining:
+            for i, (sec, sub) in enumerate(remaining, 1):
                 ssw_user_inline = (
                     "<input>\n"
                     f"<topic>{topic}</topic>\n"
@@ -389,13 +438,14 @@ def generate_article(
                     "</input>"
                 )
                 try:
+                    logger.debug(f"Final attempt for subsection {sec.id}/{sub.id} ({i}/{len(remaining)})")
                     out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
                     d: DraftChunk = out.final_output  # type: ignore
                     draft_result_by_key[(sec.id, sub.id)] = d
-                    srvlog("FINAL_OK", f"{sec.id}/{sub.id}")
+                    logger.debug(f"Subsection {sec.id}/{sub.id} recovered successfully")
                 except Exception as ex:
                     still_missing.append((sec.id, sub.id))
-                    srvlog("FINAL_FAIL", f"{sec.id}/{sub.id}: {type(ex).__name__}: {str(ex)[:200]}")
+                    logger.error(f"Subsection {sec.id}/{sub.id} failed permanently", exception=ex)
             if still_missing:
                 missing_str = ", ".join([f"{sid}/{ssid}" for (sid, ssid) in still_missing])
                 raise RuntimeError(f"Some subsections failed to generate: {missing_str}")
@@ -406,11 +456,25 @@ def generate_article(
             if not d:
                 continue
             drafts_by_section[sec.id] = d
+            # Log each section draft for tracking evolution
             try:
                 log("✍️ Draft · Section", f"{sec.id} → ```json\n{d.model_dump_json()}\n```")
             except Exception:
                 pass
-        srvlog("DRAFT_SUMMARY", f"style=2 ok={len(drafts_by_section)} total={len(outline.sections)} dur_ms={int((time.perf_counter()-writing_t0)*1000)}")
+        writing_duration = time.perf_counter() - writing_t0
+        
+        # Log writing summary
+        written_sections = [sec.title for sec in outline.sections if sec.id in drafts_by_section][:5]
+        if len(drafts_by_section) > 5:
+            written_sections.append(f"...и ещё {len(drafts_by_section) - 5}")
+        log_summary("✍️", "Разделы написаны", [
+            f"Успешно: {len(drafts_by_section)} из {len(outline.sections)}",
+            f"Время написания: {int(writing_duration)}с",
+            "",
+            "Написаны разделы:",
+            *[f"✓ {title}" for title in written_sections]
+        ])
+        logger.parallel_complete(succeeded=len(drafts_by_section), failed=len(outline.sections)-len(drafts_by_section), duration=writing_duration)
     else:
         for sec in outline.sections:
             for sub in sec.subsections:
@@ -419,11 +483,24 @@ def generate_article(
                 if not d:
                     continue
                 drafts_by_subsection[key] = d
+                # Log each subsection draft for tracking evolution
                 log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
-        srvlog("DRAFT_SUMMARY", f"style=1 ok={len(drafts_by_subsection)} dur_ms={int((time.perf_counter()-writing_t0)*1000)}")
+        writing_duration = time.perf_counter() - writing_t0
+        total_subs = sum(len(sec.subsections) for sec in outline.sections)
+        
+        # Log writing summary  
+        log_summary("✍️", "Подразделы написаны", [
+            f"Успешно: {len(drafts_by_subsection)} из {total_subs}",
+            f"Время написания: {int(writing_duration)}с",
+            f"Разделов обработано: {len(outline.sections)}"
+        ])
+        logger.parallel_complete(succeeded=len(drafts_by_subsection), failed=total_subs-len(drafts_by_subsection), duration=writing_duration)
 
     # Refining module removed in 2‑module pipeline
 
+    # Module 3: Titles and Leads
+    logger.stage("Titles and Leads Generation", total_stages=3, current_stage=3)
+    
     # Assemble final Markdown
     output_dir = ensure_output_dir(output_subdir)
     base = f"{safe_filename_base(topic)}_article"
@@ -456,6 +533,8 @@ def generate_article(
     body_lines: list[str] = []
     # Initialize Title & Lead agent once and reuse for section leads and article lead
     atl_agent = build_article_title_lead_writer_agent(provider=_prov)
+    
+    logger.step("Generating section leads", current=1, total=len(outline.sections)+1)
     for i, sec in enumerate(outline.sections, start=1):
         _lbl = _section_label(i)
         if body_lines:
@@ -481,7 +560,7 @@ def generate_article(
             except Exception:
                 sec_max_chars = 2000000
             used_sec = sec_body_text if len(sec_body_text) <= sec_max_chars else sec_body_text[:sec_max_chars]
-            srvlog("SECTION_LEAD_INPUT", f"sec={sec.id} title_len={len(sec.title or '')} body_len={len(sec_body_text)} used_len={len(used_sec)} max_chars={sec_max_chars}")
+            logger.debug(f"Generating lead for section {sec.id}: body_len={len(sec_body_text)}, used_len={len(used_sec)}")
             sec_user = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
@@ -497,9 +576,11 @@ def generate_article(
             if sec_lead:
                 body_lines.append("")
                 body_lines.append(sec_lead)
-                srvlog("SECTION_LEAD_OK", f"sec={sec.id} lead_len={len(sec_lead)} dur_ms={int((time.perf_counter()-t_sec)*1000)}")
+                duration = time.perf_counter() - t_sec
+                logger.debug(f"Section lead {sec.id} generated: {len(sec_lead)} chars in {int(duration*1000)}ms")
             else:
                 if style_key != "article_style_2":
+                    logger.debug(f"Section lead {sec.id} empty, retrying with bullet titles")
                     titles_bullets = "\n".join([f"- {s.title}" for s in sec.subsections])
                     sec_user2 = (
                         "<input>\n"
@@ -516,18 +597,19 @@ def generate_article(
                         if sec_lead2:
                             body_lines.append("")
                             body_lines.append(sec_lead2)
-                            srvlog("SECTION_LEAD_OK", f"sec={sec.id} retry=1 lead_len={len(sec_lead2)} dur_ms={int((time.perf_counter()-t_sec2)*1000)}")
+                            duration2 = time.perf_counter() - t_sec2
+                            logger.debug(f"Section lead {sec.id} retry successful: {len(sec_lead2)} chars in {int(duration2*1000)}ms")
                         else:
-                            srvlog("SECTION_LEAD_EMPTY", f"{sec.id}: lead empty after retries")
+                            logger.warning(f"Section lead {sec.id} empty after retry")
                     except Exception as e2:
-                        srvlog("SECTION_LEAD_RETRY_ERR", f"{sec.id}: {type(e2).__name__}: {e2}")
+                        logger.warning(f"Section lead {sec.id} retry failed: {type(e2).__name__}")
             # Append the full section body for style 2
             if style_key == "article_style_2":
                 if sec_body_text:
                     body_lines.append("")
                     body_lines.append(sec_body_text)
         except Exception as e:
-            srvlog("SECTION_LEAD_ERR", f"{sec.id}: {type(e).__name__}: {e}")
+            logger.error(f"Failed to generate section lead for {sec.id}", exception=e)
         if style_key != "article_style_2":
             for sub in sec.subsections:
                 d = drafts_by_subsection.get((sec.id, sub.id))
@@ -542,13 +624,14 @@ def generate_article(
     body_text = "\n".join(body_lines)
 
     # Title & Lead based on full article content
+    logger.step("Generating article title and lead")
     max_chars = 2000000
     try:
         max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "2000000"))
     except Exception:
         max_chars = 2000000
     used_body = body_text if len(body_text) <= max_chars else body_text[:max_chars]
-    srvlog("TITLE_LEAD_INPUT", f"toc_len={len(toc_text)} body_len={len(body_text)} used_len={len(used_body)} max_chars={max_chars}")
+    logger.debug(f"Article title/lead input: toc_len={len(toc_text)}, body_len={len(body_text)}, used_len={len(used_body)}")
     atl_user = (
         "<input>\n"
         f"<topic>{topic}</topic>\n"
@@ -560,14 +643,31 @@ def generate_article(
     try:
         t_atl = time.perf_counter()
         atl: ArticleTitleLead = _run_with_retries_sync(atl_agent, atl_user).final_output  # type: ignore
+        duration = time.perf_counter() - t_atl
+        
+        # Log full title & lead JSON for tracking
         log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
-        srvlog("TITLE_LEAD_OK", f"title_len={len(atl.title or '')} lead_len={len(atl.lead_markdown or '')} dur_ms={int((time.perf_counter()-t_atl)*1000)}")
+        
+        # Log readable summary
+        log_summary("📰", "Заголовок и вступление", [
+            f"**Заголовок:** {atl.title or '(не создан)'}",
+            "",
+            "**Вступление:**",
+            f"{(atl.lead_markdown or '')[:200]}{'...' if len(atl.lead_markdown or '') > 200 else ''}"
+        ])
+        
+        logger.success(f"Article title and lead generated: title_len={len(atl.title or '')}, lead_len={len(atl.lead_markdown or '')}", show_duration=False)
+        logger.debug(f"Title/lead generation took {int(duration*1000)}ms")
     except Exception as e:
-        srvlog("TITLE_LEAD_ERR", f"{type(e).__name__}: {e}")
+        logger.error("Failed to generate article title and lead", exception=e)
         _tb.print_exc()
         # Graceful fallback: use outline title/topic, empty lead
         atl = ArticleTitleLead(title=(outline.title or topic), lead_markdown="")
+        logger.warning("Using fallback title from outline")
         log("🧾 Title & Lead (fallback)", f"```json\n{atl.model_dump_json()}\n```")
+        log_summary("⚠️", "Заголовок (резервный)", [
+            f"Использован заголовок из структуры: {atl.title}"
+        ])
 
     title_text = atl.title or (outline.title or topic)
     lead_text = (atl.lead_markdown or "").strip()
@@ -577,6 +677,7 @@ def generate_article(
         f"{toc_text}\n\n"
         f"{body_text}\n"
     )
+    logger.step("Saving article to file")
     try:
         save_markdown(
             article_path,
@@ -585,9 +686,9 @@ def generate_article(
             pipeline="DeepArticle",
             content=article_md,
         )
-        srvlog("SAVE_OK", f"article_path={article_path} size={len(article_md)}")
+        logger.success(f"Article saved: {article_path.name} ({len(article_md)} chars)", show_duration=False)
     except Exception as e:
-        srvlog("SAVE_ERR", f"{type(e).__name__}: {e}")
+        logger.error("Failed to save article", exception=e)
         _tb.print_exc()
         raise
 
@@ -662,10 +763,12 @@ def generate_article(
                 except Exception:
                     pass
     except Exception as e:
-        srvlog("DB_ERR", f"{type(e).__name__}: {e}")
+        logger.warning(f"Failed to save to database: {type(e).__name__}")
+        logger.debug(f"DB error details: {str(e)[:200]}")
         _tb.print_exc()
 
-    srvlog("DONE", f"path={article_path}")
+    logger.total_duration()
+    logger.success(f"Article generation complete: {article_path.name}", show_duration=False)
     if return_log_path:
         return log_path
     return article_path
