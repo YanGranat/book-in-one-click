@@ -90,7 +90,7 @@ def main() -> None:
     if style_key not in {"article_style_1", "article_style_2"}:
         style_key = "article_style_1"
     if style_key == "article_style_2":
-        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_01_structure.sections_and_subsections import (  # type: ignore
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_01_structure.sections import (  # type: ignore
             build_sections_agent,
         )
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.section_writer import (  # type: ignore
@@ -173,7 +173,6 @@ def main() -> None:
                 f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
                 f"<section_id>{sec.id}</section_id>\n"
                 f"<content_items_json>{json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sec, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
-                f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
                 "</input>"
             )
             try:
@@ -296,7 +295,6 @@ def main() -> None:
         f"<topic>{topic}</topic>\n"
         f"<lang>{args.lang}</lang>\n"
         f"<article_markdown>{toc_text}\n\n{body_text}</article_markdown>\n"
-        f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
         "</input>"
     )
     try:
