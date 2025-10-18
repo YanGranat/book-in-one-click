@@ -14,7 +14,7 @@ def _load_prompt() -> str:
         / "deep_popular_science_article"
         / "deep_popular_science_article_style_2"
         / "module_02_writing"
-        / "subsection_writer.md"
+        / "section_writer.md"
     )
     return prompt_path.read_text(encoding="utf-8")
 
