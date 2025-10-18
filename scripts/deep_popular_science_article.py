@@ -232,9 +232,9 @@ def main() -> None:
 
     toc_lines = [f"## {_toc_title()}"]
     for i, sec in enumerate(outline.sections, start=1):
-        toc_lines.append(f"- {i}. {sec.title}")
+        toc_lines.append(f"{i}. {sec.title}")
         for j, sub in enumerate(sec.subsections, start=1):
-            toc_lines.append(f"  - {i}.{j} {sub.title}")
+            toc_lines.append(f"  {i}.{j} {sub.title}")
 
     body_lines: list[str] = []
     # Per-section leads using the same Title&Lead agent (section_id mode)

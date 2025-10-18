@@ -527,9 +527,9 @@ def generate_article(
 
     toc_lines = [f"## {_toc_title()}"]
     for i, sec in enumerate(outline.sections, start=1):
-        toc_lines.append(f"- {i}. {sec.title}")
+        toc_lines.append(f"{i}. {sec.title}")
         for j, sub in enumerate(sec.subsections, start=1):
-            toc_lines.append(f"  - {i}.{j} {sub.title}")
+            toc_lines.append(f"  {i}.{j} {sub.title}")
     body_lines: list[str] = []
     # Initialize Title & Lead agent once and reuse for section leads and article lead
     atl_agent = build_article_title_lead_writer_agent(provider=_prov)
