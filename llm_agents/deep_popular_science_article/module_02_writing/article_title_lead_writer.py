@@ -8,6 +8,17 @@ from utils.models import get_model
 
 
 def _load_prompt() -> str:
+    # Backward compatibility; prefer style_1
+    p1 = (
+        Path(__file__).resolve().parents[5]
+        / "prompts"
+        / "deep_popular_science_article"
+        / "deep_popular_science_article_style_1"
+        / "module_02_writing"
+        / "article_title_lead_writer.md"
+    )
+    if p1.exists():
+        return p1.read_text(encoding="utf-8")
     prompt_path = (
         Path(__file__).resolve().parents[3]
         / "prompts"

@@ -36,6 +36,7 @@ def generate_article(
     *,
     lang: str = "auto",
     provider: str = "openai",  # openai|gemini|claude
+    style: str = "article_style_1",  # article_style_1 | article_style_2
     output_subdir: str = "deep_article",
     on_progress: Optional[Callable[[str], None]] = None,
     job_meta: Optional[dict] = None,
@@ -117,15 +118,30 @@ def generate_article(
     max_workers = max(1, min(16, _par))
     srvlog("CONF_PAR", f"max_workers={max_workers} par_env='{par_env or ''}' max_parallel={max_parallel}")
 
-    # Agents import
-    from llm_agents.deep_popular_science_article.module_01_structure.sections_and_subsections import build_sections_and_subsections_agent
-    # content_of_subsections removed: structure module now only builds sections; writing fills content
-    from llm_agents.deep_popular_science_article.module_02_writing.subsection_writer import (
-        build_subsection_writer_agent,
-    )
-    from llm_agents.deep_popular_science_article.module_02_writing.article_title_lead_writer import (
-        build_article_title_lead_writer_agent,
-    )
+    # Agents import per style
+    style_key = (style or "article_style_1").strip().lower()
+    if style_key not in {"article_style_1", "article_style_2"}:
+        style_key = "article_style_1"
+    if style_key == "article_style_2":
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_01_structure.sections_and_subsections import (  # type: ignore
+            build_sections_and_subsections_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.subsection_writer import (  # type: ignore
+            build_section_writer_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.article_title_lead_writer import (  # type: ignore
+            build_article_title_lead_writer_agent,
+        )
+    else:
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_01_structure.sections_and_subsections import (  # type: ignore
+            build_sections_and_subsections_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_02_writing.subsection_writer import (  # type: ignore
+            build_subsection_writer_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_02_writing.article_title_lead_writer import (  # type: ignore
+            build_article_title_lead_writer_agent,
+        )
 
     # Module 1
     srvlog("START", f"topic='{topic[:100]}' lang={lang} provider={_prov}")
@@ -190,11 +206,17 @@ def generate_article(
     except Exception as e:
         srvlog("OUTLINE_EXPAND_ERR", f"{type(e).__name__}: {e}")
 
-    # Module 2 (Writing): Subsections drafts in parallel across all subsections
-    ssw_agent = build_subsection_writer_agent(provider=_prov)
+    # Module 2 (Writing)
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
-    all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
-    srvlog("DRAFT_SETUP", f"total_jobs={len(all_subs_writing)} max_workers={max_workers}")
+    drafts_by_section: dict[str, Any] = {}
+    if style_key == "article_style_2":
+        ssw_agent = build_section_writer_agent(provider=_prov)  # type: ignore[name-defined]
+        all_sections = [sec for sec in outline.sections]
+        srvlog("DRAFT_SETUP", f"style=2 total_jobs={len(all_sections)} max_workers={max_workers}")
+    else:
+        ssw_agent = build_subsection_writer_agent(provider=_prov)  # type: ignore[name-defined]
+        all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
+        srvlog("DRAFT_SETUP", f"style=1 total_jobs={len(all_subs_writing)} max_workers={max_workers}")
 
     def _run_subsection_draft(sec_obj, sub_obj):
         ssw_user_local = (
@@ -204,11 +226,9 @@ def generate_article(
             f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
             f"<section_id>{sec_obj.id}</section_id>\n"
             f"<subsection_id>{sub_obj.id}</subsection_id>\n"
-            # If content_items exist for this subsection, pass them in
             f"<content_items_json>{_json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sub_obj, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
             "</input>"
         )
-        # Retry inside worker thread
         backoff_seq = (2, 4, 8)
         for i in range(3):
             try:
@@ -218,14 +238,37 @@ def generate_article(
                 srvlog("DRAFT_DONE", f"{sec_obj.id}/{sub_obj.id} dur_ms={int((time.perf_counter()-tloc)*1000)}")
                 return res.final_output  # type: ignore
             except Exception as ex:
-                srvlog(
-                    "DRAFT_ERR",
-                    f"{sec_obj.id}/{sub_obj.id}: attempt={i+1}/3 {type(ex).__name__}: {str(ex)[:200]}",
-                )
+                srvlog("DRAFT_ERR", f"{sec_obj.id}/{sub_obj.id}: attempt={i+1}/3 {type(ex).__name__}: {str(ex)[:200]}")
                 if i == 2:
                     break
                 _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
         raise RuntimeError(f"Draft generation failed for {sec_obj.id}/{sub_obj.id}")
+
+    def _run_section_draft(sec_obj):
+        ssw_user_local = (
+            "<input>\n"
+            f"<topic>{topic}</topic>\n"
+            f"<lang>{lang}</lang>\n"
+            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+            f"<section_id>{sec_obj.id}</section_id>\n"
+            f"<content_items_json>{_json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sec_obj, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
+            f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
+            "</input>"
+        )
+        backoff_seq = (2, 4, 8)
+        for i in range(3):
+            try:
+                tloc = time.perf_counter()
+                srvlog("DRAFT_START", f"{sec_obj.id} attempt={i+1}/3")
+                res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
+                srvlog("DRAFT_DONE", f"{sec_obj.id} dur_ms={int((time.perf_counter()-tloc)*1000)}")
+                return res.final_output  # type: ignore
+            except Exception as ex:
+                srvlog("DRAFT_ERR", f"{sec_obj.id}: attempt={i+1}/3 {type(ex).__name__}: {str(ex)[:200]}")
+                if i == 2:
+                    break
+                _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
+        raise RuntimeError(f"Draft generation failed for {sec_obj.id}")
 
     # Round-based generation until all subsections are produced, or hard fail
     max_rounds = 3
@@ -241,74 +284,131 @@ def generate_article(
     srvlog("DRAFT_CONF", f"max_rounds={max_rounds} round_backoff_s={round_backoff}")
 
     draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
-    remaining = [(sec, sub) for (sec, sub) in all_subs_writing]
+    section_result_by_id: dict[str, Any] = {}
+    if style_key == "article_style_2":
+        remaining_secs = [sec for sec in outline.sections]
+    else:
+        remaining = [(sec, sub) for (sec, sub) in all_subs_writing]
     writing_t0 = time.perf_counter()
     for r in range(1, max_rounds + 1):
-        if not remaining:
-            break
-        srvlog("DRAFT_ROUND", f"round={r}/{max_rounds} jobs={len(remaining)} max_workers={max_workers}")
-        failed_pairs: list[tuple[str, str]] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            fut_map = {ex.submit(_run_subsection_draft, sec, sub): (sec.id, sub.id) for (sec, sub) in remaining}
-            for fut in as_completed(list(fut_map.keys())):
-                key = fut_map[fut]
+        if style_key == "article_style_2":
+            if not remaining_secs:
+                break
+            srvlog("DRAFT_ROUND", f"round={r}/{max_rounds} jobs={len(remaining_secs)} max_workers={max_workers}")
+            failed_secs: list[str] = []
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                fut_map = {ex.submit(_run_section_draft, sec): sec.id for sec in remaining_secs}
+                for fut in as_completed(list(fut_map.keys())):
+                    sid = fut_map[fut]
+                    try:
+                        res = fut.result()
+                        section_result_by_id[sid] = res
+                        srvlog("DRAFT_OK", f"{sid}")
+                    except Exception as ex:
+                        failed_secs.append(sid)
+                        srvlog("DRAFT_FAIL", f"{sid}: {type(ex).__name__}: {str(ex)[:200]}")
+            remaining_secs = [sec for sec in outline.sections if sec.id in set(failed_secs)]
+            if remaining_secs and r < max_rounds:
+                _sleep(round_backoff)
+        else:
+            if not remaining:
+                break
+            srvlog("DRAFT_ROUND", f"round={r}/{max_rounds} jobs={len(remaining)} max_workers={max_workers}")
+            failed_pairs: list[tuple[str, str]] = []
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                fut_map = {ex.submit(_run_subsection_draft, sec, sub): (sec.id, sub.id) for (sec, sub) in remaining}
+                for fut in as_completed(list(fut_map.keys())):
+                    key = fut_map[fut]
+                    try:
+                        res = fut.result()
+                        draft_result_by_key[key] = res
+                        srvlog("DRAFT_OK", f"{key[0]}/{key[1]}")
+                    except Exception as ex:
+                        failed_pairs.append(key)
+                        srvlog("DRAFT_FAIL", f"{key[0]}/{key[1]}: {type(ex).__name__}: {str(ex)[:200]}")
+            remaining = []
+            for (sid, ssid) in failed_pairs:
+                for sec in outline.sections:
+                    if sec.id == sid:
+                        for sub in sec.subsections:
+                            if sub.id == ssid:
+                                remaining.append((sec, sub))
+                                break
+            if remaining and r < max_rounds:
+                _sleep(round_backoff)
+
+    if style_key == "article_style_2":
+        if remaining_secs:
+            srvlog("DRAFT_FINAL", f"count={len(remaining_secs)}")
+            still_missing_s: list[str] = []
+            for sec in remaining_secs:
+                ssw_user_inline = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
+                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
+                    "</input>"
+                )
                 try:
-                    res = fut.result()
-                    draft_result_by_key[key] = res
-                    srvlog("DRAFT_OK", f"{key[0]}/{key[1]}")
+                    out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
+                    d = out.final_output  # type: ignore
+                    section_result_by_id[sec.id] = d
+                    srvlog("FINAL_OK", f"{sec.id}")
                 except Exception as ex:
-                    failed_pairs.append(key)
-                    srvlog("DRAFT_FAIL", f"{key[0]}/{key[1]}: {type(ex).__name__}: {str(ex)[:200]}")
-        remaining = []
-        # Next round will try failed only
-        for (sid, ssid) in failed_pairs:
-            # re-find sec/sub objects by ids to preserve structure
-            for sec in outline.sections:
-                if sec.id == sid:
-                    for sub in sec.subsections:
-                        if sub.id == ssid:
-                            remaining.append((sec, sub))
-                            break
-        if remaining and r < max_rounds:
-            _sleep(round_backoff)
+                    still_missing_s.append(sec.id)
+                    srvlog("FINAL_FAIL", f"{sec.id}: {type(ex).__name__}: {str(ex)[:200]}")
+            if still_missing_s:
+                missing_str = ", ".join(still_missing_s)
+                raise RuntimeError(f"Some sections failed to generate: {missing_str}")
+    else:
+        if 'remaining' in locals() and remaining:
+            srvlog("DRAFT_FINAL", f"count={len(remaining)}")
+            still_missing: list[tuple[str, str]] = []
+            for (sec, sub) in remaining:
+                ssw_user_inline = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{lang}</lang>\n"
+                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    f"<subsection_id>{sub.id}</subsection_id>\n"
+                    "</input>"
+                )
+                try:
+                    out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
+                    d: DraftChunk = out.final_output  # type: ignore
+                    draft_result_by_key[(sec.id, sub.id)] = d
+                    srvlog("FINAL_OK", f"{sec.id}/{sub.id}")
+                except Exception as ex:
+                    still_missing.append((sec.id, sub.id))
+                    srvlog("FINAL_FAIL", f"{sec.id}/{sub.id}: {type(ex).__name__}: {str(ex)[:200]}")
+            if still_missing:
+                missing_str = ", ".join([f"{sid}/{ssid}" for (sid, ssid) in still_missing])
+                raise RuntimeError(f"Some subsections failed to generate: {missing_str}")
 
-    if remaining:
-        # Final sequential attempts (strong retry via sync runner)
-        srvlog("DRAFT_FINAL", f"count={len(remaining)}")
-        still_missing: list[tuple[str, str]] = []
-        for (sec, sub) in remaining:
-            ssw_user_inline = (
-                "<input>\n"
-                f"<topic>{topic}</topic>\n"
-                f"<lang>{lang}</lang>\n"
-                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                f"<section_id>{sec.id}</section_id>\n"
-                f"<subsection_id>{sub.id}</subsection_id>\n"
-                "</input>"
-            )
-            try:
-                out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
-                d: DraftChunk = out.final_output  # type: ignore
-                draft_result_by_key[(sec.id, sub.id)] = d
-                srvlog("FINAL_OK", f"{sec.id}/{sub.id}")
-            except Exception as ex:
-                still_missing.append((sec.id, sub.id))
-                srvlog("FINAL_FAIL", f"{sec.id}/{sub.id}: {type(ex).__name__}: {str(ex)[:200]}")
-
-        if still_missing:
-            # Hard fail: do not finish pipeline with gaps
-            missing_str = ", ".join([f"{sid}/{ssid}" for (sid, ssid) in still_missing])
-            raise RuntimeError(f"Some subsections failed to generate: {missing_str}")
-
-    for sec in outline.sections:
-        for sub in sec.subsections:
-            key = (sec.id, sub.id)
-            d = draft_result_by_key.get(key)
+    if style_key == "article_style_2":
+        for sec in outline.sections:
+            d = section_result_by_id.get(sec.id)
             if not d:
                 continue
-            drafts_by_subsection[key] = d
-            log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
-    srvlog("DRAFT_SUMMARY", f"ok={len(drafts_by_subsection)} total={len(all_subs_writing)} dur_ms={int((time.perf_counter()-writing_t0)*1000)}")
+            drafts_by_section[sec.id] = d
+            try:
+                log("✍️ Draft · Section", f"{sec.id} → ```json\n{d.model_dump_json()}\n```")
+            except Exception:
+                pass
+        srvlog("DRAFT_SUMMARY", f"style=2 ok={len(drafts_by_section)} total={len(outline.sections)} dur_ms={int((time.perf_counter()-writing_t0)*1000)}")
+    else:
+        for sec in outline.sections:
+            for sub in sec.subsections:
+                key = (sec.id, sub.id)
+                d = draft_result_by_key.get(key)
+                if not d:
+                    continue
+                drafts_by_subsection[key] = d
+                log("✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
+        srvlog("DRAFT_SUMMARY", f"style=1 ok={len(drafts_by_subsection)} dur_ms={int((time.perf_counter()-writing_t0)*1000)}")
 
     # Refining module removed in 2‑module pipeline
 
@@ -337,6 +437,9 @@ def generate_article(
         return "Оглавление"
 
     toc_lines = [f"## {_toc_title()}"]
+    if (outline.main_idea or "").strip():
+        toc_lines.append("")
+        toc_lines.append(f"**Основная идея:** {outline.main_idea.strip()}")
     for i, sec in enumerate(outline.sections, start=1):
         toc_lines.append(f"- {i}. {sec.title}")
         for j, sub in enumerate(sec.subsections, start=1):
@@ -346,24 +449,24 @@ def generate_article(
     atl_agent = build_article_title_lead_writer_agent(provider=_prov)
     for i, sec in enumerate(outline.sections, start=1):
         _lbl = _section_label(i)
-        # Ensure exactly one blank line before each section (but not at very start)
         if body_lines:
             body_lines.append("")
         if _lbl:
             body_lines.append(f"## {_lbl} {sec.title}")
         else:
             body_lines.append(f"## {sec.title}")
-        # Per-section lead
         try:
-            sec_md_parts = []
-            for sub in sec.subsections:
-                d = drafts_by_subsection.get((sec.id, sub.id))
-                sub_title = d.title if d and d.title else sub.title
-                sub_md = (d.markdown if d else "").strip()
-                sec_md_parts.append(f"### {sub_title}\n\n{sub_md}")
-            # Build section body for lead agent with a single blank line between subsections
-            sec_body_text = "\n\n".join(sec_md_parts)
-            # Trim very long sections for lead agent
+            if style_key == "article_style_2":
+                d = drafts_by_section.get(sec.id)
+                sec_body_text = (getattr(d, "markdown", "") or "").strip()
+            else:
+                sec_md_parts = []
+                for sub in sec.subsections:
+                    d = drafts_by_subsection.get((sec.id, sub.id))
+                    sub_title = d.title if d and d.title else sub.title
+                    sub_md = (d.markdown if d else "").strip()
+                    sec_md_parts.append(f"### {sub_title}\n\n{sub_md}")
+                sec_body_text = "\n\n".join(sec_md_parts)
             try:
                 sec_max_chars = int(os.getenv("SECTION_LEAD_MAX_CHARS", "2000000"))
             except Exception:
@@ -376,6 +479,7 @@ def generate_article(
                 f"<lang>{lang}</lang>\n"
                 f"<article_markdown>{sec.title}\n\n{used_sec}</article_markdown>\n"
                 f"<section_id>{sec.id}</section_id>\n"
+                f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
                 "</input>"
             )
             t_sec = time.perf_counter()
@@ -386,39 +490,40 @@ def generate_article(
                 body_lines.append(sec_lead)
                 srvlog("SECTION_LEAD_OK", f"sec={sec.id} lead_len={len(sec_lead)} dur_ms={int((time.perf_counter()-t_sec)*1000)}")
             else:
-                # Retry with only subsection titles to help agent summarize
-                titles_bullets = "\n".join([f"- {s.title}" for s in sec.subsections])
-                sec_user2 = (
-                    "<input>\n"
-                    f"<topic>{topic}</topic>\n"
-                    f"<lang>{lang}</lang>\n"
-                    f"<article_markdown>{sec.title}\n\n{titles_bullets}</article_markdown>\n"
-                    f"<section_id>{sec.id}</section_id>\n"
-                    "</input>"
-                )
-                try:
-                    t_sec2 = time.perf_counter()
-                    sec_lead_obj2: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user2).final_output  # type: ignore
-                    sec_lead2 = (sec_lead_obj2.lead_markdown or "").strip()
-                    if sec_lead2:
-                        body_lines.append("")
-                        body_lines.append(sec_lead2)
-                        srvlog("SECTION_LEAD_OK", f"sec={sec.id} retry=1 lead_len={len(sec_lead2)} dur_ms={int((time.perf_counter()-t_sec2)*1000)}")
-                    else:
-                        srvlog("SECTION_LEAD_EMPTY", f"{sec.id}: lead empty after retries")
-                except Exception as e2:
-                    srvlog("SECTION_LEAD_RETRY_ERR", f"{sec.id}: {type(e2).__name__}: {e2}")
+                if style_key != "article_style_2":
+                    titles_bullets = "\n".join([f"- {s.title}" for s in sec.subsections])
+                    sec_user2 = (
+                        "<input>\n"
+                        f"<topic>{topic}</topic>\n"
+                        f"<lang>{lang}</lang>\n"
+                        f"<article_markdown>{sec.title}\n\n{titles_bullets}</article_markdown>\n"
+                        f"<section_id>{sec.id}</section_id>\n"
+                        "</input>"
+                    )
+                    try:
+                        t_sec2 = time.perf_counter()
+                        sec_lead_obj2: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user2).final_output  # type: ignore
+                        sec_lead2 = (sec_lead_obj2.lead_markdown or "").strip()
+                        if sec_lead2:
+                            body_lines.append("")
+                            body_lines.append(sec_lead2)
+                            srvlog("SECTION_LEAD_OK", f"sec={sec.id} retry=1 lead_len={len(sec_lead2)} dur_ms={int((time.perf_counter()-t_sec2)*1000)}")
+                        else:
+                            srvlog("SECTION_LEAD_EMPTY", f"{sec.id}: lead empty after retries")
+                    except Exception as e2:
+                        srvlog("SECTION_LEAD_RETRY_ERR", f"{sec.id}: {type(e2).__name__}: {e2}")
         except Exception as e:
             srvlog("SECTION_LEAD_ERR", f"{sec.id}: {type(e).__name__}: {e}")
-        for sub in sec.subsections:
-            d = drafts_by_subsection.get((sec.id, sub.id))
-            sub_title = d.title if d and d.title else sub.title
-            sub_md = (d.markdown if d else "").strip()
-            body_lines.append("")
-            body_lines.append(f"### {sub_title}")
-            if sub_md:
+        if style_key != "article_style_2":
+            for sub in sec.subsections:
+                d = drafts_by_subsection.get((sec.id, sub.id))
+                sub_title = d.title if d and d.title else sub.title
+                sub_md = (d.markdown if d else "").strip()
                 body_lines.append("")
-                body_lines.append(sub_md)
+                body_lines.append(f"### {sub_title}")
+                if sub_md:
+                    body_lines.append("")
+                    body_lines.append(sub_md)
     toc_text = "\n".join(toc_lines)
     body_text = "\n".join(body_lines)
 
@@ -435,6 +540,7 @@ def generate_article(
         f"<topic>{topic}</topic>\n"
         f"<lang>{lang}</lang>\n"
         f"<article_markdown>{toc_text}\n\n{used_body}</article_markdown>\n"
+        f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
         "</input>"
     )
     try:
@@ -479,6 +585,7 @@ def generate_article(
     header = (
         f"# 🧾 Article Generation Log\n\n"
         f"- provider: {_prov}\n"
+        f"- style: {style_key}\n"
         f"- lang: {lang}\n"
         f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
         f"- finished_at: {finished_at.strftime('%Y-%m-%d %H:%M')}\n"

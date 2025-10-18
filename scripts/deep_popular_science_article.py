@@ -51,6 +51,7 @@ def main() -> None:
     parser.add_argument("--topic", type=str, default="", help="Topic to generate about")
     parser.add_argument("--lang", type=str, default="auto", help="Language: auto|ru|en")
     parser.add_argument("--provider", type=str, default="openai", help="LLM provider: openai|gemini|claude")
+    parser.add_argument("--style", type=str, default="article_style_1", help="Article style: article_style_1|article_style_2")
     parser.add_argument("--out", type=str, default="deep_article", help="Output subdirectory")
     parser.add_argument("--include-logs", action="store_true", help="Save detailed process log")
     args = parser.parse_args()
@@ -84,9 +85,30 @@ def main() -> None:
     _log_append(logs, "🧭 Config", f"provider={provider}\nlang={args.lang}\ntopic={topic}")
 
     # Module 1: Outline
-    from llm_agents.deep_popular_science_article.module_01_structure.sections_and_subsections import (
-        build_sections_and_subsections_agent,
-    )
+    # Select agents by style
+    style_key = (args.style or "article_style_1").strip().lower()
+    if style_key not in {"article_style_1", "article_style_2"}:
+        style_key = "article_style_1"
+    if style_key == "article_style_2":
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_01_structure.sections_and_subsections import (  # type: ignore
+            build_sections_and_subsections_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.subsection_writer import (  # type: ignore
+            build_section_writer_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.article_title_lead_writer import (  # type: ignore
+            build_article_title_lead_writer_agent,
+        )
+    else:
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_01_structure.sections_and_subsections import (  # type: ignore
+            build_sections_and_subsections_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_02_writing.subsection_writer import (  # type: ignore
+            build_subsection_writer_agent,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_02_writing.article_title_lead_writer import (  # type: ignore
+            build_article_title_lead_writer_agent,
+        )
     # content_of_subsections removed in 2‑module pipeline
 
     user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{args.lang}</lang>\n</input>"
@@ -137,31 +159,52 @@ def main() -> None:
 
     # Module 2: Writing (2‑модульная архитектура)
 
-    from llm_agents.deep_popular_science_article.module_02_writing.subsection_writer import build_subsection_writer_agent
-    from llm_agents.deep_popular_science_article.module_02_writing.article_title_lead_writer import build_article_title_lead_writer_agent
-
-    ssw_agent = build_subsection_writer_agent()
+    if style_key == "article_style_2":
+        ssw_agent = build_section_writer_agent()
+    else:
+        ssw_agent = build_subsection_writer_agent()
     drafts_by_subsection: dict[tuple[str, str], DraftChunk] = {}
     for sec in outline.sections:
-        for sub in sec.subsections:
+        if style_key == "article_style_2":
             ssw_user = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{args.lang}</lang>\n"
                 f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
                 f"<section_id>{sec.id}</section_id>\n"
-                f"<subsection_id>{sub.id}</subsection_id>\n"
-                f"<content_items_json>{json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sub, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
+                f"<content_items_json>{json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sec, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
+                f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
                 "</input>"
             )
             try:
-                d: DraftChunk = Runner.run_sync(ssw_agent, ssw_user).final_output  # type: ignore
+                from schemas.article import SectionDraftChunk as _SDC  # type: ignore
+                d: _SDC = Runner.run_sync(ssw_agent, ssw_user).final_output  # type: ignore
             except Exception as e:
-                print(f"[CLI][DRAFT_ERR] {sec.id}/{sub.id}: {type(e).__name__}: {e}", file=_sys.stderr)
+                print(f"[CLI][DRAFT_ERR] {sec.id}: {type(e).__name__}: {e}", file=_sys.stderr)
                 _tb.print_exc()
                 raise
-            drafts_by_subsection[(sec.id, sub.id)] = d
-            _log_append(logs, "✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
+            drafts_by_subsection[(sec.id, "__whole__")] = d  # store per-section
+            _log_append(logs, "✍️ Draft · Section", f"{sec.id} → ```json\n{d.model_dump_json()}\n```")
+        else:
+            for sub in sec.subsections:
+                ssw_user = (
+                    "<input>\n"
+                    f"<topic>{topic}</topic>\n"
+                    f"<lang>{args.lang}</lang>\n"
+                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                    f"<section_id>{sec.id}</section_id>\n"
+                    f"<subsection_id>{sub.id}</subsection_id>\n"
+                    f"<content_items_json>{json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sub, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
+                    "</input>"
+                )
+                try:
+                    d: DraftChunk = Runner.run_sync(ssw_agent, ssw_user).final_output  # type: ignore
+                except Exception as e:
+                    print(f"[CLI][DRAFT_ERR] {sec.id}/{sub.id}: {type(e).__name__}: {e}", file=_sys.stderr)
+                    _tb.print_exc()
+                    raise
+                drafts_by_subsection[(sec.id, sub.id)] = d
+                _log_append(logs, "✍️ Draft · Subsection", f"{sec.id}/{sub.id} → ```json\n{d.model_dump_json()}\n```")
     # Refine module removed in 2‑module pipeline
 
     # Assemble final Markdown
@@ -206,19 +249,24 @@ def main() -> None:
         else:
             body_lines.append(f"## {sec.title}")
         try:
-            sec_md_parts = []
-            for sub in sec.subsections:
-                d = drafts_by_subsection.get((sec.id, sub.id))
-                sub_title = d.title if d and d.title else sub.title
-                sub_md = (d.markdown if d else "").strip()
-                sec_md_parts.append(f"### {sub_title}\n\n{sub_md}")
-            sec_body_text = "\n\n".join(sec_md_parts)
+            if style_key == "article_style_2":
+                _sd = drafts_by_subsection.get((sec.id, "__whole__"))
+                sec_body_text = (getattr(_sd, "markdown", "") or "").strip()
+            else:
+                sec_md_parts = []
+                for sub in sec.subsections:
+                    d = drafts_by_subsection.get((sec.id, sub.id))
+                    sub_title = d.title if d and d.title else sub.title
+                    sub_md = (d.markdown if d else "").strip()
+                    sec_md_parts.append(f"### {sub_title}\n\n{sub_md}")
+                sec_body_text = "\n\n".join(sec_md_parts)
             sec_user = (
                 "<input>\n"
                 f"<topic>{topic}</topic>\n"
                 f"<lang>{args.lang}</lang>\n"
                 f"<article_markdown>{sec.title}\n\n{sec_body_text}</article_markdown>\n"
                 f"<section_id>{sec.id}</section_id>\n"
+                f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
                 "</input>"
             )
             sec_lead_obj = Runner.run_sync(atl_agent, sec_user).final_output  # type: ignore
@@ -228,15 +276,16 @@ def main() -> None:
                 body_lines.append(sec_lead)
         except Exception as e:
             print(f"[CLI][SECTION_LEAD_ERR] {sec.id}: {type(e).__name__}: {e}", file=_sys.stderr)
-        for sub in sec.subsections:
-            d = drafts_by_subsection.get((sec.id, sub.id))
-            sub_title = d.title if d and d.title else sub.title
-            sub_md = (d.markdown if d else "").strip()
-            body_lines.append("")
-            body_lines.append(f"### {sub_title}")
-            if sub_md:
+        if style_key != "article_style_2":
+            for sub in sec.subsections:
+                d = drafts_by_subsection.get((sec.id, sub.id))
+                sub_title = d.title if d and d.title else sub.title
+                sub_md = (d.markdown if d else "").strip()
                 body_lines.append("")
-                body_lines.append(sub_md)
+                body_lines.append(f"### {sub_title}")
+                if sub_md:
+                    body_lines.append("")
+                    body_lines.append(sub_md)
 
     toc_text = os.linesep.join(toc_lines)
     body_text = os.linesep.join(body_lines)
@@ -248,6 +297,7 @@ def main() -> None:
         f"<topic>{topic}</topic>\n"
         f"<lang>{args.lang}</lang>\n"
         f"<article_markdown>{toc_text}\n\n{body_text}</article_markdown>\n"
+        f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
         "</input>"
     )
     try:

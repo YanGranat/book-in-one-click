@@ -130,6 +130,7 @@ class GenerateStates(StatesGroup):
     ChoosingDepth = State()
     ChoosingRefine = State()
     ChoosingGenType = State()
+    ChoosingArticleStyle = State()
     ChoosingPostStyle = State()
     ChoosingSeriesPreset = State()
     ChoosingSeriesCount = State()
@@ -386,6 +387,15 @@ def build_post_style_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb.add(
         InlineKeyboardButton(text=("Стиль 1" if ru else "Style 1"), callback_data="set:post_style:post_style_1"),
         InlineKeyboardButton(text=("Стиль 2" if ru else "Style 2"), callback_data="set:post_style:post_style_2"),
+    )
+    return kb
+
+def build_article_style_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    ru = _is_ru(ui_lang)
+    kb.add(
+        InlineKeyboardButton(text=("Стиль 1" if ru else "Style 1"), callback_data="set:article_style:article_style_1"),
+        InlineKeyboardButton(text=("Стиль 2" if ru else "Style 2"), callback_data="set:article_style:article_style_2"),
     )
     return kb
 
@@ -1150,11 +1160,14 @@ def create_dispatcher() -> Dispatcher:
             await GenerateStates.ChoosingSeriesPreset.set()
             return
         if kind == "article":
-            # Article flow: mark and ask for topic
-            await state.update_data(series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
-            prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
-            await GenerateStates.WaitingTopic.set()
+            # Ask for article style like posts
+            prompt = (
+                "Выберите стиль статьи:\n\n• Стиль 1 — разделы и подразделы.\n• Стиль 2 — только разделы + основная идея."
+                if ru
+                else "Choose article style:\n\n• Style 1 - sections with subsections.\n• Style 2 - sections only + main idea."
+            )
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_article_style_keyboard(ui_lang))
+            await GenerateStates.ChoosingArticleStyle.set()
             return
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:post_style:"), state=GenerateStates.ChoosingPostStyle)  # type: ignore
     async def cb_post_style(query: types.CallbackQuery, state: FSMContext):
@@ -2210,6 +2223,7 @@ def create_dispatcher() -> Dispatcher:
                         topic,
                         lang=eff_lang,
                         provider=((prov if prov != "auto" else "openai") or "openai"),
+                        style=(data.get("article_style") or "article_style_1"),
                         output_subdir="deep_article",
                         job_meta={"user_id": message.from_user.id if message.from_user else 0, "db_user_id": db_user_id, "chat_id": message.chat.id, "job_id": job_id, "incognito": inc_flag},
                         enable_research=False,

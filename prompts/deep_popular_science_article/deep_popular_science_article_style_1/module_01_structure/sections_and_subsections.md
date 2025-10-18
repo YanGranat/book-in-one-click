@@ -30,7 +30,8 @@
 </guidelines>
 
 <output>
-Верни строго JSON ArticleOutline: {sections:[{id,title,subsections:[{id,title,content_items?:[{id,point}]}]}]}
+Верни строго JSON ArticleOutline: {main_idea?,sections:[{id,title,subsections:[{id,title,content_items?:[{id,point}]}]}]}
+- main_idea: одна фраза — основная идея статьи (главная мысль/нить повествования).
 - id: s01, s02, … для разделов и ss01, ss02, … в рамках каждого раздела (локальная нумерация ok: ss01..ssNN заново в каждом разделе).
 - Если expand_content=true — для каждого подраздела добавь, иначе content_items можно опустить.
 </output>
@@ -41,4 +42,5 @@
 - Если outline_json не передан — сгенерируй структуру с нуля.
 - Если outline_json передан — улучши структуру.
 - Если expand_content=true — обязательно добавь content_items для каждого подраздела; следи за отсутствием повторов между подразделами.
+ - Обязательно добавь main_idea как одну фразу основной идеи статьи.
 </requirements>

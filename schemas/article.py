@@ -23,11 +23,15 @@ class SectionOutline(BaseModel):
     id: str
     title: str
     lead: Optional[str] = None
+    # For style 2 (sections-only) we allow content items directly on the section
+    content_items: List[ContentItem] = Field(default_factory=list)
     subsections: List[SubsectionOutline] = Field(default_factory=list)
 
 
 class ArticleOutline(BaseModel):
     title: Optional[str] = None
+    # Optional main idea for the whole article (style 2)
+    main_idea: Optional[str] = None
     sections: List[SectionOutline] = Field(default_factory=list)
 
 
@@ -61,6 +65,12 @@ class DraftChunk(BaseModel):
     markdown: str
 
 
+class SectionDraftChunk(BaseModel):
+    section_id: str
+    title: str
+    markdown: str
+
+
 class LeadChunk(BaseModel):
     scope: Literal["article", "section"]
     section_id: Optional[str] = None
@@ -86,6 +96,7 @@ __all__ = [
     "OutlineOperation",
     "OutlineChangeList",
     "DraftChunk",
+    "SectionDraftChunk",
     "LeadChunk",
     "TitleProposal",
     "ArticleTitleLead",
