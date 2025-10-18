@@ -437,9 +437,6 @@ def generate_article(
         return "Оглавление"
 
     toc_lines = [f"## {_toc_title()}"]
-    if (outline.main_idea or "").strip():
-        toc_lines.append("")
-        toc_lines.append(f"**Основная идея:** {outline.main_idea.strip()}")
     for i, sec in enumerate(outline.sections, start=1):
         toc_lines.append(f"- {i}. {sec.title}")
         for j, sub in enumerate(sec.subsections, start=1):
