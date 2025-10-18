@@ -1208,6 +1208,20 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
             await GenerateStates.WaitingTopic.set()
             return
+
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:article_style:"), state=GenerateStates.ChoosingArticleStyle)  # type: ignore
+    async def cb_article_style(query: types.CallbackQuery, state: FSMContext):
+        style = (query.data or "").split(":")[-1]
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ru = _is_ru(ui_lang)
+        await query.answer()
+        # Persist article style in FSM and proceed to topic
+        await state.update_data(article_style=style, series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
+        prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+        await GenerateStates.WaitingTopic.set()
+        return
         # Series branch: no FC/Refine for series
         if is_superadmin:
             await state.update_data(gen_article=False, series_mode=None, series_count=None)
