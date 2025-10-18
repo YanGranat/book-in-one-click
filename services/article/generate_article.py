@@ -137,8 +137,6 @@ def generate_article(
     logger.info(f"Parallelism configured: {max_workers} workers")
 
     # Agents import per style
-    if style_key not in {"article_style_1", "article_style_2"}:
-        style_key = "article_style_1"
     if style_key == "article_style_2":
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_01_structure.sections import (  # type: ignore
             build_sections_agent,

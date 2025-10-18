@@ -766,6 +766,8 @@ def generate_post(
                     )
                     plan_heavy = run_json_with_provider(strict_ident, f"<post>\n{content}\n</post>\n<lang>{lang}</lang>", ResearchPlan, speed="heavy")
                     points = plan_heavy.points or []
+                    if points:
+                        plan = plan_heavy  # Update plan to heavy version if it succeeded
                     # Log fallback plan
                     try:
                         log("🔎 Fact-check · Plan (fallback)", f"points={len(points)}")
@@ -777,9 +779,12 @@ def generate_post(
             if factcheck_max_items and factcheck_max_items > 0:
                 points = points[: factcheck_max_items]
             
-            # Log fact-check plan JSON for tracking
+            # Log fact-check plan JSON for tracking (use latest plan)
             try:
-                log("🔎 Fact-check · Plan", f"```json\n{plan.model_dump_json()}\n```")
+                if hasattr(plan, 'model_dump_json'):
+                    log("🔎 Fact-check · Plan", f"```json\n{plan.model_dump_json()}\n```")
+                else:
+                    log("🔎 Fact-check · Plan", f"points={len(points)}")
             except Exception:
                 log("🔎 Fact-check · Plan", f"points={len(points)}")
             
