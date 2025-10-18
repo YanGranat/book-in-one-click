@@ -488,7 +488,8 @@ def generate_article(
                 f"<lang>{lang}</lang>\n"
                 f"<article_markdown>{sec.title}\n\n{used_sec}</article_markdown>\n"
                 f"<section_id>{sec.id}</section_id>\n"
-                "</input>"
+                + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
+                + "</input>"
             )
             t_sec = time.perf_counter()
             sec_lead_obj: ArticleTitleLead = _run_with_retries_sync(atl_agent, sec_user).final_output  # type: ignore
@@ -548,7 +549,8 @@ def generate_article(
         f"<topic>{topic}</topic>\n"
         f"<lang>{lang}</lang>\n"
         f"<article_markdown>{toc_text}\n\n{used_body}</article_markdown>\n"
-        "</input>"
+        + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
+        + "</input>"
     )
     try:
         t_atl = time.perf_counter()

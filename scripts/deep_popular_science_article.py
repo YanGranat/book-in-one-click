@@ -265,7 +265,8 @@ def main() -> None:
                 f"<lang>{args.lang}</lang>\n"
                 f"<article_markdown>{sec.title}\n\n{sec_body_text}</article_markdown>\n"
                 f"<section_id>{sec.id}</section_id>\n"
-                "</input>"
+                + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
+                + "</input>"
             )
             sec_lead_obj = Runner.run_sync(atl_agent, sec_user).final_output  # type: ignore
             sec_lead = (getattr(sec_lead_obj, "lead_markdown", "") or "").strip()
@@ -295,7 +296,8 @@ def main() -> None:
         f"<topic>{topic}</topic>\n"
         f"<lang>{args.lang}</lang>\n"
         f"<article_markdown>{toc_text}\n\n{body_text}</article_markdown>\n"
-        "</input>"
+        + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
+        + "</input>"
     )
     try:
         atl: ArticleTitleLead = Runner.run_sync(atl_agent, atl_user).final_output  # type: ignore
