@@ -1234,10 +1234,10 @@ def create_dispatcher() -> Dispatcher:
             pass
         # Persist article style in FSM and proceed to topic
         await state.update_data(article_style=style, series_mode=None, series_count=None, gen_article=True, active_flow=None, next_after_fc=None, provider="openai")
-        prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
-        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
-        await GenerateStates.WaitingTopic.set()
-        return
+            prompt = "Отправьте тему для статьи:" if ru else "Send a topic for your article:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+            await GenerateStates.WaitingTopic.set()
+            return
         # Series branch: no FC/Refine for series
         if is_superadmin:
             await state.update_data(gen_article=False, series_mode=None, series_count=None)

@@ -8,15 +8,21 @@ from utils.models import get_model
 
 
 def _load_prompt() -> str:
-    prompt_path = (
-        Path(__file__).resolve().parents[5]
+    base_dir = (
+        Path(__file__).resolve().parents[4]
         / "prompts"
         / "deep_popular_science_article"
         / "deep_popular_science_article_style_1"
         / "module_01_structure"
-        / "sections_and_subsections.md"
     )
-    return prompt_path.read_text(encoding="utf-8")
+    # Keep compatibility if someone renames in future
+    p1 = base_dir / "sections_and_subsections.md"
+    if p1.exists():
+        return p1.read_text(encoding="utf-8")
+    p2 = base_dir / "sections.md"
+    if p2.exists():
+        return p2.read_text(encoding="utf-8")
+    return p1.read_text(encoding="utf-8")
 
 
 def try_import_sdk():
