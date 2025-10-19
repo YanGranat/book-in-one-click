@@ -364,9 +364,9 @@ def generate_post(
     if _prov == "openai":
         try:
             if style_key == "post_style_2":
-                from llm_agents.post.post_style_2.module_01_writing.writer import build_post_writer_agent  # type: ignore
+                from llm_agents.posts.john_oliver_explains_post.john_oliver_explains_post_style_1.module_01_writing.writer import build_post_writer_agent  # type: ignore
             else:
-                from llm_agents.post.post_style_1.module_01_writing.writer import build_post_writer_agent  # type: ignore
+                from llm_agents.posts.popular_science_post.popular_science_post_style_1.module_01_writing.writer import build_post_writer_agent  # type: ignore
             if style_key == "post_style_2":
                 # For style 2: send only user message (no system instructions)
                 from agents import Agent as _Agent, ModelSettings as _MS  # type: ignore
@@ -400,7 +400,7 @@ def generate_post(
             if style_key == "post_style_2":
                 # Second step: run dedicated agent built on title_json.md prompt (SDK path),
                 # which removes disclaimers and returns strict JSON {title, text}.
-                from llm_agents.post.post_style_2.module_01_writing.title_json import build_title_json_agent  # type: ignore
+                from llm_agents.posts.john_oliver_explains_post.john_oliver_explains_post_style_1.module_01_writing.title_json import build_title_json_agent  # type: ignore
                 # Force gpt-5 for title agent to support reasoning
                 title_agent = build_title_json_agent(model="gpt-5")
                 
@@ -588,10 +588,10 @@ def generate_post(
                 # Safety: should not happen due to guard above
                 report = None
             else:
-                from llm_agents.post.post_style_1.module_02_review.identify_points import build_identify_points_agent  # type: ignore
-                from llm_agents.post.post_style_1.module_02_review.iterative_research import build_iterative_research_agent  # type: ignore
-                from llm_agents.post.post_style_1.module_02_review.recommendation import build_recommendation_agent  # type: ignore
-                from llm_agents.post.post_style_1.module_02_review.sufficiency import build_sufficiency_agent  # type: ignore
+                from llm_agents.posts.popular_science_post.popular_science_post_style_1.module_02_review.identify_points import build_identify_points_agent  # type: ignore
+                from llm_agents.posts.popular_science_post.popular_science_post_style_1.module_02_review.iterative_research import build_iterative_research_agent  # type: ignore
+                from llm_agents.posts.popular_science_post.popular_science_post_style_1.module_02_review.recommendation import build_recommendation_agent  # type: ignore
+                from llm_agents.posts.popular_science_post.popular_science_post_style_1.module_02_review.sufficiency import build_sufficiency_agent  # type: ignore
             from utils.config import load_config
 
             _emit("factcheck:init")
