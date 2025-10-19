@@ -295,18 +295,6 @@ def generate_series(
                 "sufficiency_heavy_after": int(sufficiency_heavy_after),
                 "max_iterations": int(max_iterations),
                 "output_mode": output_mode,
-                "factcheck": eff_factcheck,
-                "refine": eff_refine,
-                "inbound_factcheck": bool(factcheck),
-                "inbound_refine": bool(refine),
-            },
-        )
-        logger.debug(
-            "GUARD_SERIES_DISABLES_FC_REFINE",
-            extra={
-                "reason": "series pipeline does not support FC/Refine",
-                "effective_factcheck": eff_factcheck,
-                "effective_refine": eff_refine,
             },
         )
     except Exception:
@@ -488,7 +476,6 @@ def generate_series(
                 lang=lang,
                 provider=provider,
                 factcheck=eff_factcheck,
-                research_iterations=research_iterations,
                 output_subdir=output_subdir,
                 job_meta=job_meta,
                 use_refine=eff_refine,
@@ -515,7 +502,6 @@ def generate_series(
                 lang=lang,
                 provider=provider,
                 factcheck=eff_factcheck,
-                research_iterations=research_iterations,
                 output_subdir=output_subdir,
                 job_meta=job_meta,
                 use_refine=eff_refine,
@@ -598,8 +584,6 @@ def generate_series(
         f"- count: {count}\n"
         f"- max_iterations: {max_iterations}\n"
         f"- output_mode: {output_mode}\n"
-        f"- factcheck: {eff_factcheck}\n"
-        f"- refine: {eff_refine}\n"
     )
     full_log_content = log_header + "\n".join(log_lines)
     log_path = log_dir / f"{safe_filename_base(topic)}_series_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
