@@ -12,6 +12,7 @@ def _load_prompt() -> str:
     p1 = (
         Path(__file__).resolve().parents[5]
         / "prompts"
+        / "article"
         / "deep_popular_science_article"
         / "deep_popular_science_article_style_1"
         / "module_02_writing"
@@ -22,6 +23,7 @@ def _load_prompt() -> str:
     prompt_path = (
         Path(__file__).resolve().parents[3]
         / "prompts"
+        / "article"
         / "deep_popular_science_article"
         / "module_02_writing"
         / "article_title_lead_writer.md"
