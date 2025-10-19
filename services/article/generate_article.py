@@ -639,6 +639,8 @@ def generate_article(
         max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "2000000"))
     except Exception:
         max_chars = 2000000
+    # Truncate inputs conservatively to help providers that reject very long prompts
+    # Keep ToC + up to max_chars of body
     used_body = body_text if len(body_text) <= max_chars else body_text[:max_chars]
     logger.debug(f"Article title/lead input: toc_len={len(toc_text)}, body_len={len(body_text)}, used_len={len(used_body)}")
     atl_user = (
@@ -661,7 +663,10 @@ def generate_article(
                 data = _parse(str(_out)) or {}
             except Exception:
                 data = {}
-            atl = ArticleTitleLead(**data)
+            # Safe construct to avoid validation errors when fields are missing
+            _title_val = (data.get("title") or "").strip() if isinstance(data, dict) else ""
+            _lead_val = (data.get("lead_markdown") or "").strip() if isinstance(data, dict) else ""
+            atl = ArticleTitleLead(title=_title_val, lead_markdown=_lead_val)
         duration = time.perf_counter() - t_atl
         # If fields are empty, try a plain-agent retry below
         need_plain_retry = (not (getattr(atl, "title", "") or "").strip()) or (not (getattr(atl, "lead_markdown", "") or "").strip())
@@ -695,7 +700,12 @@ def generate_article(
                 style_dir = "deep_popular_science_article_style_2" if style_key == "article_style_2" else "deep_popular_science_article_style_1"
                 prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "deep_popular_science_article" / style_dir / "module_02_writing" / "article_title_lead_writer.md"
                 prompt_text = prompt_path.read_text(encoding="utf-8")
-                plain_agent = Agent(name="Deep Article · Title & Lead (plain)", instructions=prompt_text, model=_get_model(_prov, "heavy"))
+                # Ensure provider-in model is used; if it fails, fall back to a general heavy model
+                try:
+                    model_id = _get_model(provider_in or _prov, "heavy")
+                except Exception:
+                    model_id = _get_model(_prov, "heavy")
+                plain_agent = Agent(name="Deep Article · Title & Lead (plain)", instructions=prompt_text, model=model_id)
                 t_atl2 = time.perf_counter()
                 _res2 = _run_with_retries_sync(plain_agent, atl_user)
                 _out2 = getattr(_res2, "final_output", _res2)
@@ -705,7 +715,7 @@ def generate_article(
                     data2 = _parse2(str(_out2)) or {}
                 except Exception:
                     data2 = {}
-                atl = ArticleTitleLead(**data2)
+                atl = ArticleTitleLead(title=(data2.get("title") or ""), lead_markdown=(data2.get("lead_markdown") or ""))
                 # If still empty, try minimal input (ToC only + optional main_idea)
                 if not (atl.title or '').strip() or not (atl.lead_markdown or '').strip():
                     atl_user_min = (
