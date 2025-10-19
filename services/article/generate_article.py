@@ -115,10 +115,22 @@ def generate_article(
         log_lines.append(f"---\n\n## {emoji} {title}\n\n{content}\n")
 
     def _run_with_retries_sync(agent: Any, user_input: str, *, attempts: int = 3, backoff_seq: tuple[int, ...] = (2, 5, 8)):
-        """Run agent with simple retries on provider transient errors."""
+        """Run agent with simple retries, creating a fresh event loop per call for thread-safety."""
         for i in range(attempts):
             try:
-                return Runner.run_sync(agent, user_input)
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(Runner.run(agent, user_input))
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+                    try:
+                        asyncio.set_event_loop(None)
+                    except Exception:
+                        pass
             except Exception as e:
                 if i < attempts - 1:
                     logger.retry(i + 1, attempts, reason=f"{type(e).__name__}: {str(e)[:100]}")
