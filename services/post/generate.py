@@ -753,7 +753,11 @@ def generate_post(
                     pass
                 points = []
             else:
-                base = Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_02_review"
+                # Map old style directories to new genre-based paths
+                if style_key == "post_style_2":
+                    base = Path(__file__).resolve().parents[2] / "prompts" / "posts" / "john_oliver_explains_post" / "john_oliver_explains_post_style_1" / "module_02_review"
+                else:
+                    base = Path(__file__).resolve().parents[2] / "prompts" / "posts" / "popular_science_post" / "popular_science_post_style_1" / "module_02_review"
                 p_ident = (base / "identify_risky_points.md").read_text(encoding="utf-8")
                 plan = run_json_with_provider(
                 p_ident
@@ -968,7 +972,15 @@ def generate_post(
             logger.info(f"Rewriting needed for {sum(1 for i in report.items if i.verdict != 'pass')} points")
             from pathlib import Path
             if style_key == "post_style_1":
-                p_rewrite = (Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_03_rewriting" / "rewrite.md").read_text(encoding="utf-8")
+                p_rewrite = (
+                    Path(__file__).resolve().parents[2]
+                    / "prompts"
+                    / "posts"
+                    / "popular_science_post"
+                    / "popular_science_post_style_1"
+                    / "module_03_rewriting"
+                    / "rewrite.md"
+                ).read_text(encoding="utf-8")
             else:
                 p_rewrite = ""
             rw_input = (
@@ -995,7 +1007,15 @@ def generate_post(
         _emit("refine:init")
         logger.stage("Final Refinement", total_stages=4, current_stage=4)
         logger.step("Polishing content for publication")
-        p_refine = (Path(__file__).resolve().parents[2] / "prompts" / "post" / style_key / "module_03_rewriting" / "refine.md").read_text(encoding="utf-8")
+        p_refine = (
+            Path(__file__).resolve().parents[2]
+            / "prompts"
+            / "posts"
+            / "popular_science_post"
+            / "popular_science_post_style_1"
+            / "module_03_rewriting"
+            / "refine.md"
+        ).read_text(encoding="utf-8")
         refine_input = (
             "<input>\n"
             f"<topic>{topic}</topic>\n"

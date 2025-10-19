@@ -16,7 +16,7 @@ from utils.models import get_model
 
 
 def _load_system_prompt() -> str:
-    p = Path("prompts") / "memom" / "meme_extractor.md"
+    p = Path("prompts") / "memes" / "meme_extractor" / "meme_extractor_style_1" / "meme_extractor.md"
     if not p.exists():
         raise FileNotFoundError("memom system prompt not found: prompts/memom/meme_extractor.md")
     return p.read_text(encoding="utf-8")

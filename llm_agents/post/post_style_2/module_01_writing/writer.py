@@ -8,8 +8,9 @@ def _load_prompt() -> str:
     prompt_path = (
         Path(__file__).resolve().parents[4]
         / "prompts"
-        / "post"
-        / "post_style_2"
+        / "posts"
+        / "john_oliver_explains_post"
+        / "john_oliver_explains_post_style_1"
         / "module_01_writing"
         / "writer.md"
     )

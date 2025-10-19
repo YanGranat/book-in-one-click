@@ -781,7 +781,7 @@ def generate_article(
                 from utils.models import get_model as _get_model
                 # Load prompt directly
                 style_dir = "deep_popular_science_article_style_2" if style_key == "article_style_2" else "deep_popular_science_article_style_1"
-                prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "deep_popular_science_article" / style_dir / "module_02_writing" / "article_title_lead_writer.md"
+                prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "article" / "deep_popular_science_article" / style_dir / "module_02_writing" / "article_title_lead_writer.md"
                 prompt_text = prompt_path.read_text(encoding="utf-8")
                 # Ensure provider-in model is used; if it fails, fall back to a general heavy model
                 try:

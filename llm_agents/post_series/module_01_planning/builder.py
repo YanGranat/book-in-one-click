@@ -7,7 +7,15 @@ from schemas.series import PostIdeaList
 
 
 def _load_prompt() -> str:
-    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "post_series" / "module_01_planning" / "builder.md"
+    prompt_path = (
+        Path(__file__).resolve().parents[3]
+        / "prompts"
+        / "post_series"
+        / "popular_science_post_series"
+        / "popular_science_post_series_style_1"
+        / "module_01_planning"
+        / "builder.md"
+    )
     return prompt_path.read_text(encoding="utf-8")
 
 

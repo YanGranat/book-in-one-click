@@ -82,7 +82,14 @@ class _ProviderAdapter:
 
 
 def _load_prompt(rel_path: str) -> str:
-    base = Path(__file__).resolve().parents[2] / "prompts" / "post_series"
+    # New structure: prompts/post_series/popular_science_post_series/popular_science_post_series_style_1/
+    base = (
+        Path(__file__).resolve().parents[2]
+        / "prompts"
+        / "post_series"
+        / "popular_science_post_series"
+        / "popular_science_post_series_style_1"
+    )
     return (base / rel_path).read_text(encoding="utf-8")
 
 

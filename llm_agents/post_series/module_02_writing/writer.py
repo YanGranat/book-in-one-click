@@ -5,7 +5,15 @@ from typing import Any
 
 
 def _load_prompt() -> str:
-    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "post_series" / "module_02_writing" / "writer.md"
+    prompt_path = (
+        Path(__file__).resolve().parents[3]
+        / "prompts"
+        / "post_series"
+        / "popular_science_post_series"
+        / "popular_science_post_series_style_1"
+        / "module_02_writing"
+        / "writer.md"
+    )
     return prompt_path.read_text(encoding="utf-8")
 
 

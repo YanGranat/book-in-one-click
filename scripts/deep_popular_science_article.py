@@ -39,7 +39,7 @@ def _try_import_sdk():
 
 
 def _load_prompt(rel: str) -> str:
-    return (Path(__file__).resolve().parents[1] / "prompts" / "deep_popular_science_article" / rel).read_text(encoding="utf-8")
+    return (Path(__file__).resolve().parents[1] / "prompts" / "article" / "deep_popular_science_article" / rel).read_text(encoding="utf-8")
 
 
 def _log_append(lines: list[str], section: str, body: str) -> None:

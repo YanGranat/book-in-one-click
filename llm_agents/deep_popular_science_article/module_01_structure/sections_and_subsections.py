@@ -10,10 +10,25 @@ from utils.models import get_model
 def _load_prompt() -> str:
     # Keep for backward compatibility; prefer style_1
     # Default to style 1 path if exists; else fallback to legacy location
-    p1 = Path(__file__).resolve().parents[4] / "prompts" / "deep_popular_science_article" / "deep_popular_science_article_style_1" / "module_01_structure" / "sections_and_subsections.md"
+    p1 = (
+        Path(__file__).resolve().parents[4]
+        / "prompts"
+        / "article"
+        / "deep_popular_science_article"
+        / "deep_popular_science_article_style_1"
+        / "module_01_structure"
+        / "sections_and_subsections.md"
+    )
     if p1.exists():
         return p1.read_text(encoding="utf-8")
-    prompt_path = Path(__file__).resolve().parents[3] / "prompts" / "deep_popular_science_article" / "module_01_structure" / "sections_and_subsections.md"
+    prompt_path = (
+        Path(__file__).resolve().parents[3]
+        / "prompts"
+        / "article"
+        / "deep_popular_science_article"
+        / "module_01_structure"
+        / "sections_and_subsections.md"
+    )
     return prompt_path.read_text(encoding="utf-8")
 
 
