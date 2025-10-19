@@ -1247,6 +1247,23 @@ def create_dispatcher() -> Dispatcher:
         await GenerateStates.WaitingTopic.set()
         return
 
+    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:post_genre:"), state=GenerateStates.ChoosingPostStyle)  # type: ignore
+    async def cb_post_genre(query: types.CallbackQuery, state: FSMContext):
+        genre = (query.data or "").split(":")[-1]
+        data = await state.get_data()
+        ui_lang = (data.get("ui_lang") or "ru").strip()
+        ru = _is_ru(ui_lang)
+        await query.answer()
+        # Map genre to current single style and skip style selection
+        if genre == "john_oliver_explains_post":
+            await state.update_data(post_style="post_style_2")
+        else:
+            await state.update_data(post_style="post_style_1")
+        prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+        await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+        await GenerateStates.WaitingTopic.set()
+        return
+
     @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:series_preset:"), state=GenerateStates.ChoosingSeriesPreset)  # type: ignore
     async def cb_series_preset(query: types.CallbackQuery, state: FSMContext):
         val = (query.data or "").split(":")[-1]
