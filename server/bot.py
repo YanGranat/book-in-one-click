@@ -4243,7 +4243,7 @@ def create_dispatcher() -> Dispatcher:
         await message.answer("Чат завершён.")
 
     # Generic commands while chat active: finish state and re-dispatch the same update
-    _allowed_cmds = {"start","info","generate","series","series_fixed","settings","history","history_clear","interface_lang","credits","pricing","chat","endchat","cancel"}
+    _allowed_cmds = {"start","info","generate","series","series_fixed","settings","history","history_clear","interface_lang","credits","pricing","chat","endchat","cancel","meme_extract"}
     @dp.message_handler(lambda m: (m.text or "").startswith("/") and ((m.text or "").split()[0].lstrip("/").split("@")[0].lower() in _allowed_cmds), state=ChatStates.Active, content_types=types.ContentTypes.TEXT)  # type: ignore
     async def cmd_any_in_chat(message: types.Message, state: FSMContext):
         try:
@@ -4276,6 +4276,7 @@ def create_dispatcher() -> Dispatcher:
                 "chat": cmd_chat,
                 "endchat": cmd_endchat,
                 "cancel": cmd_cancel,
+                "meme_extract": cmd_meme_extract,
             }
             h = handlers.get(cmd)
             if h is not None:
@@ -4332,6 +4333,7 @@ def create_dispatcher() -> Dispatcher:
                 "chat": cmd_chat,
                 "endchat": cmd_endchat,
                 "cancel": cmd_cancel,
+                "meme_extract": cmd_meme_extract,
                 # /topup lives in bot_commands; aiogram dispatcher will invoke it via registration
             }
             h = handlers.get(cmd)
