@@ -1259,11 +1259,36 @@ def create_dispatcher() -> Dispatcher:
         ui_lang = (data.get("ui_lang") or "ru").strip()
         ru = _is_ru(ui_lang)
         await query.answer()
-        # Map genre to current single style and skip style selection
+        # Role checks
+        is_admin = bool(query.from_user and query.from_user.id in ADMIN_IDS)
+        from .bot_commands import SUPER_ADMIN_ID
+        is_superadmin = bool(query.from_user and SUPER_ADMIN_ID is not None and int(query.from_user.id) == int(SUPER_ADMIN_ID))
+
+        # Map genre to current styles
         if genre == "john_oliver_explains_post":
-            await state.update_data(post_style="post_style_2")
-        else:
-            await state.update_data(post_style="post_style_1")
+            # Style 2: always skip FC/Refine, go straight to topic
+            try:
+                await state.update_data(post_style="post_style_2", next_after_fc=None, fc_ready=True, factcheck=False, research_iterations=0)
+            except Exception:
+                await state.update_data(post_style="post_style_2")
+            prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+            await GenerateStates.WaitingTopic.set()
+            return
+
+        # Default: popular science → style 1
+        await state.update_data(post_style="post_style_1")
+        if is_superadmin:
+            # For superadmin keep legacy flow: FC → Depth → Refine → Topic
+            await state.update_data(next_after_fc="post")
+            prompt = "Включить факт-чекинг?" if ru else "Enable fact-checking?"
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_yesno_inline("fc", ui_lang))
+            return
+        # Non-superadmins: no FC/Refine questions → ask topic immediately
+        try:
+            await state.update_data(next_after_fc=None, fc_ready=True, factcheck=False, research_iterations=None)
+        except Exception:
+            pass
         prompt = "Отправьте тему для поста:" if ru else "Send a topic for your post:"
         await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
         await GenerateStates.WaitingTopic.set()
