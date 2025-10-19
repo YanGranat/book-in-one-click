@@ -1167,6 +1167,11 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Сколько постов?" if ru else "How many posts?"), reply_markup=kb)
             await GenerateStates.ChoosingSeriesPreset.set()
             return
+        if kind == "book":
+            # Books: temporarily not available (in development)
+            msg = ("Пока эта функция в разработке." if ru else "This feature is under development.")
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+            return
         if kind == "article":
             # Ask for article style like posts
             prompt = (
