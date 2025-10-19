@@ -5,13 +5,13 @@ from typing import Any
 
 
 def _load_post_prompt() -> str:
-    base = Path(__file__).resolve().parents[4] / "prompts" / "posts" / "popular_science_post" / "popular_science_post_style_1"
+    base = Path(__file__).resolve().parents[5] / "prompts" / "posts" / "popular_science_post" / "popular_science_post_style_1"
     p1 = base / "module_01_writing" / "writer.md"
     return p1.read_text(encoding="utf-8") if p1.exists() else ""
 
 
 def _load_rewrite_prompt() -> str:
-    base = Path(__file__).resolve().parents[4] / "prompts" / "posts" / "popular_science_post" / "popular_science_post_style_1"
+    base = Path(__file__).resolve().parents[5] / "prompts" / "posts" / "popular_science_post" / "popular_science_post_style_1"
     p1 = base / "module_03_rewriting" / "rewrite.md"
     return p1.read_text(encoding="utf-8") if p1.exists() else ""
 
