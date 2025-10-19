@@ -98,7 +98,7 @@ venv\Scripts\python.exe scripts\simple_test.py
 
 Сейчас поддерживаются: посты. Конспект, статья и книга — в разработке.
 
-Промпты для сценария поста находятся в `prompts/post/{module_01_writing,module_02_review,module_03_rewriting}/*.md`.
+Промпты для сценария поста теперь разнесены по жанрам: `prompts/posts/<genre>/<style>/{module_01_writing,module_02_review,module_03_rewriting}/*.md`. Например: `prompts/posts/popular_science_post/popular_science_post_style_1/...` или `prompts/posts/john_oliver_explains_post/john_oliver_explains_post_style_1/...`.
 
 ## 🎛️ Параметры CLI
 
@@ -161,7 +161,7 @@ venv\Scripts\python.exe scripts\topic_summary.py --topic "Graph Neural Networks"
 
 ## 📝 Промпты
 
-Файлы промптов целиком являются системной инструкцией агента. Для постов хранятся в `prompts/post/*` (module_* структура):
+Файлы промптов целиком являются системной инструкцией агента. Для постов хранятся в `prompts/posts/<genre>/<style>/*` (module_* структура):
 - `module_01_writing/writer.md`
 - `module_02_review/*.md` (identify_risky_points.md, iterative_research.md, sufficiency.md, recommendation.md, query_synthesizer.md)
 - `module_03_rewriting/rewrite.md`, `module_03_rewriting/refine.md`
