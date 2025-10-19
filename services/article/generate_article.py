@@ -651,12 +651,20 @@ def generate_article(
     )
     try:
         t_atl = time.perf_counter()
-        atl: ArticleTitleLead = _run_with_retries_sync(atl_agent, atl_user).final_output  # type: ignore
+        _res = _run_with_retries_sync(atl_agent, atl_user)
+        _out = getattr(_res, "final_output", _res)
+        if isinstance(_out, ArticleTitleLead):
+            atl = _out
+        else:
+            from utils.json_parse import parse_json_best_effort as _parse
+            try:
+                data = _parse(str(_out)) or {}
+            except Exception:
+                data = {}
+            atl = ArticleTitleLead(**data)
         duration = time.perf_counter() - t_atl
-        
         # Log full title & lead JSON for tracking
         log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
-        
         # Log readable summary
         log_summary("📰", "Заголовок и вступление", [
             f"**Заголовок:** {atl.title or '(не создан)'}",
@@ -664,19 +672,57 @@ def generate_article(
             "**Вступление:**",
             f"{(atl.lead_markdown or '')[:200]}{'...' if len(atl.lead_markdown or '') > 200 else ''}"
         ])
-        
         logger.success(f"Article title and lead generated: title_len={len(atl.title or '')}, lead_len={len(atl.lead_markdown or '')}", show_duration=False)
         logger.debug(f"Title/lead generation took {int(duration*1000)}ms")
     except Exception as e:
-        logger.error("Failed to generate article title and lead", exception=e)
-        _tb.print_exc()
-        # Graceful fallback: use outline title/topic, empty lead
-        atl = ArticleTitleLead(title=(outline.title or topic), lead_markdown="")
-        logger.warning("Using fallback title from outline")
-        log("🧾 Title & Lead (fallback)", f"```json\n{atl.model_dump_json()}\n```")
-        log_summary("⚠️", "Заголовок (резервный)", [
-            f"Использован заголовок из структуры: {atl.title}"
-        ])
+        # If the failure may be due to unsupported output_type, retry once with plain agent (no output schema) and manual JSON parse
+        try:
+            msg = str(e)
+        except Exception:
+            msg = ""
+        did_retry_plain = False
+        if ("output_type" in msg) or ("json_schema" in msg) or ("not supported" in msg):
+            try:
+                did_retry_plain = True
+                from agents import Agent  # type: ignore
+                from utils.models import get_model as _get_model
+                # Load prompt directly
+                style_dir = "deep_popular_science_article_style_2" if style_key == "article_style_2" else "deep_popular_science_article_style_1"
+                prompt_path = Path(__file__).resolve().parents[1] / "prompts" / "deep_popular_science_article" / style_dir / "module_02_writing" / "article_title_lead_writer.md"
+                prompt_text = prompt_path.read_text(encoding="utf-8")
+                plain_agent = Agent(name="Deep Article · Title & Lead (plain)", instructions=prompt_text, model=_get_model(_prov, "heavy"))
+                t_atl2 = time.perf_counter()
+                _res2 = _run_with_retries_sync(plain_agent, atl_user)
+                _out2 = getattr(_res2, "final_output", _res2)
+                from utils.json_parse import parse_json_best_effort as _parse2
+                data2 = {}
+                try:
+                    data2 = _parse2(str(_out2)) or {}
+                except Exception:
+                    data2 = {}
+                atl = ArticleTitleLead(**data2)
+                duration2 = time.perf_counter() - t_atl2
+                log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
+                log_summary("📰", "Заголовок и вступление", [
+                    f"**Заголовок:** {atl.title or '(не создан)'}",
+                    "",
+                    "**Вступление:**",
+                    f"{(atl.lead_markdown or '')[:200]}{'...' if len(atl.lead_markdown or '') > 200 else ''}"
+                ])
+                logger.success(f"Article title and lead generated (plain retry): title_len={len(atl.title or '')}, lead_len={len(atl.lead_markdown or '')}", show_duration=False)
+                logger.debug(f"Title/lead plain retry took {int(duration2*1000)}ms")
+            except Exception as e2:
+                logger.error("Plain retry for title/lead failed", exception=e2)
+        if not did_retry_plain:
+            logger.error("Failed to generate article title and lead", exception=e)
+        if 'atl' not in locals() or not isinstance(atl, ArticleTitleLead) or not (atl.title or '').strip():
+            # Graceful fallback: use outline title/topic, empty lead
+            atl = ArticleTitleLead(title=(outline.title or topic), lead_markdown="")
+            logger.warning("Using fallback title from outline")
+            log("🧾 Title & Lead (fallback)", f"```json\n{atl.model_dump_json()}\n```")
+            log_summary("⚠️", "Заголовок (резервный)", [
+                f"Использован заголовок из структуры: {atl.title}"
+            ])
 
     title_text = atl.title or (outline.title or topic)
     lead_text = (atl.lead_markdown or "").strip()
