@@ -75,10 +75,19 @@ def generate_article(
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
+    # Log initial loop state
     try:
-        asyncio.get_event_loop()
+        import threading
+        logger.info("INIT_LOOP_STATE", extra={
+            "thread": threading.current_thread().name,
+            "has_running": bool(asyncio.get_event_loop()),
+        })
     except Exception:
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        try:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            logger.info("INIT_LOOP_CREATED")
+        except Exception:
+            pass
 
     Agent, Runner = _try_import_sdk()
 
@@ -113,6 +122,27 @@ def generate_article(
         """Log a clean summary without technical details."""
         content = "\n".join(f"- {item}" for item in items if item)
         log_lines.append(f"---\n\n## {emoji} {title}\n\n{content}\n")
+
+    # Diagnostics: event-loop/thread state logger
+    def _log_loop_state(tag: str) -> None:
+        try:
+            import threading
+            tn = threading.current_thread().name
+            has_running = False
+            loop_desc = "none"
+            try:
+                loop = asyncio.get_running_loop()
+                has_running = True
+                loop_desc = f"id={id(loop)} closed={loop.is_closed()}"
+            except Exception:
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop_desc = f"id={id(loop)} closed={loop.is_closed()}"
+                except Exception:
+                    loop_desc = "none"
+            logger.info("ATL_LOOP_STATE", extra={"tag": tag, "thread": tn, "has_running_loop": has_running, "loop": loop_desc})
+        except Exception:
+            pass
 
     def _run_with_retries_sync(agent: Any, user_input: str, *, attempts: int = 3, backoff_seq: tuple[int, ...] = (2, 5, 8)):
         """Run agent with simple retries, creating a fresh event loop per call for thread-safety."""
@@ -329,7 +359,20 @@ def generate_article(
             try:
                 tloc = time.perf_counter()
                 logger.debug(f"Writing section {sec_obj.id} (attempt {i+1}/3)")
-                res = asyncio.run(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
+                # Run with fresh loop like in _run_with_retries_sync (thread-safe)
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    res = loop.run_until_complete(Runner.run(ssw_agent, ssw_user_local))  # type: ignore
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+                    try:
+                        asyncio.set_event_loop(None)
+                    except Exception:
+                        pass
                 duration = time.perf_counter() - tloc
                 logger.debug(f"Section {sec_obj.id} completed in {int(duration*1000)}ms")
                 return res.final_output  # type: ignore
@@ -684,7 +727,9 @@ def generate_article(
             logger.info("ATL_RUN_STRUCTURED_START")
         except Exception:
             pass
+        _log_loop_state("structured_before_run")
         _res = _run_with_retries_sync(atl_agent, atl_user)
+        _log_loop_state("structured_after_run")
         _out = getattr(_res, "final_output", _res)
         if isinstance(_out, ArticleTitleLead):
             atl = _out
@@ -749,7 +794,9 @@ def generate_article(
                 except Exception:
                     pass
                 t_atl2 = time.perf_counter()
+                _log_loop_state("plain_before_run_full")
                 _res2 = _run_with_retries_sync(plain_agent, atl_user)
+                _log_loop_state("plain_after_run_full")
                 _out2 = getattr(_res2, "final_output", _res2)
                 from utils.json_parse import parse_json_best_effort as _parse2
                 data2 = {}
@@ -777,7 +824,9 @@ def generate_article(
                         + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
                         + "</input>"
                     )
+                    _log_loop_state("plain_before_run_min")
                     _res3 = _run_with_retries_sync(plain_agent, atl_user_min)
+                    _log_loop_state("plain_after_run_min")
                     _out3 = getattr(_res3, "final_output", _res3)
                     try:
                         data3 = _parse2(str(_out3)) or {}
