@@ -544,7 +544,7 @@ def generate_article(
     # Initialize Title & Lead agent once and reuse for section leads and article lead
     atl_agent = build_article_title_lead_writer_agent(provider=_prov)
     try:
-        logger.debug("ATL_AGENT_INIT", extra={"provider_resolved": _prov, "style": style_key, "lang": lang})
+        logger.info("ATL_AGENT_INIT", extra={"provider_resolved": _prov, "style": style_key, "lang": lang})
     except Exception:
         pass
     
@@ -643,17 +643,16 @@ def generate_article(
         max_chars = int(os.getenv("TITLE_LEAD_MAX_CHARS", "2000000"))
     except Exception:
         max_chars = 2000000
-    # Truncate inputs conservatively to help providers that reject very long prompts
-    # Keep ToC + up to max_chars of body
-    used_body = body_text if len(body_text) <= max_chars else body_text[:max_chars]
+    # Per request: pass FULL article body without truncation
+    used_body = body_text
     try:
-        logger.debug(
+        logger.info(
             "ATL_INPUT",
             extra={
                 "toc_len": len(toc_text),
                 "body_len": len(body_text),
                 "used_len": len(used_body),
-                "title_lead_max_chars": max_chars,
+                "title_lead_max_chars": "unlimited",
                 "has_main_idea": bool((outline.main_idea or "").strip()) if style_key == "article_style_2" else False,
             },
         )
@@ -670,7 +669,7 @@ def generate_article(
     try:
         t_atl = time.perf_counter()
         try:
-            logger.debug("ATL_RUN_STRUCTURED_START")
+            logger.info("ATL_RUN_STRUCTURED_START")
         except Exception:
             pass
         _res = _run_with_retries_sync(atl_agent, atl_user)
@@ -702,7 +701,7 @@ def generate_article(
             ])
             logger.success(f"Article title and lead generated: title_len={len(atl.title or '')}, lead_len={len(atl.lead_markdown or '')}", show_duration=False)
             try:
-                logger.debug("ATL_RUN_STRUCTURED_OK", extra={"duration_ms": int(duration*1000), "title_len": len(atl.title or ''), "lead_len": len(atl.lead_markdown or '')})
+                logger.info("ATL_RUN_STRUCTURED_OK", extra={"duration_ms": int(duration*1000), "title_len": len(atl.title or ''), "lead_len": len(atl.lead_markdown or '')})
             except Exception:
                 pass
         else:
@@ -714,7 +713,7 @@ def generate_article(
         except Exception:
             msg = ""
         try:
-            logger.debug("ATL_RUN_STRUCTURED_FAIL", extra={"error": type(e).__name__, "message": msg[:500]})
+            logger.info("ATL_RUN_STRUCTURED_FAIL", extra={"error": type(e).__name__, "message": msg[:500]})
         except Exception:
             pass
         did_retry_plain = False
@@ -734,7 +733,7 @@ def generate_article(
                     model_id = _get_model(_prov, "heavy")
                 plain_agent = Agent(name="Deep Article · Title & Lead (plain)", instructions=prompt_text, model=model_id)
                 try:
-                    logger.debug("ATL_RUN_PLAIN_START", extra={"prompt_path": str(prompt_path), "model_id": model_id, "provider_in": provider_in or None})
+                    logger.info("ATL_RUN_PLAIN_START", extra={"prompt_path": str(prompt_path), "model_id": model_id, "provider_in": provider_in or None})
                 except Exception:
                     pass
                 t_atl2 = time.perf_counter()
@@ -748,14 +747,14 @@ def generate_article(
                     data2 = {}
                 try:
                     _raw2 = str(_out2)
-                    logger.debug("ATL_RUN_PLAIN_RAW", extra={"raw_len": len(_raw2), "raw_head": _raw2[:500]})
+                    logger.info("ATL_RUN_PLAIN_RAW", extra={"raw_len": len(_raw2), "raw_head": _raw2[:500]})
                 except Exception:
                     pass
                 atl = ArticleTitleLead(title=(data2.get("title") or ""), lead_markdown=(data2.get("lead_markdown") or ""))
                 # If still empty, try minimal input (ToC only + optional main_idea)
                 if not (atl.title or '').strip() or not (atl.lead_markdown or '').strip():
                     try:
-                        logger.debug("ATL_RUN_PLAIN_MIN_INPUT", extra={"toc_len": len(toc_text), "has_main_idea": bool((outline.main_idea or "").strip()) if style_key == "article_style_2" else False})
+                        logger.info("ATL_RUN_PLAIN_MIN_INPUT", extra={"toc_len": len(toc_text), "has_main_idea": bool((outline.main_idea or "").strip()) if style_key == "article_style_2" else False})
                     except Exception:
                         pass
                     atl_user_min = (
@@ -783,7 +782,7 @@ def generate_article(
                 duration2 = time.perf_counter() - t_atl2
                 log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
                 try:
-                    logger.debug("ATL_RUN_PLAIN_OK", extra={"duration_ms": int(duration2*1000), "title_len": len(atl.title or ''), "lead_len": len(atl.lead_markdown or '')})
+                    logger.info("ATL_RUN_PLAIN_OK", extra={"duration_ms": int(duration2*1000), "title_len": len(atl.title or ''), "lead_len": len(atl.lead_markdown or '')})
                 except Exception:
                     pass
                 log_summary("📰", "Заголовок и вступление", [
@@ -794,13 +793,13 @@ def generate_article(
                 ])
                 logger.success(f"Article title and lead generated (plain retry): title_len={len(atl.title or '')}, lead_len={len(atl.lead_markdown or '')}", show_duration=False)
                 try:
-                    logger.debug(f"Title/lead plain retry took {int(duration2*1000)}ms")
+                    logger.info(f"Title/lead plain retry took {int(duration2*1000)}ms")
                 except Exception:
                     pass
             except Exception as e2:
                 logger.error("Plain retry for title/lead failed", exception=e2)
                 try:
-                    logger.debug("ATL_RUN_PLAIN_FAIL", extra={"error": type(e2).__name__, "message": str(e2)[:500]})
+                    logger.info("ATL_RUN_PLAIN_FAIL", extra={"error": type(e2).__name__, "message": str(e2)[:500]})
                 except Exception:
                     pass
         if not did_retry_plain:
