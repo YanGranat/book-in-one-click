@@ -693,7 +693,7 @@ def generate_article(
                 from utils.models import get_model as _get_model
                 # Load prompt directly
                 style_dir = "deep_popular_science_article_style_2" if style_key == "article_style_2" else "deep_popular_science_article_style_1"
-                prompt_path = Path(__file__).resolve().parents[1] / "prompts" / "deep_popular_science_article" / style_dir / "module_02_writing" / "article_title_lead_writer.md"
+                prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "deep_popular_science_article" / style_dir / "module_02_writing" / "article_title_lead_writer.md"
                 prompt_text = prompt_path.read_text(encoding="utf-8")
                 plain_agent = Agent(name="Deep Article · Title & Lead (plain)", instructions=prompt_text, model=_get_model(_prov, "heavy"))
                 t_atl2 = time.perf_counter()
