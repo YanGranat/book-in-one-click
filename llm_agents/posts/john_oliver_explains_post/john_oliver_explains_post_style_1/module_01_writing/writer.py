@@ -6,7 +6,7 @@ from typing import Any
 
 def _load_prompt() -> str:
     prompt_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[5]
         / "prompts"
         / "posts"
         / "john_oliver_explains_post"

@@ -229,6 +229,7 @@ def generate_series(
     ])
 
     # 2) Iterate sufficiency/extend
+    logger.step("Checking coverage and extending ideas if needed")
     iterations = max(0, int(max_iterations))
     for i in range(iterations):
         p_suff = _load_prompt("module_01_planning/sufficiency.md")

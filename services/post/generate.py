@@ -137,6 +137,8 @@ def generate_post(
     logger = create_logger("post", show_debug=bool(os.getenv("DEBUG_LOGS")))
     logger.info(f"Starting post generation: '{topic[:100]}'")
     logger.info(f"Configuration: provider={_prov}, lang={lang}, style={style_key}")
+    # Stage 1: draft writing
+    logger.stage("Draft Writing", total_stages=4, current_stage=1)
 
     log_lines = []
     def log(section: str, body: str):
@@ -362,6 +364,7 @@ def generate_post(
     )
     # Log writer input for transparency (full prompt for tracking evolution)
     log("⬇️ Writer · Input", user_message_local_writer)
+    logger.step("Running writer agent", current=1, total=1)
     # Use explicit Agent for OpenAI via writer module; others use provider runner
     if _prov == "openai":
         try:
@@ -532,6 +535,7 @@ def generate_post(
         f"Первые 150 символов:",
         f"_{content[:150]}..._"
     ])
+    logger.success("Draft writing completed")
 
     # Define helper classes at function scope to ensure instances persist across blocks
     class _SimpleItem:

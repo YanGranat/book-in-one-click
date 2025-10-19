@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
+from utils.logging import create_logger
 from utils.slug import safe_filename_base
 from utils.lang import detect_lang_from_text
 from services.providers.runner import ProviderRunner
@@ -41,6 +42,10 @@ def extract_memes(
     """
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
+    # Initialize structured logger
+    logger = create_logger("meme", show_debug=bool(os.getenv("DEBUG_LOGS")))
+    logger.info("Starting meme extraction")
+    logger.stage("Input Preparation", total_stages=3, current_stage=1)
 
     # Normalize language parameter
     lang_setting = (lang or "auto").strip().lower()
@@ -59,6 +64,8 @@ def extract_memes(
     system_prompt = system_prompt.replace("{LANG}", lang_setting)
 
     # Run model
+    logger.success("Input prepared")
+    logger.stage("Model Inference", total_stages=3, current_stage=2)
     pnorm = (provider or "openai").strip().lower()
     # Normalize aliases and auto
     if pnorm in {"", "auto"}:
@@ -93,6 +100,8 @@ def extract_memes(
             used_model = get_model("claude", "heavy")
         runner = ProviderRunner(pnorm)
         final_content = runner.run_text(system_prompt, text, speed="heavy") or ""
+    logger.success("Model inference completed")
+    logger.stage("Persist Results", total_stages=3, current_stage=3)
     # Guarantee non-empty content stored in DB/UI even if model returned empty
     if not final_content.strip():
         final_content = "(no memes extracted)"
@@ -108,6 +117,7 @@ def extract_memes(
         pipeline="MemeExtract",
         content=final_content,
     )
+    logger.success(f"Result saved: {result_path.name}")
 
     # Build and persist log (with metadata)
     log_dir = ensure_output_dir("memes")
@@ -145,6 +155,7 @@ def extract_memes(
         + "\n"
     )
     save_markdown(log_path, title=f"Log: {Path(source_name).name}", generator="bio1c", pipeline="Log", content=full_log)
+    logger.success("Log saved")
 
     # Record in DB (sync, like post pipeline)
     try:
@@ -250,6 +261,8 @@ def extract_memes(
     except Exception:
         # Non-fatal if DB not available; files are saved anyway
         pass
+    logger.total_duration()
+    logger.success("Meme extraction complete", show_duration=False)
 
     if return_content:
         return final_content

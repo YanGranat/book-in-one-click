@@ -75,20 +75,6 @@ def generate_article(
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
-    # Log initial loop state
-    try:
-        import threading
-        logger.info("INIT_LOOP_STATE", extra={
-            "thread": threading.current_thread().name,
-            "has_running": bool(asyncio.get_event_loop()),
-        })
-    except Exception:
-        try:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            logger.info("INIT_LOOP_CREATED")
-        except Exception:
-            pass
-
     Agent, Runner = _try_import_sdk()
 
     def _emit(stage: str) -> None:
@@ -110,6 +96,19 @@ def generate_article(
     
     # Initialize structured logger
     logger = create_logger("article", show_debug=bool(os.getenv("DEBUG_LOGS")))
+    # Log initial loop state (now that logger is ready)
+    try:
+        import threading
+        logger.info("INIT_LOOP_STATE", extra={
+            "thread": threading.current_thread().name,
+            "has_running": bool(asyncio.get_event_loop()),
+        })
+    except Exception:
+        try:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            logger.info("INIT_LOOP_CREATED")
+        except Exception:
+            pass
     logger.info(f"Starting article generation: '{topic[:100]}'")
     logger.info(f"Configuration: provider_in={(provider_in or provider)}, resolved={_prov}, lang={lang}, style={style_key}")
     

@@ -8,7 +8,7 @@ from schemas.research import SufficiencyDecision
 
 def _load_prompt() -> str:
     prompt_path = (
-        Path(__file__).resolve().parents[4]
+        Path(__file__).resolve().parents[5]
         / "prompts"
         / "posts"
         / "popular_science_post"
