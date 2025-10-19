@@ -128,11 +128,16 @@ def generate_post(
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
     
+    # Normalize style EARLY for consistent logging and branching
+    style_key = (style or "post_style_1").strip().lower()
+    if style_key not in {"post_style_1", "post_style_2"}:
+        style_key = "post_style_1"
+
     # Initialize structured logger
     logger = create_logger("post", show_debug=bool(os.getenv("DEBUG_LOGS")))
     logger.info(f"Starting post generation: '{topic[:100]}'")
     logger.info(f"Configuration: provider={_prov}, lang={lang}, style={style_key}")
-    
+
     log_lines = []
     def log(section: str, body: str):
         """Log to markdown file - keep it readable and high-level."""
@@ -142,10 +147,7 @@ def generate_post(
         """Log a clean summary without technical details."""
         content = "\n".join(f"- {item}" for item in items if item)
         log_lines.append(f"---\n\n## {emoji} {title}\n\n{content}\n")
-    # Normalize style
-    style_key = (style or "post_style_1").strip().lower()
-    if style_key not in {"post_style_1", "post_style_2"}:
-        style_key = "post_style_1"
+    # style_key already normalized above
 
     # Log generation configuration
     log_summary("⚙️", "Конфигурация генерации", [
