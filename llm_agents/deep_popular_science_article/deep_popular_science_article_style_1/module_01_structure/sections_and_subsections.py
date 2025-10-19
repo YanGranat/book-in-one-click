@@ -29,11 +29,18 @@ def build_sections_agent(model: str | None = None, provider: str | None = None) 
     Agent, AgentOutputSchema = try_import_sdk()
     eff_provider = (provider or "openai").strip().lower()
     eff_model = model or get_model(eff_provider, "medium")
-    return Agent(
-        name="Deep Article · Outline Sections Builder (Style 1)",
-        instructions=_load_prompt(),
-        model=eff_model,
-        output_type=AgentOutputSchema(ArticleOutline, strict_json_schema=False),
-    )
+    try:
+        return Agent(
+            name="Deep Article · Outline Sections Builder (Style 1)",
+            instructions=_load_prompt(),
+            model=eff_model,
+            output_type=AgentOutputSchema(ArticleOutline, strict_json_schema=False),
+        )
+    except Exception:
+        return Agent(
+            name="Deep Article · Outline Sections Builder (Style 1, plain)",
+            instructions=_load_prompt(),
+            model=eff_model,
+        )
 
 

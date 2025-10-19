@@ -29,11 +29,18 @@ def build_section_writer_agent(model: str | None = None, provider: str | None = 
     Agent, AgentOutputSchema = try_import_sdk()
     eff_provider = (provider or "openai").strip().lower()
     eff_model = model or get_model(eff_provider, "heavy")
-    return Agent(
-        name="Deep Article · Section Writer (Style 2)",
-        instructions=_load_prompt(),
-        model=eff_model,
-        output_type=AgentOutputSchema(SectionDraftChunk, strict_json_schema=False),
-    )
+    try:
+        return Agent(
+            name="Deep Article · Section Writer (Style 2)",
+            instructions=_load_prompt(),
+            model=eff_model,
+            output_type=AgentOutputSchema(SectionDraftChunk, strict_json_schema=False),
+        )
+    except Exception:
+        return Agent(
+            name="Deep Article · Section Writer (Style 2, plain)",
+            instructions=_load_prompt(),
+            model=eff_model,
+        )
 
 
