@@ -663,17 +663,22 @@ def generate_article(
                 data = {}
             atl = ArticleTitleLead(**data)
         duration = time.perf_counter() - t_atl
-        # Log full title & lead JSON for tracking
-        log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
-        # Log readable summary
-        log_summary("📰", "Заголовок и вступление", [
-            f"**Заголовок:** {atl.title or '(не создан)'}",
-            "",
-            "**Вступление:**",
-            f"{(atl.lead_markdown or '')[:200]}{'...' if len(atl.lead_markdown or '') > 200 else ''}"
-        ])
-        logger.success(f"Article title and lead generated: title_len={len(atl.title or '')}, lead_len={len(atl.lead_markdown or '')}", show_duration=False)
-        logger.debug(f"Title/lead generation took {int(duration*1000)}ms")
+        # If fields are empty, try a plain-agent retry below
+        need_plain_retry = (not (getattr(atl, "title", "") or "").strip()) or (not (getattr(atl, "lead_markdown", "") or "").strip())
+        if not need_plain_retry:
+            # Log full title & lead JSON for tracking
+            log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
+            # Log readable summary
+            log_summary("📰", "Заголовок и вступление", [
+                f"**Заголовок:** {atl.title or '(не создан)'}",
+                "",
+                "**Вступление:**",
+                f"{(atl.lead_markdown or '')[:200]}{'...' if len(atl.lead_markdown or '') > 200 else ''}"
+            ])
+            logger.success(f"Article title and lead generated: title_len={len(atl.title or '')}, lead_len={len(atl.lead_markdown or '')}", show_duration=False)
+            logger.debug(f"Title/lead generation took {int(duration*1000)}ms")
+        else:
+            raise RuntimeError("empty_title_or_lead")
     except Exception as e:
         # If the failure may be due to unsupported output_type, retry once with plain agent (no output schema) and manual JSON parse
         try:
@@ -681,7 +686,7 @@ def generate_article(
         except Exception:
             msg = ""
         did_retry_plain = False
-        if ("output_type" in msg) or ("json_schema" in msg) or ("not supported" in msg):
+        if ("output_type" in msg) or ("json_schema" in msg) or ("not supported" in msg) or ("empty_title_or_lead" in msg):
             try:
                 did_retry_plain = True
                 from agents import Agent  # type: ignore
@@ -701,6 +706,30 @@ def generate_article(
                 except Exception:
                     data2 = {}
                 atl = ArticleTitleLead(**data2)
+                # If still empty, try minimal input (ToC only + optional main_idea)
+                if not (atl.title or '').strip() or not (atl.lead_markdown or '').strip():
+                    atl_user_min = (
+                        "<input>\n"
+                        f"<topic>{topic}</topic>\n"
+                        f"<lang>{lang}</lang>\n"
+                        f"<article_markdown>{toc_text}</article_markdown>\n"
+                        + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
+                        + "</input>"
+                    )
+                    _res3 = _run_with_retries_sync(plain_agent, atl_user_min)
+                    _out3 = getattr(_res3, "final_output", _res3)
+                    try:
+                        data3 = _parse2(str(_out3)) or {}
+                    except Exception:
+                        data3 = {}
+                    # Preserve any non-empty fields from previous attempt
+                    if data3:
+                        title3 = (data3.get("title") or "").strip()
+                        lead3 = (data3.get("lead_markdown") or "").strip()
+                        atl = ArticleTitleLead(
+                            title=title3 or (atl.title or ""),
+                            lead_markdown=lead3 or (atl.lead_markdown or ""),
+                        )
                 duration2 = time.perf_counter() - t_atl2
                 log("🧾 Title & Lead", f"```json\n{atl.model_dump_json()}\n```")
                 log_summary("📰", "Заголовок и вступление", [
