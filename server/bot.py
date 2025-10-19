@@ -378,6 +378,8 @@ def build_gentype_keyboard(ui_lang: str, *, allow_series: bool) -> InlineKeyboar
     )
     if allow_series:
         kb.add(InlineKeyboardButton(text=("Статья" if ru else "Article"), callback_data="set:gentype:article"))
+    # Add Book (always visible) — returns "in development" for now
+    kb.add(InlineKeyboardButton(text=("Книга" if ru else "Book"), callback_data="set:gentype:book"))
     return kb
 
 
@@ -387,6 +389,17 @@ def build_post_style_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
     kb.add(
         InlineKeyboardButton(text=("Стиль 1" if ru else "Style 1"), callback_data="set:post_style:post_style_1"),
         InlineKeyboardButton(text=("Стиль 2" if ru else "Style 2"), callback_data="set:post_style:post_style_2"),
+    )
+    return kb
+
+def build_post_genre_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup()
+    ru = _is_ru(ui_lang)
+    kb.add(
+        InlineKeyboardButton(text=("Научно-популярный" if ru else "Popular science"), callback_data="set:post_genre:popular_science_post"),
+    )
+    kb.add(
+        InlineKeyboardButton(text=("Джон Оливер объясняет" if ru else "John Oliver explains"), callback_data="set:post_genre:john_oliver_explains_post"),
     )
     return kb
 
@@ -1130,18 +1143,13 @@ def create_dispatcher() -> Dispatcher:
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, ("Недоступно." if ru else "Not available."))
             return
         if kind == "post":
-            # Ask for post style for all roles first
+            # Ask for post genre first (new structure)
             await state.update_data(gen_article=False, series_mode=None, series_count=None, active_flow="post")
             prompt = (
-                "Выберите стиль поста:\n"
-                "• Стиль 1 - структурированный образовательный.\n"
-                "• Стиль 2 - объяснение в стиле Джона Оливера."
-                if ru else
-                "Choose post style:\n"
-                "• Style 1 - structured educational.\n"
-                "• Style 2 - John Oliver-style explanation."
+                "Выберите жанр поста:" if ru else "Choose post genre:"
             )
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_post_style_keyboard(ui_lang))
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_post_genre_keyboard(ui_lang))
+            # Reuse ChoosingPostStyle state for next step routing convenience
             await GenerateStates.ChoosingPostStyle.set()
             return
         if kind == "series":
