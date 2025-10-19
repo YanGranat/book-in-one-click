@@ -377,8 +377,9 @@ def generate_post(
                 _writer_prompt = (
                     _P(__file__).resolve().parents[2]
                     / "prompts"
-                    / "post"
-                    / "post_style_2"
+                    / "posts"
+                    / "john_oliver_explains_post"
+                    / "john_oliver_explains_post_style_1"
                     / "module_01_writing"
                     / "writer.md"
                 ).read_text(encoding="utf-8")
@@ -432,8 +433,9 @@ def generate_post(
                         tprompt = (
                             _P(__file__).resolve().parents[2]
                             / "prompts"
-                            / "post"
-                            / "post_style_2"
+                            / "posts"
+                            / "john_oliver_explains_post"
+                            / "john_oliver_explains_post_style_1"
                             / "module_01_writing"
                             / "title_json.md"
                         ).read_text(encoding="utf-8")
@@ -479,7 +481,15 @@ def generate_post(
                 pass
             # step 2: title json (prefer provider JSON mode for non-OpenAI)
             from pathlib import Path as _P
-            tprompt = (_P(__file__).resolve().parents[2] / "prompts" / "post" / "post_style_2" / "module_01_writing" / "title_json.md").read_text(encoding="utf-8")
+            tprompt = (
+                _P(__file__).resolve().parents[2]
+                / "prompts"
+                / "posts"
+                / "john_oliver_explains_post"
+                / "john_oliver_explains_post_style_1"
+                / "module_01_writing"
+                / "title_json.md"
+            ).read_text(encoding="utf-8")
             tj_payload = (
                 "<input>\n"
                 f"<lang>{(lang or 'auto').strip()}</lang>\n"
