@@ -66,8 +66,8 @@ class PipelineLogger:
             mins = int((seconds % 3600) // 60)
             return f"{hours}h {mins}m"
     
-    def _log(self, level: LogLevel, message: str, *, progress: Optional[str] = None):
-        """Internal logging method."""
+    def _log(self, level: LogLevel, message: str, *, progress: Optional[str] = None, extra: Optional[dict] = None):
+        """Internal logging method with optional structured key/value payload."""
         if level == LogLevel.DEBUG and not self.show_debug:
             return
         
@@ -81,7 +81,24 @@ class PipelineLogger:
         level_str = f"[{level.value:7s}]"
         
         # Construct message
-        line = f"[{self.pipeline_name}]{level_str}[{timestamp:>8s}]{progress_str} {message}"
+        kv = ""
+        if isinstance(extra, dict) and extra:
+            try:
+                # Render compact key=value pairs in stable order
+                parts = []
+                for k in sorted(extra.keys()):
+                    try:
+                        v = extra[k]
+                        if isinstance(v, (dict, list, tuple)):
+                            v = str(v)
+                        parts.append(f"{k}={v}")
+                    except Exception:
+                        continue
+                if parts:
+                    kv = " | " + " ".join(parts)
+            except Exception:
+                kv = ""
+        line = f"[{self.pipeline_name}]{level_str}[{timestamp:>8s}]{progress_str} {message}{kv}"
         
         try:
             print(line, file=sys.stderr, flush=True)
@@ -129,16 +146,16 @@ class PipelineLogger:
         
         self._log(LogLevel.STEP, step_name, progress=progress)
     
-    def info(self, message: str):
+    def info(self, message: str, *, extra: Optional[dict] = None):
         """
         Log general information.
         
         Example:
             logger.info("Using provider: openai, model: gpt-4")
         """
-        self._log(LogLevel.INFO, message)
+        self._log(LogLevel.INFO, message, extra=extra)
     
-    def success(self, message: str, *, show_duration: bool = True):
+    def success(self, message: str, *, show_duration: bool = True, extra: Optional[dict] = None):
         """
         Log successful completion.
         
@@ -154,18 +171,18 @@ class PipelineLogger:
             duration = time.perf_counter() - self.stage_start_time
             message = f"{message} (took {self._format_duration(duration)})"
         
-        self._log(LogLevel.SUCCESS, message)
+        self._log(LogLevel.SUCCESS, message, extra=extra)
     
-    def warning(self, message: str):
+    def warning(self, message: str, *, extra: Optional[dict] = None):
         """
         Log warning message.
         
         Example:
             logger.warning("Retrying after transient error")
         """
-        self._log(LogLevel.WARNING, message)
+        self._log(LogLevel.WARNING, message, extra=extra)
     
-    def error(self, message: str, *, exception: Optional[Exception] = None):
+    def error(self, message: str, *, exception: Optional[Exception] = None, extra: Optional[dict] = None):
         """
         Log error message.
         
@@ -181,16 +198,16 @@ class PipelineLogger:
             exc_msg = str(exception)[:200]
             message = f"{message}: {exc_name}: {exc_msg}"
         
-        self._log(LogLevel.ERROR, message)
+        self._log(LogLevel.ERROR, message, extra=extra)
     
-    def debug(self, message: str):
+    def debug(self, message: str, *, extra: Optional[dict] = None):
         """
         Log debug information (only shown if show_debug=True).
         
         Example:
             logger.debug("Attempting retry #2")
         """
-        self._log(LogLevel.DEBUG, message)
+        self._log(LogLevel.DEBUG, message, extra=extra)
     
     def retry(self, attempt: int, max_attempts: int, reason: str = ""):
         """

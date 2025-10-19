@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import os
 import asyncio
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.models import get_model, get_json_mode, is_json_supported, get_thinking_config
+from utils.logging import PipelineLogger
 
 
 def _ensure_loop() -> None:
@@ -20,7 +22,7 @@ def _ensure_loop() -> None:
 
 
 class ProviderRunner:
-    def __init__(self, provider: str):
+    def __init__(self, provider: str, *, logger: Optional[PipelineLogger] = None):
         # Normalize provider aliases and auto
         p = (provider or "openai").strip().lower()
         if p in {"", "auto"}:
@@ -30,6 +32,7 @@ class ProviderRunner:
         if p == "anthropic":
             p = "claude"
         self.provider = p
+        self.logger = logger
 
     # --- OpenAI ---
     def _openai_text(self, system: str, user_message: str, *, tier: str = "heavy") -> str:
@@ -40,6 +43,18 @@ class ProviderRunner:
         try:
             from agents import Agent, Runner  # type: ignore
             model = get_model("openai", tier)
+            t0 = time.monotonic()
+            try:
+                if self.logger:
+                    self.logger.info("LLM_START", extra={
+                        "provider": "openai",
+                        "tier": tier,
+                        "model": model,
+                        "system_len": len(system or ""),
+                        "user_len": len(user_message or ""),
+                    })
+            except Exception:
+                pass
             tools = []
             try:
                 from agents import WebSearchTool  # type: ignore
@@ -48,9 +63,30 @@ class ProviderRunner:
                 tools = []
             agent = Agent(name="Agent", instructions=system, model=model, tools=tools)
             res = Runner.run_sync(agent, user_message)
-            return getattr(res, "final_output", "")
+            out = getattr(res, "final_output", "")
+            try:
+                if self.logger:
+                    self.logger.success("LLM_OK", extra={
+                        "provider": "openai",
+                        "tier": tier,
+                        "model": model,
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                        "out_len": len(out or ""),
+                    })
+            except Exception:
+                pass
+            return out
         except Exception as e:
             print(f"❌ OpenAI API error (tier={tier}, model={get_model('openai', tier)}): {type(e).__name__}: {str(e)[:300]}")
+            try:
+                if self.logger:
+                    self.logger.error("LLM_FAIL", exception=e, extra={
+                        "provider": "openai",
+                        "tier": tier,
+                        "model": get_model("openai", tier),
+                    })
+            except Exception:
+                pass
             raise
 
     # --- Gemini ---
@@ -63,6 +99,19 @@ class ProviderRunner:
                 raise ValueError("Gemini API key not found. Set GOOGLE_API_KEY or GEMINI_API_KEY environment variable.")
             genai.configure(api_key=api_key)
             mname = get_model("gemini", tier)
+            t0 = time.monotonic()
+            try:
+                if self.logger:
+                    self.logger.info("LLM_START", extra={
+                        "provider": "gemini",
+                        "tier": tier,
+                        "model": mname,
+                        "json_mode": bool(json_mode),
+                        "system_len": len(system or ""),
+                        "user_len": len(user_message or ""),
+                    })
+            except Exception:
+                pass
             # Try to enable Google Search grounding when SDK supports it; otherwise fall back gracefully
             tools = None
             try:
@@ -109,9 +158,31 @@ class ProviderRunner:
                 except Exception:
                     pass
                 txt = ("\n".join(parts)).strip()
+            try:
+                if self.logger:
+                    self.logger.success("LLM_OK", extra={
+                        "provider": "gemini",
+                        "tier": tier,
+                        "model": mname,
+                        "json_mode": bool(json_mode),
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                        "out_len": len(txt or ""),
+                    })
+            except Exception:
+                pass
             return txt
         except Exception as e:
             print(f"❌ Gemini API error (tier={tier}, model={get_model('gemini', tier)}, json_mode={json_mode}): {type(e).__name__}: {str(e)[:300]}")
+            try:
+                if self.logger:
+                    self.logger.error("LLM_FAIL", exception=e, extra={
+                        "provider": "gemini",
+                        "tier": tier,
+                        "model": get_model("gemini", tier),
+                        "json_mode": bool(json_mode),
+                    })
+            except Exception:
+                pass
             raise
 
     # --- Claude ---
@@ -124,6 +195,19 @@ class ProviderRunner:
                 raise ValueError("Claude API key not found. Set ANTHROPIC_API_KEY environment variable.")
             client = anthropic.Anthropic(api_key=api_key)
             mname = get_model("claude", tier)
+            t0 = time.monotonic()
+            try:
+                if self.logger:
+                    self.logger.info("LLM_START", extra={
+                        "provider": "claude",
+                        "tier": tier,
+                        "model": mname,
+                        "json_mode": bool(json_mode),
+                        "system_len": len(system or ""),
+                        "user_len": len(user_message or ""),
+                    })
+            except Exception:
+                pass
             # Claude relies on prompt instructions for JSON output, not response_format parameter
             # If JSON mode is requested, augment system prompt
             system_augmented = system
@@ -216,6 +300,18 @@ class ProviderRunner:
                     out = out or []
                 txt_all = ("".join(out)).strip()
                 if txt_all:
+                    try:
+                        if self.logger:
+                            self.logger.success("LLM_OK", extra={
+                                "provider": "claude",
+                                "tier": tier,
+                                "model": mname,
+                                "json_mode": bool(json_mode),
+                                "duration_ms": int((time.monotonic() - t0) * 1000),
+                                "out_len": len(txt_all or ""),
+                            })
+                    except Exception:
+                        pass
                     return txt_all
             except Exception:
                 pass
@@ -235,9 +331,32 @@ class ProviderRunner:
                 txt = getattr(blk, "text", None)
                 if txt:
                     parts.append(txt)
-            return ("\n\n".join(parts)).strip()
+            txt_final = ("\n\n".join(parts)).strip()
+            try:
+                if self.logger:
+                    self.logger.success("LLM_OK", extra={
+                        "provider": "claude",
+                        "tier": tier,
+                        "model": mname,
+                        "json_mode": bool(json_mode),
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                        "out_len": len(txt_final or ""),
+                    })
+            except Exception:
+                pass
+            return txt_final
         except Exception as e:
             print(f"❌ Claude API error (tier={tier}, model={get_model('claude', tier)}, json_mode={json_mode}): {type(e).__name__}: {str(e)[:300]}")
+            try:
+                if self.logger:
+                    self.logger.error("LLM_FAIL", exception=e, extra={
+                        "provider": "claude",
+                        "tier": tier,
+                        "model": get_model("claude", tier),
+                        "json_mode": bool(json_mode),
+                    })
+            except Exception:
+                pass
             raise
 
     # --- Public API ---

@@ -89,7 +89,7 @@ def extract_memes(
             final_content = getattr(Runner.run_sync(agent, text), "final_output", "")
         except Exception:
             # Fallback to provider runner
-            runner = ProviderRunner(pnorm)
+            runner = ProviderRunner(pnorm, logger=logger)
             used_model = get_model("openai", "heavy")
             final_content = runner.run_text(system_prompt, text, speed="heavy") or ""
     else:
@@ -98,7 +98,7 @@ def extract_memes(
             used_model = get_model("gemini", "heavy")
         else:
             used_model = get_model("claude", "heavy")
-        runner = ProviderRunner(pnorm)
+        runner = ProviderRunner(pnorm, logger=logger)
         final_content = runner.run_text(system_prompt, text, speed="heavy") or ""
     logger.success("Model inference completed")
     logger.stage("Persist Results", total_stages=3, current_stage=3)

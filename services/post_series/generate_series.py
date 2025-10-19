@@ -25,7 +25,7 @@ import json
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
 from utils.slug import safe_filename_base
-from utils.logging import create_logger
+from utils.logging import create_logger, PipelineLogger
 from schemas.series import PostIdea, PostIdeaList, ListSufficiency, ExtendResponse, PrioritizedList
 from services.providers.runner import ProviderRunner
 
@@ -42,15 +42,77 @@ def _try_import_sdk():
 
 
 class _ProviderAdapter:
-    def __init__(self, provider: str):
-        self._runner = ProviderRunner(provider)
+    def __init__(self, provider: str, *, logger: Optional[PipelineLogger] = None):
+        self._runner = ProviderRunner(provider, logger=logger)
+        self._logger = logger
 
     def run_text(self, system: str, user_message: str, speed: str = "heavy") -> str:
-        return self._runner.run_text(system, user_message, speed=speed)
+        # Structured timing/logging for diagnostics
+        t0 = time.perf_counter()
+        if self._logger:
+            try:
+                self._logger.info(
+                    "LLM_TEXT_START",
+                    extra={
+                        "speed": speed,
+                        "system_len": len(system or ""),
+                        "user_len": len(user_message or ""),
+                    },
+                )
+            except Exception:
+                pass
+        try:
+            out = self._runner.run_text(system, user_message, speed=speed)
+            if self._logger:
+                try:
+                    self._logger.success(
+                        "LLM_TEXT_OK",
+                        show_duration=False,
+                        extra={
+                            "duration_ms": int((time.perf_counter() - t0) * 1000),
+                            "out_len": len(out or ""),
+                        },
+                    )
+                except Exception:
+                    pass
+            return out
+        except Exception as e:
+            if self._logger:
+                try:
+                    self._logger.error("LLM_TEXT_FAIL", exception=e, extra={"speed": speed})
+                except Exception:
+                    pass
+            raise
 
     def run_json(self, system: str, user_message: str, cls: Type, speed: str = "fast"):
         import json as _json
-        txt = self._runner.run_json(system, user_message, speed=speed)
+        t0 = time.perf_counter()
+        if self._logger:
+            try:
+                self._logger.info(
+                    "LLM_JSON_START",
+                    extra={
+                        "speed": speed,
+                        "system_len": len(system or ""),
+                        "user_len": len(user_message or ""),
+                        "schema": getattr(cls, "__name__", str(cls)),
+                    },
+                )
+            except Exception:
+                pass
+        try:
+            txt = self._runner.run_json(system, user_message, speed=speed)
+        except Exception as e:
+            if self._logger:
+                try:
+                    self._logger.error(
+                        "LLM_JSON_FAIL",
+                        exception=e,
+                        extra={"speed": speed, "schema": getattr(cls, "__name__", str(cls))},
+                    )
+                except Exception:
+                    pass
+            raise
         if txt.strip().startswith("```") and txt.strip().endswith("```"):
             txt = "\n".join([line for line in txt.strip().splitlines()[1:-1]])
 
@@ -74,11 +136,36 @@ class _ProviderAdapter:
             m = _re.search(r"\{[\s\S]*\}\s*$", txt)
             if not m:
                 if speed != "heavy":
+                    # Promote to heavy and retry with diagnostic log
+                    if self._logger:
+                        try:
+                            self._logger.warning(
+                                "LLM_JSON_RETRY_HEAVY",
+                                extra={
+                                    "schema": getattr(cls, "__name__", str(cls)),
+                                    "reason": f"parse_fail:{type(e).__name__}",
+                                },
+                            )
+                        except Exception:
+                            pass
                     return self.run_json(system, user_message, cls, speed="heavy")
                 raise RuntimeError(f"Failed to parse JSON for {cls.__name__}: {str(e)[:200]}")
             data = _json.loads(m.group(0))
         data = _normalize(data)
-        return cls.model_validate(data)
+        obj = cls.model_validate(data)
+        if self._logger:
+            try:
+                self._logger.success(
+                    "LLM_JSON_OK",
+                    show_duration=False,
+                    extra={
+                        "duration_ms": int((time.perf_counter() - t0) * 1000),
+                        "schema": getattr(cls, "__name__", str(cls)),
+                    },
+                )
+            except Exception:
+                pass
+        return obj
 
 
 def _load_prompt(rel_path: str) -> str:
@@ -162,12 +249,29 @@ def generate_series(
 
     # Ensure loop
     try:
-        asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
     except Exception:
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # Initialize structured logger EARLY (before any provider calls)
+    # Default to verbose debug for series to diagnose potential stalls
+    logger = create_logger("series", show_debug=True)
+    try:
+        # Diagnostic: initial event loop state
+        logger.debug(
+            "INIT_LOOP_STATE",
+            extra={
+                "has_loop": bool(loop),
+                "is_running": getattr(loop, "is_running", lambda: False)(),
+                "loop_class": type(loop).__name__,
+            },
+        )
+    except Exception:
+        pass
 
     Agent, Runner = _try_import_sdk()
-    pr = _ProviderAdapter(_prov)
+    pr = _ProviderAdapter(_prov, logger=logger)
 
     def _emit(stage: str) -> None:
         if on_progress:
@@ -180,11 +284,17 @@ def generate_series(
     from datetime import datetime
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
-    
-    # Initialize structured logger
-    logger = create_logger("series", show_debug=bool(os.getenv("DEBUG_LOGS")))
     logger.info(f"Starting series generation: '{topic[:100]}'")
-    logger.info(f"Configuration: provider={_prov}, lang={lang}, mode={mode}, count={count}")
+    logger.info(
+        f"Configuration: provider={_prov}, lang={lang}, mode={mode}, count={count}",
+        extra={
+            "sufficiency_heavy_after": int(sufficiency_heavy_after),
+            "max_iterations": int(max_iterations),
+            "output_mode": output_mode,
+            "factcheck": bool(factcheck),
+            "refine": bool(refine),
+        },
+    )
     
     log_lines: list[str] = []
     def log(section: str, body: str):
@@ -210,6 +320,10 @@ def generate_series(
     logger.step("Generating initial post ideas")
     p_builder = _load_prompt("module_01_planning/builder.md")
     user_builder = f"<input>\n<topic>{topic}</topic>\n<lang>{(lang or 'auto').strip()}</lang>\n</input>"
+    logger.debug(
+        "BUILDER_INPUT",
+        extra={"system_len": len(p_builder or ""), "user_len": len(user_builder or "")},
+    )
     plan = pr.run_json(p_builder, user_builder, PostIdeaList, speed="fast")
     ideas: list[PostIdea] = _dedupe(plan.items or [])
     logger.success(f"Generated {len(ideas)} initial post ideas", show_duration=False)
@@ -235,6 +349,15 @@ def generate_series(
         p_suff = _load_prompt("module_01_planning/sufficiency.md")
         suff_user = f"<input>\n<topic>{topic}</topic>\n<ideas_json>{PostIdeaList(items=ideas).model_dump_json()}</ideas_json>\n<lang>{(lang or 'auto').strip()}</lang>\n</input>"
         speed = "heavy" if i + 1 > int(sufficiency_heavy_after) else "fast"
+        logger.debug(
+            "SUFFICIENCY_INPUT",
+            extra={
+                "iter": i + 1,
+                "speed": speed,
+                "system_len": len(p_suff or ""),
+                "user_len": len(suff_user or ""),
+            },
+        )
         suff = pr.run_json(p_suff, suff_user, ListSufficiency, speed=speed)
         # Log sufficiency check for tracking
         log("🧪 Sufficiency", f"```json\n{suff.model_dump_json()}\n```")
@@ -254,6 +377,14 @@ def generate_series(
             f"<needed>{needed}</needed>\n"
             f"<lang>{(lang or 'auto').strip()}</lang>\n"
             "</input>"
+        )
+        logger.debug(
+            "EXTEND_INPUT",
+            extra={
+                "iter": i + 1,
+                "system_len": len(p_ext or ""),
+                "user_len": len(ext_user or ""),
+            },
         )
         ext = pr.run_json(p_ext, ext_user, ExtendResponse, speed="fast")
         new_items = ext.items or []
@@ -279,6 +410,10 @@ def generate_series(
             f"<ideas_json>{PostIdeaList(items=ideas).model_dump_json()}</ideas_json>\n"
             f"<N>{n}</N>\n"
             "</input>"
+        )
+        logger.debug(
+            "PRIORITIZE_INPUT",
+            extra={"system_len": len(p_pri or ""), "user_len": len(pri_user or ""), "N": n},
         )
         pri = pr.run_json(p_pri, pri_user, PrioritizedList, speed="fast")
         selected = pri.items or []
@@ -310,6 +445,16 @@ def generate_series(
     from services.post.generate import generate_post as generate_single_post
     posts_contents: list[tuple[PostIdea, str, Optional[Path]]] = []
     done_ids: list[str] = []
+    # Define progress callback to surface sub-progress from post generator
+    def _on_post_progress(stage: str, *, _total: int):
+        try:
+            logger.info(
+                "POST_PROGRESS",
+                extra={"stage": stage, "total": _total},
+            )
+        except Exception:
+            pass
+
     for idx, idea in enumerate(selected, start=1):
         _emit(f"write:{idx}")
         logger.step(f"Writing post: {idea.title}", current=idx, total=len(selected))
@@ -320,6 +465,7 @@ def generate_series(
         # Pass full list of topics as JSON (all fields of PostIdea)
         series_topics_full = [it.model_dump() for it in selected]
         # Choose behavior based on output mode
+        t_post0 = time.perf_counter()
         if (output_mode or "single").strip().lower() == "single":
             content = generate_single_post(
                 idea.title,
@@ -338,6 +484,7 @@ def generate_series(
                 disable_file_save=True,
                 disable_sidecar_log=True,
                 return_content=True,
+                on_progress=lambda s: _on_post_progress(s, _total=len(selected)),
             )
             # Log post output for tracking evolution
             try:
@@ -362,6 +509,7 @@ def generate_series(
                 series_done_ids=done_ids,
                 disable_db_record=True,
                 disable_sidecar_log=True,
+                on_progress=lambda s: _on_post_progress(s, _total=len(selected)),
             )
             # Read content back to include inline in aggregate and in series log
             content = Path(path).read_text(encoding="utf-8") if isinstance(path, Path) else Path(path).read_text(encoding="utf-8")
@@ -372,6 +520,18 @@ def generate_series(
                 pass
             logger.success(f"Post written: {idea.title[:50]}, {len(content)} chars", show_duration=False)
             posts_contents.append((idea, content, path if isinstance(path, Path) else Path(path)))
+        try:
+            logger.info(
+                "POST_DONE",
+                extra={
+                    "idx": idx,
+                    "total": len(selected),
+                    "duration_ms": int((time.perf_counter() - t_post0) * 1000),
+                    "content_len": len(content or ""),
+                },
+            )
+        except Exception:
+            pass
         done_ids.append(idea.id)
 
     # 5) Build aggregate content
@@ -396,6 +556,7 @@ def generate_series(
     output_dir = ensure_output_dir(output_subdir)
     base = f"{safe_filename_base(topic)}_series"
     aggregate_path = next_available_filepath(output_dir, base, ".md")
+    logger.step("Saving aggregate file")
     save_markdown(
         aggregate_path,
         title=f"Series: {topic}",
@@ -426,6 +587,7 @@ def generate_series(
     )
     full_log_content = log_header + "\n".join(log_lines)
     log_path = log_dir / f"{safe_filename_base(topic)}_series_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
+    logger.step("Saving series log sidecar and recording DB aggregate")
     save_markdown(log_path, title=f"Series Log: {topic}", generator="bio1c", pipeline="LogSeries", content=full_log_content)
 
     # DB aggregate only

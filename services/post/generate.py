@@ -173,8 +173,38 @@ def generate_post(
             instructions=system,
             model=(model or get_model("openai", "heavy")),
         )
-        res_local = Runner.run_sync(agent, user_message_local)
-        return getattr(res_local, "final_output", "")
+        # Structured logging for Agents SDK call
+        try:
+            logger.info("AGENT_START", extra={
+                "agent": "Generic",
+                "model": (model or get_model("openai", "heavy")),
+                "system_len": len(system or ""),
+                "user_len": len(user_message_local or ""),
+            })
+        except Exception:
+            pass
+        import time as _t
+        _t0 = _t.perf_counter()
+        try:
+            res_local = Runner.run_sync(agent, user_message_local)
+            out = getattr(res_local, "final_output", "")
+            try:
+                logger.success("AGENT_OK", extra={
+                    "agent": "Generic",
+                    "duration_ms": int((_t.perf_counter() - _t0) * 1000),
+                    "out_len": len(out or ""),
+                })
+            except Exception:
+                pass
+            return out
+        except Exception as e:
+            try:
+                logger.error("AGENT_FAIL", exception=e, extra={
+                    "agent": "Generic",
+                })
+            except Exception:
+                pass
+            raise
 
     def _run_openai() -> str:
         agent = Agent(
@@ -188,13 +218,43 @@ def generate_post(
             f"<lang>{(lang or 'auto').strip()}</lang>\n"
             f"</input>"
         )
-        res_local = Runner.run_sync(agent, user_message_local)
-        return getattr(res_local, "final_output", "")
+        # Structured logging for Agents SDK call
+        try:
+            logger.info("AGENT_START", extra={
+                "agent": "Writer",
+                "model": get_model("openai", "heavy"),
+                "instr_len": len(instructions or ""),
+                "user_len": len(user_message_local or ""),
+            })
+        except Exception:
+            pass
+        import time as _t
+        _t0 = _t.perf_counter()
+        try:
+            res_local = Runner.run_sync(agent, user_message_local)
+            out = getattr(res_local, "final_output", "")
+            try:
+                logger.success("AGENT_OK", extra={
+                    "agent": "Writer",
+                    "duration_ms": int((_t.perf_counter() - _t0) * 1000),
+                    "out_len": len(out or ""),
+                })
+            except Exception:
+                pass
+            return out
+        except Exception as e:
+            try:
+                logger.error("AGENT_FAIL", exception=e, extra={
+                    "agent": "Writer",
+                })
+            except Exception:
+                pass
+            raise
 
     # Provider-agnostic runners
 
     def run_with_provider(system: str, user_inp: str, speed: str = "heavy") -> str:
-        pr = ProviderRunner(_prov)
+        pr = ProviderRunner(_prov, logger=logger)
         if _prov == "openai":
             # Prefer Agents SDK path for OpenAI to keep tools/session parity
             model = get_model("openai", "fast" if speed == "fast" else "heavy")
@@ -203,7 +263,7 @@ def generate_post(
 
     def run_json_with_provider(system: str, user_inp: str, cls: Type, speed: str = "fast"):
         import json
-        pr = ProviderRunner(_prov)
+        pr = ProviderRunner(_prov, logger=logger)
         if _prov in {"gemini", "google", "claude"}:
             txt = pr.run_json(system, user_inp, speed=("fast" if speed == "fast" else "heavy"))
         else:
@@ -444,7 +504,7 @@ def generate_post(
                             / "module_01_writing"
                             / "title_json.md"
                         ).read_text(encoding="utf-8")
-                        pr_local = ProviderRunner(_prov)
+                        pr_local = ProviderRunner(_prov, logger=logger)
                         tj = pr_local.run_json(tprompt, tj_payload, speed="heavy")
                         obj = _pjson(tj)
                         title = str((obj or {}).get("title") or "").strip() or _fallback_title_from_text(str(content_raw or ""))
@@ -503,7 +563,7 @@ def generate_post(
                 "</input>"
             )
             try:
-                pr_local = ProviderRunner(_prov)
+                pr_local = ProviderRunner(_prov, logger=logger)
                 tj = pr_local.run_json(tprompt, tj_payload, speed="heavy")
             except Exception:
                 tj = run_with_provider(tprompt, tj_payload, speed="heavy")
