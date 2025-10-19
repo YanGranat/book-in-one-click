@@ -587,9 +587,9 @@ def generate_article(
         if style_key == "article_style_2":
             _lbl = _section_label(i)
             if _lbl:
-                toc_lines.append(f"- {_lbl} {sec.title}")
+                toc_lines.append(f"{_lbl} {sec.title}")
             else:
-                toc_lines.append(f"- {i}. {sec.title}")
+                toc_lines.append(f"{i}. {sec.title}")
         else:
             toc_lines.append(f"{i}. {sec.title}")
             for j, sub in enumerate(sec.subsections, start=1):
