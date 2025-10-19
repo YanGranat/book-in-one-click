@@ -285,16 +285,32 @@ def generate_series(
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
     logger.info(f"Starting series generation: '{topic[:100]}'")
-    logger.info(
-        f"Configuration: provider={_prov}, lang={lang}, mode={mode}, count={count}",
-        extra={
-            "sufficiency_heavy_after": int(sufficiency_heavy_after),
-            "max_iterations": int(max_iterations),
-            "output_mode": output_mode,
-            "factcheck": bool(factcheck),
-            "refine": bool(refine),
-        },
-    )
+    # Series pipeline policy: always disable fact-check and refine
+    eff_factcheck = False
+    eff_refine = False
+    try:
+        logger.info(
+            f"Configuration: provider={_prov}, lang={lang}, mode={mode}, count={count}",
+            extra={
+                "sufficiency_heavy_after": int(sufficiency_heavy_after),
+                "max_iterations": int(max_iterations),
+                "output_mode": output_mode,
+                "factcheck": eff_factcheck,
+                "refine": eff_refine,
+                "inbound_factcheck": bool(factcheck),
+                "inbound_refine": bool(refine),
+            },
+        )
+        logger.debug(
+            "GUARD_SERIES_DISABLES_FC_REFINE",
+            extra={
+                "reason": "series pipeline does not support FC/Refine",
+                "effective_factcheck": eff_factcheck,
+                "effective_refine": eff_refine,
+            },
+        )
+    except Exception:
+        pass
     
     log_lines: list[str] = []
     def log(section: str, body: str):
@@ -471,11 +487,11 @@ def generate_series(
                 idea.title,
                 lang=lang,
                 provider=provider,
-                factcheck=factcheck,
+                factcheck=eff_factcheck,
                 research_iterations=research_iterations,
                 output_subdir=output_subdir,
                 job_meta=job_meta,
-                use_refine=refine,
+                use_refine=eff_refine,
                 instructions_override=p_writer,
                 series_topics=series_topics_full,
                 series_current_id=idea.id,
@@ -498,11 +514,11 @@ def generate_series(
                 idea.title,
                 lang=lang,
                 provider=provider,
-                factcheck=factcheck,
+                factcheck=eff_factcheck,
                 research_iterations=research_iterations,
                 output_subdir=output_subdir,
                 job_meta=job_meta,
-                use_refine=refine,
+                use_refine=eff_refine,
                 instructions_override=p_writer,
                 series_topics=series_topics_full,
                 series_current_id=idea.id,
@@ -582,8 +598,8 @@ def generate_series(
         f"- count: {count}\n"
         f"- max_iterations: {max_iterations}\n"
         f"- output_mode: {output_mode}\n"
-        f"- factcheck: {bool(factcheck)}\n"
-        f"- refine: {bool(refine)}\n"
+        f"- factcheck: {eff_factcheck}\n"
+        f"- refine: {eff_refine}\n"
     )
     full_log_content = log_header + "\n".join(log_lines)
     log_path = log_dir / f"{safe_filename_base(topic)}_series_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
