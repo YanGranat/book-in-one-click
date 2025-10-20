@@ -345,32 +345,33 @@ def generate_article(
 
     # Research module removed in 2‑module pipeline
 
-    # Second pass: refine/improve outline with the same agent if necessary
-    try:
-        improve_user = (
-            "<input>\n"
-            f"<topic>{topic}</topic>\n"
-            f"<lang>{lang}</lang>\n"
-            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-            "</input>"
-        )
-        t1 = time.perf_counter()
-        logger.step("Refining outline (pass 2 of 3)")
-        improved_outline: ArticleOutline = Runner.run_sync(outline_agent, improve_user).final_output  # type: ignore
-        # Accept improved outline when it still has sections and not smaller by an extreme margin
-        if improved_outline and improved_outline.sections:
-            outline = improved_outline
-            duration = time.perf_counter() - t1
-            # Log full improved outline
-            log("📑 Outline · Improved", f"```json\n{outline.model_dump_json()}\n```")
-            log_summary("✨", "Структура улучшена", [
-                f"Итого разделов: {len(outline.sections)}",
-                f"Итого подразделов: {sum(len(s.subsections) for s in outline.sections)}"
-            ])
-            logger.success(f"Outline refined: {len(outline.sections)} sections", show_duration=False)
-            logger.debug(f"Refine took {int(duration*1000)}ms")
-    except Exception as e:
-        logger.warning(f"Outline refinement failed: {type(e).__name__}: {str(e)[:100]}")
+    # Second pass: refine/improve outline (skip for style_3)
+    if style_key != "article_style_3":
+        try:
+            improve_user = (
+                "<input>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<lang>{lang}</lang>\n"
+                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                "</input>"
+            )
+            t1 = time.perf_counter()
+            logger.step("Refining outline (pass 2 of 3)")
+            improved_outline: ArticleOutline = Runner.run_sync(outline_agent, improve_user).final_output  # type: ignore
+            # Accept improved outline when it still has sections and not smaller by an extreme margin
+            if improved_outline and improved_outline.sections:
+                outline = improved_outline
+                duration = time.perf_counter() - t1
+                # Log full improved outline
+                log("📑 Outline · Improved", f"```json\n{outline.model_dump_json()}\n```")
+                log_summary("✨", "Структура улучшена", [
+                    f"Итого разделов: {len(outline.sections)}",
+                    f"Итого подразделов: {sum(len(s.subsections) for s in outline.sections)}"
+                ])
+                logger.success(f"Outline refined: {len(outline.sections)} sections", show_duration=False)
+                logger.debug(f"Refine took {int(duration*1000)}ms")
+        except Exception as e:
+            logger.warning(f"Outline refinement failed: {type(e).__name__}: {str(e)[:100]}")
 
     # Third pass: expand content items per subsection (outline_json + expand_content=true)
     try:
@@ -573,13 +574,13 @@ def generate_article(
 
     draft_result_by_key: dict[tuple[str, str], DraftChunk] = {}
     section_result_by_id: dict[str, Any] = {}
-    if style_key == "article_style_2":
+    if style_key in {"article_style_2", "article_style_3"}:
         remaining_secs = [sec for sec in outline.sections]
     else:
         remaining = [(sec, sub) for (sec, sub) in all_subs_writing]
     writing_t0 = time.perf_counter()
     for r in range(1, max_rounds + 1):
-        if style_key == "article_style_2":
+        if style_key in {"article_style_2", "article_style_3"}:
             if not remaining_secs:
                 break
             logger.step(f"Sequential writing round {r}/{max_rounds}", current=r, total=max_rounds)
