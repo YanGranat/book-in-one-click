@@ -7,9 +7,9 @@
 
 <input>
 - lang: ru|en|auto. Если lang=auto — используй язык topic.
-- extended_topic: тема (развёрнуто сформулированная).
+- extended_topic: строка — развёрнутая формулировка темы.
 - main_idea: ключевой тезис статьи.
- - article_markdown: полный текст статьи (Оглавление + Тело)
+- article_markdown: полный текст статьи (Оглавление + Тело)
 </input>
 
 <guidelines>

@@ -99,14 +99,12 @@
 </context>
 
 <input>
-- extended_topic: строка — развёрнутая тема (из Агент 1)
-- main_idea: строка — ключевой тезис (из Агент 2)
-- toc: объект JSON — результат Агент 3 ({ sections: [{id, title, note}] })
+- extended_topic: строка — развёрнутая формулировка темы
+- main_idea: строка — ключевой тезис статьи
+- toc: объект JSON — Оглавление (название разделов + небольшое пояснение к названию) будущей статьи ({ sections: [{id, title, note}] })
 - section_id: строка — идентификатор раздела (sNN)
 - lang: ru|en|auto. Если lang=auto — используй язык extended_topic.
-
 </input>
-
 
 <output>
 Верни строго JSON следующего вида:

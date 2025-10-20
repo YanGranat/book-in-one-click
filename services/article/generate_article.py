@@ -478,6 +478,25 @@ def generate_article(
             except Exception as e:
                 logger.error("S3_A4_FAIL", exception=e)
                 content_items = []
+            # Build cumulative article_so_far for current section
+            written_ordered = []
+            try:
+                for idx_prev, sec_prev in enumerate(outline.sections, start=1):
+                    if sec_prev.id == sec_obj.id:
+                        break
+                    d_prev = section_result_by_id.get(sec_prev.id)
+                    if not d_prev:
+                        continue
+                    label = f"Раздел {idx_prev}. " if (lang or "auto").lower().startswith("ru") else (f"Section {idx_prev}. " if (lang or "auto").lower().startswith("en") else "")
+                    title_line = f"## {label}{sec_prev.title}" if label else f"## {sec_prev.title}"
+                    body_prev = (getattr(d_prev, "markdown", "") or "").strip()
+                    if body_prev:
+                        written_ordered.append(title_line)
+                        written_ordered.append("")
+                        written_ordered.append(body_prev)
+            except Exception:
+                written_ordered = []
+            article_so_far_md = "\n".join(written_ordered)
             ssw_user_local = (
                 "<input>\n"
                 f"- lang: {lang}\n"
@@ -485,6 +504,7 @@ def generate_article(
                 f"- main_idea: {main_idea}\n"
                 f"- section_id: {sec_obj.id}\n"
                 f"- content_items_json: { _json.dumps(content_items, ensure_ascii=False) }\n"
+                f"- article_so_far_markdown: { _json.dumps(article_so_far_md, ensure_ascii=False) }\n"
                 "</input>"
             )
         else:
@@ -626,12 +646,12 @@ def generate_article(
                         f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
                         "</input>"
                     )
-                try:
-                    logger.debug(f"Final attempt for section {sec.id} ({i}/{len(remaining_secs)})")
-                    out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
-                    d = out.final_output  # type: ignore
-                    section_result_by_id[sec.id] = d
-                    logger.debug(f"Section {sec.id} recovered successfully")
+            try:
+                logger.debug(f"Final attempt for section {sec.id} ({i}/{len(remaining_secs)})")
+                out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
+                d = out.final_output  # type: ignore
+                section_result_by_id[sec.id] = d
+                logger.debug(f"Section {sec.id} recovered successfully")
                 except Exception as ex:
                     still_missing_s.append(sec.id)
                     logger.error(f"Section {sec.id} failed permanently", exception=ex)

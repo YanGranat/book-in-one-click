@@ -9,10 +9,11 @@
 
 <input>
 - lang: ru|en|auto. Если lang=auto — используй язык topic.
-- extended_topic: тема (развёрнуто сформулированная).
+- extended_topic: строка — развёрнутая формулировка темы.
 - main_idea: ключевой тезис статьи.
-- section_id: sNN
-- content_items_json (опционально): массив ContentItem для этого раздела (id, point).
+- section_id: sNN - номер раздела для которого нужно написать текст.
+- content_items_json: массив ContentItem для этого раздела (id, point, note) - тезисное содержание раздела и пояснение к тезисам.
+- article_so_far_markdown (опционально): Markdown уже написанных предыдущих разделов. Используй как контекст для связности, анти‑повторов и логических мостиков.
 </input>
 
 <guidelines>

@@ -64,7 +64,7 @@
 </context>
 
 <input>
-- extended_topic: строка — развёрнутая тема (из Агент 1)
+- extended_topic: строка — развёрнутая формулировка темы
 - lang: ru|en|auto. Если lang=auto — используй язык extended_topic.
 </input>
 
