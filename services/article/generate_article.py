@@ -232,23 +232,36 @@ def generate_article(
         a1 = build_agent_1_extended_topic(provider=_prov)  # type: ignore[name-defined]
         a2 = build_agent_2_main_idea(provider=_prov)  # type: ignore[name-defined]
         try:
-            logger.step("Agent 1: Extended Topic")
-            a1_res = Runner.run_sync(a1, f"<input>\n- topic: {topic}\n- lang: {lang}\n</input>")
+            a1_user = f"<input>\n- topic: {topic}\n- lang: {lang}\n</input>"
+            logger.info("S3_A1_START", extra={"input_len": len(a1_user)})
+            _log_loop_state("s3_a1_before_run")
+            t_a1 = time.perf_counter()
+            a1_res = Runner.run_sync(a1, a1_user)
+            _log_loop_state("s3_a1_after_run")
             ext_topic = getattr(a1_res, "final_output", None)
             extended_topic = getattr(ext_topic, "extended_topic", "") if ext_topic else ""
-            log("🧩 Concept · Extended Topic", f"```json\n{getattr(ext_topic, 'model_dump_json', lambda: '{}')()}\n```")
+            duration_a1 = time.perf_counter() - t_a1
+            try:
+                j = getattr(ext_topic, 'model_dump_json', lambda: '{}')()
+            except Exception:
+                j = "{}"
+            log("🧩 Concept · Extended Topic", f"```json\n{j}\n```")
+            logger.info("S3_A1_OK", extra={"extended_topic_len": len(extended_topic or ""), "duration_ms": int(duration_a1 * 1000)})
         except Exception as e:
-            logger.error("Extended topic generation failed", exception=e)
+            logger.error("S3_A1_FAIL", exception=e)
             extended_topic = topic
         try:
-            logger.step("Agent 2: Main Idea")
             a2_user = (
                 "<input>\n"
                 f"- extended_topic: {extended_topic}\n"
                 f"- lang: {lang}\n"
                 "</input>"
             )
+            logger.info("S3_A2_START", extra={"input_len": len(a2_user), "extended_topic_len": len(extended_topic or "")})
+            _log_loop_state("s3_a2_before_run")
+            t_a2 = time.perf_counter()
             a2_res = Runner.run_sync(a2, a2_user)
+            _log_loop_state("s3_a2_after_run")
             main_idea_obj = getattr(a2_res, "final_output", None)
             main_idea = getattr(main_idea_obj, "main_idea", "") if main_idea_obj else ""
             main_expl = getattr(main_idea_obj, "explanation", "") if main_idea_obj else ""
@@ -257,8 +270,10 @@ def generate_article(
             except Exception:
                 j = "{}"
             log("🧩 Concept · Main Idea", f"```json\n{j}\n```")
+            duration_a2 = time.perf_counter() - t_a2
+            logger.info("S3_A2_OK", extra={"main_idea_len": len(main_idea or ""), "has_expl": bool((main_expl or '').strip()), "duration_ms": int(duration_a2 * 1000)})
         except Exception as e:
-            logger.error("Main idea generation failed", exception=e)
+            logger.error("S3_A2_FAIL", exception=e)
             main_idea, main_expl = "", ""
         # ToC agent
         toc_agent = build_agent_3_toc(provider=_prov)  # type: ignore[name-defined]
@@ -270,15 +285,19 @@ def generate_article(
             + f"- lang: {lang}\n"
             + "</input>"
         )
+        logger.info("S3_A3_START", extra={"input_len": len(toc_user), "has_expl": bool((main_expl or '').strip())})
+        _log_loop_state("s3_a3_before_run")
         t0 = time.perf_counter()
-        logger.step("Generating table of contents (style 3)")
         toc_res = Runner.run_sync(toc_agent, toc_user)
+        _log_loop_state("s3_a3_after_run")
         toc_obj = getattr(toc_res, "final_output", None)
         try:
             log("📑 ToC", f"```json\n{toc_obj.model_dump_json()}\n```")
         except Exception:
             pass
         sections_s3 = list(getattr(toc_obj, "sections", []) or [])
+        duration_toc = time.perf_counter() - t0
+        logger.info("S3_A3_OK", extra={"sections": len(sections_s3), "duration_ms": int(duration_toc * 1000)})
     else:
         outline_agent = build_sections_agent(provider=_prov)
         user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
@@ -433,23 +452,31 @@ def generate_article(
         if style_key == "article_style_3":
             # Ask Agent 4 for content plan for this section
             sp_agent = build_agent_4_section_contents(provider=_prov)  # type: ignore[name-defined]
+            toc_dict = {"sections": [{"id": s.id, "title": s.title} for s in outline.sections]}
             sp_user = (
                 "<input>\n"
                 f"- extended_topic: {extended_topic}\n"
                 f"- main_idea: {main_idea}\n"
-                f"- toc: {{\"sections\": { _json.dumps([{ 'id': s.id, 'title': s.title } for s in outline.sections], ensure_ascii=False) } }}\n"
+                f"- toc: { _json.dumps(toc_dict, ensure_ascii=False) }\n"
                 f"- section_id: {sec_obj.id}\n"
                 f"- lang: {lang}\n"
                 "</input>"
             )
+            logger.info("S3_A4_START", extra={"section_id": sec_obj.id, "input_len": len(sp_user)})
+            t_sp = time.perf_counter()
             try:
+                _log_loop_state("s3_a4_before_run")
                 sp_res = _run_with_retries_sync(sp_agent, sp_user)
+                _log_loop_state("s3_a4_after_run")
                 sp_obj = getattr(sp_res, "final_output", None)
                 content_items = [
                     {"id": getattr(ci, "id", ""), "point": getattr(ci, "point", "")}
                     for ci in (getattr(sp_obj, "content_items", []) or [])
                 ]
-            except Exception:
+                duration_sp = time.perf_counter() - t_sp
+                logger.info("S3_A4_OK", extra={"section_id": sec_obj.id, "items": len(content_items), "duration_ms": int(duration_sp * 1000)})
+            except Exception as e:
+                logger.error("S3_A4_FAIL", exception=e)
                 content_items = []
             ssw_user_local = (
                 "<input>\n"
@@ -475,7 +502,7 @@ def generate_article(
         for i in range(3):
             try:
                 tloc = time.perf_counter()
-                logger.debug(f"Writing section {sec_obj.id} (attempt {i+1}/3)")
+                logger.info("S3_A5_START" if style_key == "article_style_3" else "A5_START", extra={"section_id": sec_obj.id, "attempt": i + 1, "input_len": len(ssw_user_local)})
                 # Run with fresh loop like in _run_with_retries_sync (thread-safe)
                 loop = asyncio.new_event_loop()
                 try:
@@ -491,10 +518,13 @@ def generate_article(
                     except Exception:
                         pass
                 duration = time.perf_counter() - tloc
-                logger.debug(f"Section {sec_obj.id} completed in {int(duration*1000)}ms")
-                return res.final_output  # type: ignore
+                out = getattr(res, "final_output", None)
+                title_len = len(getattr(out, "title", "") or "") if out else 0
+                md_len = len(getattr(out, "markdown", "") or "") if out else 0
+                logger.info("S3_A5_OK" if style_key == "article_style_3" else "A5_OK", extra={"section_id": sec_obj.id, "duration_ms": int(duration * 1000), "title_len": title_len, "markdown_len": md_len})
+                return out  # type: ignore
             except Exception as ex:
-                logger.debug(f"Section {sec_obj.id} failed (attempt {i+1}/3): {type(ex).__name__}")
+                logger.warning("S3_A5_RETRY" if style_key == "article_style_3" else "A5_RETRY", extra={"section_id": sec_obj.id, "attempt": i + 1, "error": type(ex).__name__})
                 if i == 2:
                     break
                 _sleep(backoff_seq[min(i, len(backoff_seq)-1)])
