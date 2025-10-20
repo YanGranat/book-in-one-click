@@ -452,7 +452,14 @@ def generate_article(
         if style_key == "article_style_3":
             # Ask Agent 4 for content plan for this section
             sp_agent = build_agent_4_section_contents(provider=_prov)  # type: ignore[name-defined]
-            toc_dict = {"sections": [{"id": s.id, "title": s.title} for s in outline.sections]}
+            # Use original Style3 ToC items to preserve notes
+            try:
+                toc_dict = {"sections": [
+                    {"id": getattr(s, "id", ""), "title": getattr(s, "title", ""), "note": getattr(s, "note", None)}
+                    for s in (sections_s3 if 'sections_s3' in locals() else outline.sections)
+                ]}
+            except Exception:
+                toc_dict = {"sections": [{"id": s.id, "title": s.title} for s in outline.sections]}
             sp_user = (
                 "<input>\n"
                 f"- extended_topic: {extended_topic}\n"
@@ -503,6 +510,7 @@ def generate_article(
                 f"- extended_topic: {extended_topic}\n"
                 f"- main_idea: {main_idea}\n"
                 f"- section_id: {sec_obj.id}\n"
+                f"- toc: { _json.dumps(toc_dict, ensure_ascii=False) }\n"
                 f"- content_items_json: { _json.dumps(content_items, ensure_ascii=False) }\n"
                 f"- article_so_far_markdown: { _json.dumps(article_so_far_md, ensure_ascii=False) }\n"
                 "</input>"
