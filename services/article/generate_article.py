@@ -660,9 +660,9 @@ def generate_article(
                 d = out.final_output  # type: ignore
                 section_result_by_id[sec.id] = d
                 logger.debug(f"Section {sec.id} recovered successfully")
-                except Exception as ex:
-                    still_missing_s.append(sec.id)
-                    logger.error(f"Section {sec.id} failed permanently", exception=ex)
+            except Exception as ex:
+                still_missing_s.append(sec.id)
+                logger.error(f"Section {sec.id} failed permanently", exception=ex)
             if still_missing_s:
                 missing_str = ", ".join(still_missing_s)
                 raise RuntimeError(f"Some sections failed to generate: {missing_str}")
@@ -798,8 +798,8 @@ def generate_article(
         else:
             body_lines.append(f"## {sec.title}")
         try:
-    if style_key in {"article_style_2", "article_style_3"}:
-                # Style 2: no per-section leads, only append section body
+            if style_key in {"article_style_2", "article_style_3"}:
+                # Style 2/3: no per-section leads, only append section body
                 d = drafts_by_section.get(sec.id)
                 sec_body_text = (getattr(d, "markdown", "") or "").strip()
                 if sec_body_text:
