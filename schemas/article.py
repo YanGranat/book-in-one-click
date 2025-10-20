@@ -86,6 +86,37 @@ class ArticleTitleLead(BaseModel):
     lead_markdown: str
 
 
+# ===== Style 3 specific schemas =====
+class ExtendedTopic(BaseModel):
+    extended_topic: str
+
+
+class MainIdea(BaseModel):
+    main_idea: str
+    explanation: Optional[str] = None
+
+
+class Style3TocItem(BaseModel):
+    id: str
+    title: str
+    note: Optional[str] = None
+
+
+class Style3ToC(BaseModel):
+    sections: List[Style3TocItem] = Field(default_factory=list)
+
+
+class SectionPlanItem(BaseModel):
+    id: str
+    point: str
+    note: Optional[str] = None
+
+
+class SectionPlan(BaseModel):
+    section_id: str
+    content_items: List[SectionPlanItem] = Field(default_factory=list)
+
+
 __all__ = [
     "ContentItem",
     "SubsectionOutline",
@@ -100,6 +131,13 @@ __all__ = [
     "LeadChunk",
     "TitleProposal",
     "ArticleTitleLead",
+    # Style 3 exports
+    "ExtendedTopic",
+    "MainIdea",
+    "Style3TocItem",
+    "Style3ToC",
+    "SectionPlanItem",
+    "SectionPlan",
 ]
 
 

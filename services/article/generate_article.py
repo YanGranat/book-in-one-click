@@ -91,7 +91,7 @@ def generate_article(
     
     # Normalize and validate style key early (used in logs below)
     style_key = (style or "article_style_1").strip().lower()
-    if style_key not in {"article_style_1", "article_style_2"}:
+    if style_key not in {"article_style_1", "article_style_2", "article_style_3"}:
         style_key = "article_style_1"
     
     # Initialize structured logger
@@ -193,6 +193,26 @@ def generate_article(
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.article_title_lead_writer import (  # type: ignore
             build_article_title_lead_writer_agent,
         )
+    elif style_key == "article_style_3":
+        # Style 3: multi-agent concept → structure → writing
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_01_concept.agent_1_extended_topic import (  # type: ignore
+            build_agent_1_extended_topic,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_01_concept.agent_2_main_idea import (  # type: ignore
+            build_agent_2_main_idea,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_02_structure.agent_3_table_of_contents import (  # type: ignore
+            build_agent_3_toc,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_02_structure.agent_4_section_contents import (  # type: ignore
+            build_agent_4_section_contents,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_03_writing.agent_5_section_writer import (  # type: ignore
+            build_agent_5_section_writer,
+        )
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_03_writing.agent_6_article_title_lead_writer import (  # type: ignore
+            build_agent_6_title_lead as build_article_title_lead_writer_agent,
+        )
     else:
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_01_structure.sections_and_subsections import (  # type: ignore
             build_sections_agent,
@@ -207,15 +227,76 @@ def generate_article(
     # Module 1: Structure Generation
     logger.stage("Structure Generation", total_stages=3, current_stage=1)
     
-    outline_agent = build_sections_agent(provider=_prov)
-    user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
+    # Style 3: run concept agents first to get extended_topic and main_idea
+    if style_key == "article_style_3":
+        a1 = build_agent_1_extended_topic(provider=_prov)  # type: ignore[name-defined]
+        a2 = build_agent_2_main_idea(provider=_prov)  # type: ignore[name-defined]
+        try:
+            logger.step("Agent 1: Extended Topic")
+            a1_res = Runner.run_sync(a1, f"<input>\n- topic: {topic}\n- lang: {lang}\n</input>")
+            ext_topic = getattr(a1_res, "final_output", None)
+            extended_topic = getattr(ext_topic, "extended_topic", "") if ext_topic else ""
+            log("🧩 Concept · Extended Topic", f"```json\n{getattr(ext_topic, 'model_dump_json', lambda: '{}')()}\n```")
+        except Exception as e:
+            logger.error("Extended topic generation failed", exception=e)
+            extended_topic = topic
+        try:
+            logger.step("Agent 2: Main Idea")
+            a2_user = (
+                "<input>\n"
+                f"- extended_topic: {extended_topic}\n"
+                f"- lang: {lang}\n"
+                "</input>"
+            )
+            a2_res = Runner.run_sync(a2, a2_user)
+            main_idea_obj = getattr(a2_res, "final_output", None)
+            main_idea = getattr(main_idea_obj, "main_idea", "") if main_idea_obj else ""
+            main_expl = getattr(main_idea_obj, "explanation", "") if main_idea_obj else ""
+            try:
+                j = main_idea_obj.model_dump_json() if main_idea_obj else "{}"
+            except Exception:
+                j = "{}"
+            log("🧩 Concept · Main Idea", f"```json\n{j}\n```")
+        except Exception as e:
+            logger.error("Main idea generation failed", exception=e)
+            main_idea, main_expl = "", ""
+        # ToC agent
+        toc_agent = build_agent_3_toc(provider=_prov)  # type: ignore[name-defined]
+        toc_user = (
+            "<input>\n"
+            f"- extended_topic: {extended_topic}\n"
+            f"- main_idea: {main_idea}\n"
+            + (f"- explanation: {main_expl}\n" if (main_expl or "").strip() else "")
+            + f"- lang: {lang}\n"
+            + "</input>"
+        )
+        t0 = time.perf_counter()
+        logger.step("Generating table of contents (style 3)")
+        toc_res = Runner.run_sync(toc_agent, toc_user)
+        toc_obj = getattr(toc_res, "final_output", None)
+        try:
+            log("📑 ToC", f"```json\n{toc_obj.model_dump_json()}\n```")
+        except Exception:
+            pass
+        sections_s3 = list(getattr(toc_obj, "sections", []) or [])
+    else:
+        outline_agent = build_sections_agent(provider=_prov)
+        user_outline = f"<input>\n<topic>{topic}</topic>\n<lang>{lang}</lang>\n</input>"
     try:
         t0 = time.perf_counter()
-        logger.step("Generating initial outline (pass 1 of 3)")
-        outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
-        sec_count = len(outline.sections)
-        sub_count = sum(len(s.subsections) for s in outline.sections)
-        duration = time.perf_counter() - t0
+        if style_key == "article_style_3":
+            # Construct a synthetic outline from Style 3 ToC
+            from schemas.article import ArticleOutline as _AO, SectionOutline as _SO
+            outline = _AO(title=None, main_idea=main_idea or None, sections=[_SO(id=it.id, title=it.title, lead=None, subsections=[], content_items=[]) for it in sections_s3])
+            sec_count = len(outline.sections)
+            sub_count = 0
+            duration = time.perf_counter() - t0
+        else:
+            logger.step("Generating initial outline (pass 1 of 3)")
+            outline: ArticleOutline = Runner.run_sync(outline_agent, user_outline).final_output  # type: ignore
+            sec_count = len(outline.sections)
+            sub_count = sum(len(s.subsections) for s in outline.sections)
+            duration = time.perf_counter() - t0
         
         # Log full outline JSON for tracking evolution
         log("📑 Outline · Sections", f"```json\n{outline.model_dump_json()}\n```")
@@ -283,20 +364,21 @@ def generate_article(
             "</input>"
         )
         t2 = time.perf_counter()
-        logger.step("Expanding content points (pass 3 of 3)")
-        expanded_outline: ArticleOutline = Runner.run_sync(outline_agent, expand_user).final_output  # type: ignore
-        if expanded_outline and expanded_outline.sections:
-            outline = expanded_outline
-            duration = time.perf_counter() - t2
-            total_content_items = sum(len(getattr(sub, 'content_items', []) or []) for sec in outline.sections for sub in sec.subsections)
-            # Log full expanded outline with content items
-            log("📑 Outline · Expanded Content", f"```json\n{outline.model_dump_json()}\n```")
-            log_summary("📝", "Контент-пункты добавлены", [
-                f"Детализировано подразделов: {sum(len(s.subsections) for s in outline.sections)}",
-                f"Контент-пунктов для раскрытия: {total_content_items}"
-            ])
-            logger.success(f"Content points expanded: {len(outline.sections)} sections ready", show_duration=False)
-            logger.debug(f"Expansion took {int(duration*1000)}ms")
+        if style_key != "article_style_3":
+            logger.step("Expanding content points (pass 3 of 3)")
+            expanded_outline: ArticleOutline = Runner.run_sync(outline_agent, expand_user).final_output  # type: ignore
+            if expanded_outline and expanded_outline.sections:
+                outline = expanded_outline
+                duration = time.perf_counter() - t2
+                total_content_items = sum(len(getattr(sub, 'content_items', []) or []) for sec in outline.sections for sub in sec.subsections)
+                # Log full expanded outline with content items
+                log("📑 Outline · Expanded Content", f"```json\n{outline.model_dump_json()}\n```")
+                log_summary("📝", "Контент-пункты добавлены", [
+                    f"Детализировано подразделов: {sum(len(s.subsections) for s in outline.sections)}",
+                    f"Контент-пунктов для раскрытия: {total_content_items}"
+                ])
+                logger.success(f"Content points expanded: {len(outline.sections)} sections ready", show_duration=False)
+                logger.debug(f"Expansion took {int(duration*1000)}ms")
     except Exception as e:
         logger.warning(f"Content expansion failed: {type(e).__name__}: {str(e)[:100]}")
 
@@ -309,6 +391,11 @@ def generate_article(
         ssw_agent = build_section_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_sections = [sec for sec in outline.sections]
         logger.info(f"Writing style: section-level (style 2, sequential)")
+    elif style_key == "article_style_3":
+        # Style 3: section writer with content plan per section
+        ssw_agent = build_agent_5_section_writer(provider=_prov)  # type: ignore[name-defined]
+        all_sections = [sec for sec in outline.sections]
+        logger.info(f"Writing style: section-level (style 3, sequential)")
     else:
         ssw_agent = build_subsection_writer_agent(provider=_prov)  # type: ignore[name-defined]
         all_subs_writing = [(sec, sub) for sec in outline.sections for sub in sec.subsections]
@@ -343,16 +430,47 @@ def generate_article(
         raise RuntimeError(f"Draft generation failed for {sec_obj.id}/{sub_obj.id}")
 
     def _run_section_draft(sec_obj):
-        ssw_user_local = (
-            "<input>\n"
-            f"<topic>{topic}</topic>\n"
-            f"<lang>{lang}</lang>\n"
-            f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-            f"<section_id>{sec_obj.id}</section_id>\n"
-            f"<content_items_json>{_json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sec_obj, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
-            f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
-            "</input>"
-        )
+        if style_key == "article_style_3":
+            # Ask Agent 4 for content plan for this section
+            sp_agent = build_agent_4_section_contents(provider=_prov)  # type: ignore[name-defined]
+            sp_user = (
+                "<input>\n"
+                f"- extended_topic: {extended_topic}\n"
+                f"- main_idea: {main_idea}\n"
+                f"- toc: {{\"sections\": { _json.dumps([{ 'id': s.id, 'title': s.title } for s in outline.sections], ensure_ascii=False) } }}\n"
+                f"- section_id: {sec_obj.id}\n"
+                f"- lang: {lang}\n"
+                "</input>"
+            )
+            try:
+                sp_res = _run_with_retries_sync(sp_agent, sp_user)
+                sp_obj = getattr(sp_res, "final_output", None)
+                content_items = [
+                    {"id": getattr(ci, "id", ""), "point": getattr(ci, "point", "")}
+                    for ci in (getattr(sp_obj, "content_items", []) or [])
+                ]
+            except Exception:
+                content_items = []
+            ssw_user_local = (
+                "<input>\n"
+                f"- lang: {lang}\n"
+                f"- extended_topic: {extended_topic}\n"
+                f"- main_idea: {main_idea}\n"
+                f"- section_id: {sec_obj.id}\n"
+                f"- content_items_json: { _json.dumps(content_items, ensure_ascii=False) }\n"
+                "</input>"
+            )
+        else:
+            ssw_user_local = (
+                "<input>\n"
+                f"<topic>{topic}</topic>\n"
+                f"<lang>{lang}</lang>\n"
+                f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                f"<section_id>{sec_obj.id}</section_id>\n"
+                f"<content_items_json>{_json.dumps([{'id': getattr(ci, 'id', ''), 'point': getattr(ci, 'point', '')} for ci in (getattr(sec_obj, 'content_items', []) or [])], ensure_ascii=False)}</content_items_json>\n"
+                f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
+                "</input>"
+            )
         backoff_seq = (2, 4, 8)
         for i in range(3):
             try:
@@ -454,20 +572,30 @@ def generate_article(
                 logger.info(f"Retrying {len(remaining)} failed subsections after {round_backoff}s")
                 _sleep(round_backoff)
 
-    if style_key == "article_style_2":
+    if style_key in {"article_style_2", "article_style_3"}:
         if remaining_secs:
             logger.step(f"Final sequential attempt for {len(remaining_secs)} failed sections")
             still_missing_s: list[str] = []
             for i, sec in enumerate(remaining_secs, 1):
-                ssw_user_inline = (
-                    "<input>\n"
-                    f"<topic>{topic}</topic>\n"
-                    f"<lang>{lang}</lang>\n"
-                    f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
-                    f"<section_id>{sec.id}</section_id>\n"
-                    f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
-                    "</input>"
-                )
+                if style_key == "article_style_3":
+                    ssw_user_inline = (
+                        "<input>\n"
+                        f"- lang: {lang}\n"
+                        f"- extended_topic: {extended_topic}\n"
+                        f"- main_idea: {main_idea}\n"
+                        f"- section_id: {sec.id}\n"
+                        "</input>"
+                    )
+                else:
+                    ssw_user_inline = (
+                        "<input>\n"
+                        f"<topic>{topic}</topic>\n"
+                        f"<lang>{lang}</lang>\n"
+                        f"<outline_json>{outline.model_dump_json()}</outline_json>\n"
+                        f"<section_id>{sec.id}</section_id>\n"
+                        f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
+                        "</input>"
+                    )
                 try:
                     logger.debug(f"Final attempt for section {sec.id} ({i}/{len(remaining_secs)})")
                     out = _run_with_retries_sync(ssw_agent, ssw_user_inline)
@@ -507,7 +635,7 @@ def generate_article(
                 missing_str = ", ".join([f"{sid}/{ssid}" for (sid, ssid) in still_missing])
                 raise RuntimeError(f"Some subsections failed to generate: {missing_str}")
 
-    if style_key == "article_style_2":
+    if style_key in {"article_style_2", "article_style_3"}:
         for sec in outline.sections:
             d = section_result_by_id.get(sec.id)
             if not d:
@@ -584,7 +712,7 @@ def generate_article(
 
     toc_lines = [f"## {_toc_title()}"]
     for i, sec in enumerate(outline.sections, start=1):
-        if style_key == "article_style_2":
+        if style_key in {"article_style_2", "article_style_3"}:
             _lbl = _section_label(i)
             if _lbl:
                 toc_lines.append(f"{_lbl} {sec.title}")
@@ -612,7 +740,7 @@ def generate_article(
         else:
             body_lines.append(f"## {sec.title}")
         try:
-            if style_key == "article_style_2":
+    if style_key in {"article_style_2", "article_style_3"}:
                 # Style 2: no per-section leads, only append section body
                 d = drafts_by_section.get(sec.id)
                 sec_body_text = (getattr(d, "markdown", "") or "").strip()
@@ -717,7 +845,11 @@ def generate_article(
         f"<topic>{topic}</topic>\n"
         f"<lang>{lang}</lang>\n"
         f"<article_markdown>{toc_text}\n\n{used_body}</article_markdown>\n"
-        + (f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n" if style_key == "article_style_2" else "")
+        + (
+            f"<main_idea>{(outline.main_idea or '').strip()}</main_idea>\n"
+            if style_key in {"article_style_2", "article_style_3"}
+            else ""
+        )
         + "</input>"
     )
     try:
@@ -779,7 +911,11 @@ def generate_article(
                 from agents import Agent  # type: ignore
                 from utils.models import get_model as _get_model
                 # Load prompt directly
-                style_dir = "deep_popular_science_article_style_2" if style_key == "article_style_2" else "deep_popular_science_article_style_1"
+                style_dir = (
+                    "deep_popular_science_article_style_2"
+                    if style_key == "article_style_2"
+                    else ("deep_popular_science_article_style_3" if style_key == "article_style_3" else "deep_popular_science_article_style_1")
+                )
                 prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "article" / "deep_popular_science_article" / style_dir / "module_02_writing" / "article_title_lead_writer.md"
                 prompt_text = prompt_path.read_text(encoding="utf-8")
                 # Ensure provider-in model is used; if it fails, fall back to a general heavy model

@@ -410,6 +410,9 @@ def build_article_style_keyboard(ui_lang: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text=("Стиль 1" if ru else "Style 1"), callback_data="set:article_style:article_style_1"),
         InlineKeyboardButton(text=("Стиль 2" if ru else "Style 2"), callback_data="set:article_style:article_style_2"),
     )
+    kb.add(
+        InlineKeyboardButton(text=("Стиль 3" if ru else "Style 3"), callback_data="set:article_style:article_style_3"),
+    )
     return kb
 
 
@@ -1175,9 +1178,9 @@ def create_dispatcher() -> Dispatcher:
         if kind == "article":
             # Ask for article style like posts
             prompt = (
-                "Выберите стиль статьи:\n\n• Стиль 1 — разделы и подразделы.\n• Стиль 2 — только разделы + основная идея."
+                "Выберите стиль статьи:\n\n• Стиль 1 — разделы и подразделы.\n• Стиль 2 — только разделы + основная идея.\n• Стиль 3 — 6 агентов: расширение темы → тезис → оглавление → тезисы разделов → последовательное написание → лид/заголовок."
                 if ru
-                else "Choose article style:\n\n• Style 1 - sections with subsections.\n• Style 2 - sections only + main idea."
+                else "Choose article style:\n\n• Style 1 - sections with subsections.\n• Style 2 - sections only + main idea.\n• Style 3 - 6 agents: extend topic → main thesis → ToC → section bullet points → sequential writing → title/lead."
             )
             await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=build_article_style_keyboard(ui_lang))
             try:

@@ -51,7 +51,7 @@ def main() -> None:
     parser.add_argument("--topic", type=str, default="", help="Topic to generate about")
     parser.add_argument("--lang", type=str, default="auto", help="Language: auto|ru|en")
     parser.add_argument("--provider", type=str, default="openai", help="LLM provider: openai|gemini|claude")
-    parser.add_argument("--style", type=str, default="article_style_1", help="Article style: article_style_1|article_style_2")
+    parser.add_argument("--style", type=str, default="article_style_1", help="Article style: article_style_1|article_style_2|article_style_3")
     parser.add_argument("--out", type=str, default="deep_article", help="Output subdirectory")
     parser.add_argument("--include-logs", action="store_true", help="Save detailed process log")
     args = parser.parse_args()
@@ -99,6 +99,13 @@ def main() -> None:
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_2.module_02_writing.article_title_lead_writer import (  # type: ignore
             build_article_title_lead_writer_agent,
         )
+    elif style_key == "article_style_3":
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_01_concept.agent_1_extended_topic import build_agent_1_extended_topic  # type: ignore
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_01_concept.agent_2_main_idea import build_agent_2_main_idea  # type: ignore
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_02_structure.agent_3_table_of_contents import build_agent_3_toc  # type: ignore
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_02_structure.agent_4_section_contents import build_agent_4_section_contents  # type: ignore
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_03_writing.agent_5_section_writer import build_agent_5_section_writer  # type: ignore
+        from llm_agents.deep_popular_science_article.deep_popular_science_article_style_3.module_03_writing.agent_6_article_title_lead_writer import build_agent_6_title_lead as build_article_title_lead_writer_agent  # type: ignore
     else:
         from llm_agents.deep_popular_science_article.deep_popular_science_article_style_1.module_01_structure.sections_and_subsections import (  # type: ignore
             build_sections_agent,
