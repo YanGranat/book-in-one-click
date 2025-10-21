@@ -1171,9 +1171,11 @@ def create_dispatcher() -> Dispatcher:
             await GenerateStates.ChoosingSeriesPreset.set()
             return
         if kind == "book":
-            # Books: temporarily not available (in development)
-            msg = ("Пока эта функция в разработке." if ru else "This feature is under development.")
-            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, msg)
+            # Book generation flow: ask for topic directly
+            await state.update_data(gen_book=True, active_flow="book")
+            prompt = ("Отправьте тему для книги:" if ru else "Send a topic for your book:")
+            await dp.bot.send_message(query.message.chat.id if query.message else query.from_user.id, prompt, reply_markup=ReplyKeyboardRemove())
+            await GenerateStates.WaitingTopic.set()
             return
         if kind == "article":
             # Ask for article style like posts
@@ -2375,6 +2377,131 @@ def create_dispatcher() -> Dispatcher:
             finally:
                 await state.finish()
                 await unmark_chat_running(chat_id)
+            return
+
+        # If book mode is active, branch into book generation flow
+        if bool(data.get("gen_book")):
+            chat_id = message.chat.id
+            if not await mark_chat_running(chat_id):
+                return
+            try:
+                prov = (data.get("provider") or "openai").strip().lower()
+                persisted_gen_lang = None
+                try:
+                    if message.from_user:
+                        persisted_gen_lang = await get_gen_lang(message.from_user.id)
+                except Exception:
+                    persisted_gen_lang = None
+                gen_lang = (data.get("gen_lang") or persisted_gen_lang or "auto")
+                eff_lang = ("auto" if (gen_lang or "auto").strip().lower() == "auto" else gen_lang)
+
+                # Create Job row (book) and ensure User exists
+                job_id = 0
+                db_user_id = None
+                try:
+                    if SessionLocal is not None and message.from_user:
+                        async with SessionLocal() as session:
+                            from .db import Job
+                            import json as _json
+                            from .db import get_or_create_user as _get_or_create_user
+                            db_user = await _get_or_create_user(session, message.from_user.id)
+                            db_user_id = int(db_user.id)
+                            params = {"topic": topic, "lang": eff_lang, "provider": prov or "openai"}
+                            j = Job(user_id=db_user.id, type="book", status="running", params_json=_json.dumps(params, ensure_ascii=False), cost=1000)
+                            session.add(j)
+                            await session.flush()
+                            job_id = int(j.id)
+                            await session.commit()
+                except Exception:
+                    job_id = 0
+
+                # Charge 1000 credits for book (admins free)
+                is_admin = bool(message.from_user and message.from_user.id in ADMIN_IDS)
+                if not is_admin:
+                    from sqlalchemy.exc import SQLAlchemyError
+                    try:
+                        charged = False
+                        if SessionLocal is not None and message.from_user:
+                            async with SessionLocal() as session:
+                                from .db import get_or_create_user
+                                user = await get_or_create_user(session, message.from_user.id)
+                                ok, remaining = await charge_credits(session, user, 1000, reason="book")
+                                if ok:
+                                    await session.commit()
+                                    charged = True
+                                else:
+                                    need = max(0, 1000 - int(remaining))
+                                    warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                                    await message.answer(warn)
+                                    if _stars_enabled():
+                                        try:
+                                            await message.answer(_stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
+                                        except Exception:
+                                            pass
+                                    await state.finish(); await unmark_chat_running(chat_id); return
+                        if not charged and message.from_user:
+                            ok, remaining = await charge_credits_kv(message.from_user.id, 1000)  # type: ignore
+                            if not ok:
+                                need = max(0, 1000 - int(remaining))
+                                warn = (f"Недостаточно кредитов. Не хватает: {need}. Используйте /credits для пополнения." if _is_ru(ui_lang) else f"Insufficient credits. Need: {need}. Use /credits to top up.")
+                                await message.answer(warn)
+                                if _stars_enabled():
+                                    try:
+                                        await message.answer(_stars_buy_prompt(ui_lang), reply_markup=build_buy_keyboard(ui_lang))
+                                    except Exception:
+                                        pass
+                                await state.finish(); await unmark_chat_running(chat_id); return
+                    except SQLAlchemyError:
+                        await message.answer("Временная ошибка БД. Попробуйте позже." if _is_ru(ui_lang) else "Temporary DB error. Try later.")
+                        await state.finish(); await unmark_chat_running(chat_id); return
+
+                await message.answer("Генерирую…" if _is_ru(ui_lang) else "Generating…")
+                import asyncio as _asyncio
+                loop = _asyncio.get_running_loop()
+                from services.book.generate_book import generate_book as _gen_book
+                timeout_s = int(os.getenv("GEN_TIMEOUT_S", "36000"))
+                fut = loop.run_in_executor(
+                    None,
+                    lambda: _gen_book(
+                        topic,
+                        lang=eff_lang,
+                        provider=((prov if prov != "auto" else "openai") or "openai"),
+                        output_subdir="deep_book",
+                        job_meta={"user_id": message.from_user.id if message.from_user else 0, "db_user_id": db_user_id, "chat_id": message.chat.id, "job_id": job_id, "provider_in": prov},
+                    ),
+                )
+                try:
+                    book_path = await _asyncio.wait_for(fut, timeout=timeout_s)
+                except _asyncio.TimeoutError:
+                    warn = (
+                        f"Превышено время ожидания ({int(timeout_s/60)} мин). Генерация продолжается в фоне; проверьте /results-ui позже."
+                        if _is_ru(ui_lang) else
+                        f"Timeout ({int(timeout_s/60)} min). Generation continues in background; check /results-ui later."
+                    )
+                    await message.answer(warn)
+                    await state.finish(); await unmark_chat_running(chat_id); return
+                # Send result
+                try:
+                    with open(book_path, "rb") as f:
+                        cap = ("Готово (книга): " + Path(book_path).name) if _is_ru(ui_lang) else ("Done (book): " + Path(book_path).name)
+                        await message.answer_document(f, caption=cap)
+                except Exception:
+                    pass
+                # Mark job done
+                try:
+                    if job_id and SessionLocal is not None:
+                        from sqlalchemy import update as _upd
+                        from datetime import datetime as _dt
+                        async with SessionLocal() as session:
+                            from .db import Job
+                            await session.execute(_upd(Job).where(Job.id == job_id).values(status="done", finished_at=_dt.utcnow(), file_path=str(book_path)))
+                            await session.commit()
+                except Exception:
+                    pass
+            except Exception as e:
+                await message.answer((f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"))
+            finally:
+                await state.finish(); await unmark_chat_running(chat_id)
             return
 
         # If series mode is active, branch into series generation flow
