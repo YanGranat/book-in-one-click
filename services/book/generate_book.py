@@ -360,11 +360,8 @@ def generate_book(
             return f"Chapter {idx}."
         return None
     for i, sec in enumerate(toc_outline.sections, start=1):
-        _lbl = _book_section_label(i)
-        if _lbl:
-            toc_lines.append(f"{_lbl} {sec.title}")
-        else:
-            toc_lines.append(f"{i}. {sec.title}")
+        # ToC style follows Article Style 1: numeric listing without 'Глава/Chapter' label
+        toc_lines.append(f"{i}. {sec.title}")
         # Include subsections in ToC
         for j, sub in enumerate(getattr(sec, "subsections", []) or [], start=1):
             toc_lines.append(f"  {i}.{j} {sub.title}")
