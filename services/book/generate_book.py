@@ -351,6 +351,9 @@ def generate_book(
     toc_lines: list[str] = ["## Оглавление" if (lang or "auto").lower().startswith("ru") else "## Table of Contents"]
     for i, sec in enumerate(toc_outline.sections, start=1):
         toc_lines.append(f"{i}. {sec.title}")
+        # Include subsections in ToC
+        for j, sub in enumerate(getattr(sec, "subsections", []) or [], start=1):
+            toc_lines.append(f"  {i}.{j} {sub.title}")
         # Section title (H2)
         body_lines.append("")
         body_lines.append(f"## {sec.title}")
