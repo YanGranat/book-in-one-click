@@ -64,6 +64,14 @@ def generate_book(
         "output_subdir": output_subdir,
     })
 
+    # Markdown log aggregator (similar to articles)
+    log_lines: list[str] = []
+    def log(section: str, body: str):
+        log_lines.append(f"---\n\n## {section}\n\n{body}\n")
+    def log_summary(emoji: str, title: str, items: list[str]):
+        content = "\n".join(f"- {it}" for it in items if it)
+        log_lines.append(f"---\n\n## {emoji} {title}\n\n{content}\n")
+
     # Import agents
     from llm_agents.books.deep_popular_science_book.deep_popular_science_book_style_1.module_01_main_idea.agent_1_main_idea import (  # type: ignore
         build_agent_1_main_idea,
@@ -129,6 +137,11 @@ def generate_book(
         main_idea_obj = getattr(a1_res, "final_output", None)
         main_idea = getattr(main_idea_obj, "main_idea", "") if main_idea_obj else ""
         logger.success("A1_OK", show_duration=True, extra={"main_idea_len": len(main_idea or "")})
+        try:
+            import json as __json
+            log("🧩 Concept · Main Idea", f"```json\n{__json.dumps({'main_idea': main_idea}, ensure_ascii=False)}\n```")
+        except Exception:
+            pass
     except Exception as e:
         logger.error("A1_FAIL", exception=e)
         main_idea = ""
@@ -144,6 +157,11 @@ def generate_book(
         toc_outline: BookOutline = _run_with_retries_sync(a2, a2_in).final_output  # type: ignore
         sec_count = len(getattr(toc_outline, 'sections', []) or [])
         logger.success("A2_OK", show_duration=True, extra={"sections": sec_count})
+        try:
+            log("📑 ToC · Initial", f"```json\n{toc_outline.model_dump_json()}\n```")
+            log_summary("📋", "Оглавление создано", [f"Разделов: {sec_count}"])
+        except Exception:
+            pass
     except Exception as e:
         logger.error("A2_FAIL", exception=e)
         raise
@@ -158,6 +176,10 @@ def generate_book(
         logger.info("A3_RUN", extra={"input_len": len(a3_in)})
         toc_outline = _run_with_retries_sync(a3, a3_in).final_output  # type: ignore
         logger.success("A3_OK", show_duration=True, extra={"sections": len(toc_outline.sections)})
+        try:
+            log("📑 ToC · Refined", f"```json\n{toc_outline.model_dump_json()}\n```")
+        except Exception:
+            pass
     except Exception as e:
         logger.error("A3_FAIL", exception=e)
         raise
@@ -173,6 +195,11 @@ def generate_book(
         toc_outline = _run_with_retries_sync(a4, a4_in).final_output  # type: ignore
         subs = sum(len(s.subsections) for s in toc_outline.sections)
         logger.success("A4_OK", show_duration=True, extra={"sections": len(toc_outline.sections), "subsections": subs})
+        try:
+            log("📑 ToC · With Subsections", f"```json\n{toc_outline.model_dump_json()}\n```")
+            log_summary("📝", "Подразделы добавлены", [f"Подразделов: {subs}"])
+        except Exception:
+            pass
     except Exception as e:
         logger.error("A4_FAIL", exception=e)
         raise
@@ -188,6 +215,10 @@ def generate_book(
         toc_outline = _run_with_retries_sync(a5, a5_in).final_output  # type: ignore
         subs = sum(len(s.subsections) for s in toc_outline.sections)
         logger.success("A5_OK", show_duration=True, extra={"sections": len(toc_outline.sections), "subsections": subs})
+        try:
+            log("📑 ToC · Subsections Refined", f"```json\n{toc_outline.model_dump_json()}\n```")
+        except Exception:
+            pass
     except Exception as e:
         logger.error("A5_FAIL", exception=e)
         raise
@@ -221,6 +252,11 @@ def generate_book(
                 logger.warning("A6_FAIL", extra={"section": sec.id, "subsection": sub.id, "error": type(e).__name__})
                 items = []
             plans[(sec.id, sub.id)] = items
+    try:
+        planned = sum(len(v) for v in plans.values())
+        log_summary("🧩", "Планы подразделов", [f"Итого пунктов плана: {planned}"])
+    except Exception:
+        pass
 
     # Agent 7: Write subsections (parallel rounds similar to article style 1)
     logger.stage("Agent 7 · Write Subsections", total_stages=5, current_stage=4)
@@ -265,6 +301,10 @@ def generate_book(
                 logger.warning("A7_WRITE_FAIL", extra={"section": key[0], "subsection": key[1], "error": type(e).__name__})
                 continue
     logger.parallel_complete(succeeded=len(drafts), failed=failed, duration=(time.perf_counter()-t_w))
+    try:
+        log_summary("✍️", "Подразделы написаны", [f"Успешно: {len(drafts)}", f"Ошибок: {failed}"])
+    except Exception:
+        pass
 
     # Agent 8: Section leads
     logger.stage("Agent 8 · Section Leads", total_stages=5, current_stage=4)
@@ -300,6 +340,11 @@ def generate_book(
             logger.warning("A8_FAIL", extra={"section": sec.id, "error": type(e).__name__})
             sec_lead = ""
         sec_leads[sec.id] = sec_lead
+    try:
+        have_leads = sum(1 for v in sec_leads.values() if (v or '').strip())
+        log_summary("📰", "Лиды разделов", [f"Сгенерировано: {have_leads} из {len(toc_outline.sections)}"])
+    except Exception:
+        pass
 
     # Assemble body
     body_lines: list[str] = []
@@ -344,6 +389,11 @@ def generate_book(
         logger.info("A9_RUN", extra={"input_len": len(a9_user)})
         atl = _run_with_retries_sync(a9, a9_user).final_output  # type: ignore
         logger.success("A9_OK", show_duration=True, extra={"title_len": len(getattr(atl, 'title', '') or ''), "lead_len": len(getattr(atl, 'lead_markdown', '') or '')})
+        try:
+            import json as __json
+            log("🧾 Title & Lead", f"```json\n{__json.dumps({'title': getattr(atl, 'title', ''), 'lead_markdown': getattr(atl, 'lead_markdown', '')[:400]}, ensure_ascii=False)}\n```")
+        except Exception:
+            pass
     except Exception as e:
         logger.error("A9_FAIL", exception=e)
         atl = ArticleTitleLead(title=(topic or ""), lead_markdown="")
@@ -381,7 +431,8 @@ def generate_book(
             f"- subsections: {sum(len(s.subsections) for s in toc_outline.sections)}\n\n"
             f"## Outline JSON\n\n```json\n{toc_outline.model_dump_json()}\n```\n"
         )
-        save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="LogDeepBook", content=header)
+        full_log_content = header + "".join(log_lines)
+        save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="LogDeepBook", content=full_log_content)
         # DB record
         try:
             from server.db import JobLog, ResultDoc
@@ -409,7 +460,7 @@ def generate_book(
                             job_id = int((job_meta or {}).get("job_id", 0))
                         except (ValueError, TypeError):
                             job_id = 0
-                        jl = JobLog(job_id=job_id, kind="md", path=rel_log, content=header)
+                        jl = JobLog(job_id=job_id, kind="md", path=rel_log, content=full_log_content)
                         s.add(jl)
                         s.flush()
                         try:
