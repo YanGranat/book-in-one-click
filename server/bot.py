@@ -2471,7 +2471,15 @@ def create_dispatcher() -> Dispatcher:
                     ),
                 )
                 try:
+                    print(f"[BOT][BOOK][START] uid={message.from_user.id if message.from_user else 0} chat={message.chat.id} topic_len={len(topic)} prov={prov} lang={eff_lang}", file=sys.stderr)
+                except Exception:
+                    pass
+                try:
                     book_path = await _asyncio.wait_for(fut, timeout=timeout_s)
+                    try:
+                        print(f"[BOT][BOOK][DONE] path={book_path}", file=sys.stderr)
+                    except Exception:
+                        pass
                 except _asyncio.TimeoutError:
                     warn = (
                         f"Превышено время ожидания ({int(timeout_s/60)} мин). Генерация продолжается в фоне; проверьте /results-ui позже."
@@ -2480,13 +2488,27 @@ def create_dispatcher() -> Dispatcher:
                     )
                     await message.answer(warn)
                     await state.finish(); await unmark_chat_running(chat_id); return
+                except Exception as e:
+                    try:
+                        import traceback as _tb
+                        print(f"[BOT][BOOK][ERR] {type(e).__name__}: {e}", file=sys.stderr)
+                        _tb.print_exc()
+                    except Exception:
+                        pass
+                    await message.answer((f"Ошибка: {e}" if _is_ru(ui_lang) else f"Error: {e}"))
+                    await state.finish(); await unmark_chat_running(chat_id); return
                 # Send result
                 try:
                     with open(book_path, "rb") as f:
                         cap = ("Готово (книга): " + Path(book_path).name) if _is_ru(ui_lang) else ("Done (book): " + Path(book_path).name)
                         await message.answer_document(f, caption=cap)
                 except Exception:
-                    pass
+                    try:
+                        import traceback as _tb
+                        print(f"[BOT][BOOK][SEND_ERR] path={book_path}", file=sys.stderr)
+                        _tb.print_exc()
+                    except Exception:
+                        pass
                 # Mark job done
                 try:
                     if job_id and SessionLocal is not None:

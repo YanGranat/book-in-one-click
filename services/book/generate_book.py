@@ -52,7 +52,12 @@ def generate_book(
                 pass
 
     logger = create_logger("book", show_debug=bool(os.getenv("DEBUG_LOGS")))
-    logger.info(f"Starting book generation: '{topic[:100]}'")
+    logger.stage("Initialization", total_stages=5, current_stage=1)
+    logger.info(f"Starting book generation: '{topic[:100]}'", extra={
+        "provider": _prov,
+        "lang": lang,
+        "output_subdir": output_subdir,
+    })
 
     # Import agents
     from llm_agents.books.deep_popular_science_book.deep_popular_science_book_style_1.module_01_main_idea.agent_1_main_idea import (  # type: ignore
@@ -86,43 +91,81 @@ def generate_book(
     _prov = (provider or "openai").strip().lower()
 
     # Agent 1: Main idea
+    logger.stage("Agent 1 · Main Idea", total_stages=5, current_stage=1)
     a1 = build_agent_1_main_idea(provider=_prov)
     a1_in = f"<input>\n- topic: {topic}\n- lang: {lang}\n</input>"
-    a1_res = Runner.run_sync(a1, a1_in)
-    main_idea_obj = getattr(a1_res, "final_output", None)
-    main_idea = getattr(main_idea_obj, "main_idea", "") if main_idea_obj else ""
-    logger.info(f"Main idea len={len(main_idea or '')}")
+    t_a1 = time.perf_counter()
+    try:
+        logger.info("A1_RUN", extra={"input_len": len(a1_in)})
+        a1_res = Runner.run_sync(a1, a1_in)
+        main_idea_obj = getattr(a1_res, "final_output", None)
+        main_idea = getattr(main_idea_obj, "main_idea", "") if main_idea_obj else ""
+        logger.success("A1_OK", show_duration=True, extra={"main_idea_len": len(main_idea or "")})
+    except Exception as e:
+        logger.error("A1_FAIL", exception=e)
+        main_idea = ""
 
     # Agent 2: ToC (sections with purposes)
+    logger.stage("Agent 2 · Build ToC", total_stages=5, current_stage=2)
     a2 = build_agent_2_toc(provider=_prov)
     a2_in = (
         "<input>\n" f"- topic: {topic}\n" f"- lang: {lang}\n" f"- main_idea: {main_idea}\n" "</input>"
     )
-    toc_outline: BookOutline = Runner.run_sync(a2, a2_in).final_output  # type: ignore
-    logger.info(f"ToC sections={len(getattr(toc_outline,'sections',[]) or [])}")
+    try:
+        logger.info("A2_RUN", extra={"input_len": len(a2_in)})
+        toc_outline: BookOutline = Runner.run_sync(a2, a2_in).final_output  # type: ignore
+        sec_count = len(getattr(toc_outline, 'sections', []) or [])
+        logger.success("A2_OK", show_duration=True, extra={"sections": sec_count})
+    except Exception as e:
+        logger.error("A2_FAIL", exception=e)
+        raise
 
     # Agent 3: ToC refinement
+    logger.stage("Agent 3 · Refine ToC", total_stages=5, current_stage=2)
     a3 = build_agent_3_toc_refine(provider=_prov)
     a3_in = (
         "<input>\n" f"- topic: {topic}\n" f"- lang: {lang}\n" f"- main_idea: {main_idea}\n" f"- toc_json: {toc_outline.model_dump_json()}\n" "</input>"
     )
-    toc_outline = Runner.run_sync(a3, a3_in).final_output  # type: ignore
+    try:
+        logger.info("A3_RUN", extra={"input_len": len(a3_in)})
+        toc_outline = Runner.run_sync(a3, a3_in).final_output  # type: ignore
+        logger.success("A3_OK", show_duration=True, extra={"sections": len(toc_outline.sections)})
+    except Exception as e:
+        logger.error("A3_FAIL", exception=e)
+        raise
 
     # Agent 4: Add subsections
+    logger.stage("Agent 4 · Add Subsections", total_stages=5, current_stage=2)
     a4 = build_agent_4_add_subsections(provider=_prov)
     a4_in = (
         "<input>\n" f"- topic: {topic}\n" f"- lang: {lang}\n" f"- main_idea: {main_idea}\n" f"- toc_json: {toc_outline.model_dump_json()}\n" "</input>"
     )
-    toc_outline = Runner.run_sync(a4, a4_in).final_output  # type: ignore
+    try:
+        logger.info("A4_RUN", extra={"input_len": len(a4_in)})
+        toc_outline = Runner.run_sync(a4, a4_in).final_output  # type: ignore
+        subs = sum(len(s.subsections) for s in toc_outline.sections)
+        logger.success("A4_OK", show_duration=True, extra={"sections": len(toc_outline.sections), "subsections": subs})
+    except Exception as e:
+        logger.error("A4_FAIL", exception=e)
+        raise
 
     # Agent 5: Subsections refinement
+    logger.stage("Agent 5 · Refine Subsections", total_stages=5, current_stage=2)
     a5 = build_agent_5_subsections_refine(provider=_prov)
     a5_in = (
         "<input>\n" f"- topic: {topic}\n" f"- lang: {lang}\n" f"- main_idea: {main_idea}\n" f"- toc_json: {toc_outline.model_dump_json()}\n" "</input>"
     )
-    toc_outline = Runner.run_sync(a5, a5_in).final_output  # type: ignore
+    try:
+        logger.info("A5_RUN", extra={"input_len": len(a5_in)})
+        toc_outline = Runner.run_sync(a5, a5_in).final_output  # type: ignore
+        subs = sum(len(s.subsections) for s in toc_outline.sections)
+        logger.success("A5_OK", show_duration=True, extra={"sections": len(toc_outline.sections), "subsections": subs})
+    except Exception as e:
+        logger.error("A5_FAIL", exception=e)
+        raise
 
     # Agent 6: Plan per subsection → build mapping plans
+    logger.stage("Agent 6 · Plan Subsections", total_stages=5, current_stage=3)
     plan_agent = build_agent_6_subsection_plan(provider=_prov)
     plans: dict[tuple[str, str], list[str]] = {}
     for sec in toc_outline.sections:
@@ -140,19 +183,26 @@ def generate_book(
                 "</input>"
             )
             try:
+                logger.step("A6_RUN", current=None, total=None)
+                t_a6 = time.perf_counter()
                 res = Runner.run_sync(plan_agent, pi_in)
                 sp = getattr(res, "final_output", None)
                 items = list(getattr(sp, "plan_items", []) or [])
-            except Exception:
+                logger.info("A6_OK", extra={"section": sec.id, "subsection": sub.id, "items": len(items), "t_ms": int((time.perf_counter()-t_a6)*1000)})
+            except Exception as e:
+                logger.warning("A6_FAIL", extra={"section": sec.id, "subsection": sub.id, "error": type(e).__name__})
                 items = []
             plans[(sec.id, sub.id)] = items
 
     # Agent 7: Write subsections (parallel rounds similar to article style 1)
+    logger.stage("Agent 7 · Write Subsections", total_stages=5, current_stage=4)
     from concurrent.futures import ThreadPoolExecutor, as_completed
     ssw = build_agent_7_subsection_writer(provider=_prov)
     all_pairs = [(sec, sub) for sec in toc_outline.sections for sub in sec.subsections]
     drafts: dict[tuple[str, str], DraftChunk] = {}
     max_workers = max(1, min(8, int(os.getenv("ARTICLE_MAX_PAR", "4") or 4)))
+    logger.parallel_start("Write subsections", total_jobs=len(all_pairs), max_workers=max_workers)
+    t_w = time.perf_counter()
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = {}
         for sec, sub in all_pairs:
@@ -169,6 +219,7 @@ def generate_book(
                 "</input>"
             )
             futs[ex.submit(Runner.run, ssw, user)] = (sec.id, sub.id)
+        failed = 0
         for fut in as_completed(list(futs.keys())):
             key = futs[fut]
             try:
@@ -176,10 +227,14 @@ def generate_book(
                 d = getattr(out, "final_output", None)
                 if d:
                     drafts[key] = d
-            except Exception:
+            except Exception as e:
+                failed += 1
+                logger.warning("A7_WRITE_FAIL", extra={"section": key[0], "subsection": key[1], "error": type(e).__name__})
                 continue
+    logger.parallel_complete(succeeded=len(drafts), failed=failed, duration=(time.perf_counter()-t_w))
 
     # Agent 8: Section leads
+    logger.stage("Agent 8 · Section Leads", total_stages=5, current_stage=4)
     sec_leads: dict[str, str] = {}
     a8 = build_agent_8_section_lead_writer(provider=_prov)
     for sec in toc_outline.sections:
@@ -203,10 +258,13 @@ def generate_book(
             "</input>"
         )
         try:
+            t_a8 = time.perf_counter()
             res = Runner.run_sync(a8, user)
             lead_obj = getattr(res, "final_output", None)
             sec_lead = getattr(lead_obj, "lead_markdown", "") if lead_obj else ""
-        except Exception:
+            logger.info("A8_OK", extra={"section": sec.id, "lead_len": len(sec_lead or ""), "t_ms": int((time.perf_counter()-t_a8)*1000)})
+        except Exception as e:
+            logger.warning("A8_FAIL", extra={"section": sec.id, "error": type(e).__name__})
             sec_lead = ""
         sec_leads[sec.id] = sec_lead
 
@@ -238,18 +296,23 @@ def generate_book(
     toc_text = "\n".join(toc_lines)
 
     # Agent 9: Book title & lead (full body)
+    logger.stage("Agent 9 · Title & Book Lead", total_stages=5, current_stage=5)
     a9 = build_agent_9_title_lead_writer(provider=_prov)
     a9_user = (
         "<input>\n"
         f"- topic: {topic}\n"
         f"- lang: {lang}\n"
         f"- main_idea: {main_idea}\n"
+        f"- toc_json: {toc_outline.model_dump_json()}\n"
         f"- book_markdown: {toc_text}\n\n{body_text}\n"
         "</input>"
     )
     try:
+        logger.info("A9_RUN", extra={"input_len": len(a9_user)})
         atl = Runner.run_sync(a9, a9_user).final_output  # type: ignore
-    except Exception:
+        logger.success("A9_OK", show_duration=True, extra={"title_len": len(getattr(atl, 'title', '') or ''), "lead_len": len(getattr(atl, 'lead_markdown', '') or '')})
+    except Exception as e:
+        logger.error("A9_FAIL", exception=e)
         atl = ArticleTitleLead(title=(topic or ""), lead_markdown="")
 
     title_text = getattr(atl, "title", None) or topic
@@ -260,6 +323,7 @@ def generate_book(
     base = f"{safe_filename_base(topic)}_book"
     book_path = next_available_filepath(output_dir, base, ".md")
     content = f"# {title_text}\n\n{lead_text}\n\n{toc_text}\n\n{body_text}\n"
+    logger.stage("Save Result", total_stages=5, current_stage=5)
     save_markdown(
         book_path,
         title=title_text,
@@ -267,6 +331,8 @@ def generate_book(
         pipeline="DeepBook",
         content=content,
     )
+    logger.success("Book saved", show_duration=True, extra={"path": str(book_path), "chars": len(content)})
+    logger.total_duration()
     return book_path
 
 
