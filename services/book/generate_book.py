@@ -95,6 +95,29 @@ def generate_book(
 
     # _prov already resolved above
 
+    def _run_with_retries_sync(agent: Any, user_input: str, *, attempts: int = 3, backoff_seq: tuple[int, ...] = (2, 5, 8)):
+        for i in range(attempts):
+            try:
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(Runner.run(agent, user_input))
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+                    try:
+                        asyncio.set_event_loop(None)
+                    except Exception:
+                        pass
+            except Exception as e:
+                if i < attempts - 1:
+                    logger.retry(i + 1, attempts, reason=f"{type(e).__name__}: {str(e)[:100]}")
+                    time.sleep(backoff_seq[min(i, len(backoff_seq)-1)])
+                else:
+                    raise
+
     # Agent 1: Main idea
     logger.stage("Agent 1 · Main Idea", total_stages=5, current_stage=1)
     a1 = build_agent_1_main_idea(provider=_prov)
@@ -102,7 +125,7 @@ def generate_book(
     t_a1 = time.perf_counter()
     try:
         logger.info("A1_RUN", extra={"input_len": len(a1_in)})
-        a1_res = Runner.run_sync(a1, a1_in)
+        a1_res = _run_with_retries_sync(a1, a1_in)
         main_idea_obj = getattr(a1_res, "final_output", None)
         main_idea = getattr(main_idea_obj, "main_idea", "") if main_idea_obj else ""
         logger.success("A1_OK", show_duration=True, extra={"main_idea_len": len(main_idea or "")})
@@ -118,7 +141,7 @@ def generate_book(
     )
     try:
         logger.info("A2_RUN", extra={"input_len": len(a2_in)})
-        toc_outline: BookOutline = Runner.run_sync(a2, a2_in).final_output  # type: ignore
+        toc_outline: BookOutline = _run_with_retries_sync(a2, a2_in).final_output  # type: ignore
         sec_count = len(getattr(toc_outline, 'sections', []) or [])
         logger.success("A2_OK", show_duration=True, extra={"sections": sec_count})
     except Exception as e:
@@ -133,7 +156,7 @@ def generate_book(
     )
     try:
         logger.info("A3_RUN", extra={"input_len": len(a3_in)})
-        toc_outline = Runner.run_sync(a3, a3_in).final_output  # type: ignore
+        toc_outline = _run_with_retries_sync(a3, a3_in).final_output  # type: ignore
         logger.success("A3_OK", show_duration=True, extra={"sections": len(toc_outline.sections)})
     except Exception as e:
         logger.error("A3_FAIL", exception=e)
@@ -147,7 +170,7 @@ def generate_book(
     )
     try:
         logger.info("A4_RUN", extra={"input_len": len(a4_in)})
-        toc_outline = Runner.run_sync(a4, a4_in).final_output  # type: ignore
+        toc_outline = _run_with_retries_sync(a4, a4_in).final_output  # type: ignore
         subs = sum(len(s.subsections) for s in toc_outline.sections)
         logger.success("A4_OK", show_duration=True, extra={"sections": len(toc_outline.sections), "subsections": subs})
     except Exception as e:
@@ -162,7 +185,7 @@ def generate_book(
     )
     try:
         logger.info("A5_RUN", extra={"input_len": len(a5_in)})
-        toc_outline = Runner.run_sync(a5, a5_in).final_output  # type: ignore
+        toc_outline = _run_with_retries_sync(a5, a5_in).final_output  # type: ignore
         subs = sum(len(s.subsections) for s in toc_outline.sections)
         logger.success("A5_OK", show_duration=True, extra={"sections": len(toc_outline.sections), "subsections": subs})
     except Exception as e:
@@ -190,7 +213,7 @@ def generate_book(
             try:
                 logger.step("A6_RUN", current=None, total=None)
                 t_a6 = time.perf_counter()
-                res = Runner.run_sync(plan_agent, pi_in)
+                res = _run_with_retries_sync(plan_agent, pi_in)
                 sp = getattr(res, "final_output", None)
                 items = list(getattr(sp, "plan_items", []) or [])
                 logger.info("A6_OK", extra={"section": sec.id, "subsection": sub.id, "items": len(items), "t_ms": int((time.perf_counter()-t_a6)*1000)})
@@ -223,12 +246,17 @@ def generate_book(
                 f"- content_items_json: {_json.dumps(content_items, ensure_ascii=False)}\n"
                 "</input>"
             )
-            futs[ex.submit(Runner.run, ssw, user)] = (sec.id, sub.id)
+            def _job(u: str, _agent: Any):
+                try:
+                    return _run_with_retries_sync(_agent, u)
+                except Exception as _e:
+                    raise _e
+            futs[ex.submit(_job, user, ssw)] = (sec.id, sub.id)
         failed = 0
         for fut in as_completed(list(futs.keys())):
             key = futs[fut]
             try:
-                out = asyncio.get_event_loop().run_until_complete(fut)  # use existing loop
+                out = fut.result()
                 d = getattr(out, "final_output", None)
                 if d:
                     drafts[key] = d
@@ -264,7 +292,7 @@ def generate_book(
         )
         try:
             t_a8 = time.perf_counter()
-            res = Runner.run_sync(a8, user)
+            res = _run_with_retries_sync(a8, user)
             lead_obj = getattr(res, "final_output", None)
             sec_lead = getattr(lead_obj, "lead_markdown", "") if lead_obj else ""
             logger.info("A8_OK", extra={"section": sec.id, "lead_len": len(sec_lead or ""), "t_ms": int((time.perf_counter()-t_a8)*1000)})
@@ -314,7 +342,7 @@ def generate_book(
     )
     try:
         logger.info("A9_RUN", extra={"input_len": len(a9_user)})
-        atl = Runner.run_sync(a9, a9_user).final_output  # type: ignore
+        atl = _run_with_retries_sync(a9, a9_user).final_output  # type: ignore
         logger.success("A9_OK", show_duration=True, extra={"title_len": len(getattr(atl, 'title', '') or ''), "lead_len": len(getattr(atl, 'lead_markdown', '') or '')})
     except Exception as e:
         logger.error("A9_FAIL", exception=e)
