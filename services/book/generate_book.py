@@ -368,9 +368,13 @@ def generate_book(
         # Include subsections in ToC
         for j, sub in enumerate(getattr(sec, "subsections", []) or [], start=1):
             toc_lines.append(f"  {i}.{j} {sub.title}")
-        # Section title (H2)
+        # Section title (H2) with language-specific chapter label
         body_lines.append("")
-        body_lines.append(f"## {sec.title}")
+        _lbl2 = _book_section_label(i)
+        if _lbl2:
+            body_lines.append(f"## {_lbl2} {sec.title}")
+        else:
+            body_lines.append(f"## {sec.title}")
         # Section lead
         lead = (sec_leads.get(sec.id) or "").strip()
         if lead:
