@@ -53,6 +53,8 @@ def generate_book(
 
     logger = create_logger("book", show_debug=bool(os.getenv("DEBUG_LOGS")))
     logger.stage("Initialization", total_stages=5, current_stage=1)
+    from datetime import datetime
+    started_at = datetime.utcnow()
     logger.info(f"Starting book generation: '{topic[:100]}'", extra={
         "provider": _prov,
         "lang": lang,
@@ -332,6 +334,78 @@ def generate_book(
         content=content,
     )
     logger.success("Book saved", show_duration=True, extra={"path": str(book_path), "chars": len(content)})
+    # Save log (compact) and DB records (best-effort)
+    try:
+        log_dir = ensure_output_dir(output_subdir)
+        log_path = log_dir / f"{safe_filename_base(topic)}_book_log_{started_at.strftime('%Y%m%d_%H%M%S')}.md"
+        finished_at = datetime.utcnow()
+        header = (
+            f"# 🧾 Book Generation Log\n\n"
+            f"- provider: {_prov}\n"
+            f"- lang: {lang}\n"
+            f"- started_at: {started_at.strftime('%Y-%m-%d %H:%M')}\n"
+            f"- finished_at: {finished_at.strftime('%Y-%m-%d %H:%M')}\n"
+            f"- topic: {topic}\n"
+            f"- sections: {len(toc_outline.sections)}\n"
+            f"- subsections: {sum(len(s.subsections) for s in toc_outline.sections)}\n\n"
+            f"## Outline JSON\n\n```json\n{toc_outline.model_dump_json()}\n```\n"
+        )
+        save_markdown(log_path, title=f"Log: {topic}", generator="bio1c", pipeline="LogDeepBook", content=header)
+        # DB record
+        try:
+            from server.db import JobLog, ResultDoc
+            if os.getenv("DB_URL", "").strip():
+                from sqlalchemy import create_engine
+                from sqlalchemy.orm import sessionmaker
+                from urllib.parse import urlsplit, urlunsplit, parse_qs
+                db_url = os.getenv("DB_URL", "")
+                if db_url:
+                    sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace("postgresql://", "postgresql+psycopg2://")
+                    parts = urlsplit(sync_url)
+                    qs = parse_qs(parts.query or "")
+                    base_sync_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
+                    cargs = {}
+                    if "sslmode" not in {k.lower() for k in qs.keys()}:
+                        cargs["sslmode"] = "require"
+                    sync_engine = create_engine(base_sync_url, connect_args=cargs, pool_pre_ping=True, pool_size=3, max_overflow=0)
+                    SyncSession = sessionmaker(sync_engine)
+                    with SyncSession() as s:
+                        try:
+                            rel_log = str(log_path.relative_to(Path.cwd())) if log_path.is_absolute() else str(log_path)
+                        except ValueError:
+                            rel_log = str(log_path)
+                        try:
+                            job_id = int((job_meta or {}).get("job_id", 0))
+                        except (ValueError, TypeError):
+                            job_id = 0
+                        jl = JobLog(job_id=job_id, kind="md", path=rel_log, content=header)
+                        s.add(jl)
+                        s.flush()
+                        try:
+                            rel_doc = str(book_path.relative_to(Path.cwd())) if book_path.is_absolute() else str(book_path)
+                        except ValueError:
+                            rel_doc = str(book_path)
+                        rd = ResultDoc(
+                            job_id=job_id,
+                            kind="book",
+                            path=rel_doc,
+                            topic=topic,
+                            provider=_prov,
+                            lang=lang,
+                            content=content,
+                            hidden=1 if ((job_meta or {}).get("incognito") is True) else 0,
+                        )
+                        s.add(rd)
+                        s.flush()
+                        s.commit()
+                    try:
+                        sync_engine.dispose()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    except Exception:
+        pass
     logger.total_duration()
     return book_path
 
