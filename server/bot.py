@@ -2509,6 +2509,21 @@ def create_dispatcher() -> Dispatcher:
                         _tb.print_exc()
                     except Exception:
                         pass
+                # Send book log if enabled (best-effort)
+                try:
+                    if message.from_user:
+                        logs_enabled = await get_logs_enabled(message.from_user.id)
+                        if logs_enabled:
+                            from utils.slug import safe_filename_base as _sfb
+                            base = _sfb(topic)
+                            log_files = list(Path(book_path).parent.glob(f"{base}_book_log_*.md"))
+                            if log_files:
+                                lp = log_files[0]
+                                with open(lp, "rb") as log_f:
+                                    log_cap = f"Лог книги: {lp.name}" if _is_ru(ui_lang) else f"Book log: {lp.name}"
+                                    await message.answer_document(log_f, caption=log_cap)
+                except Exception:
+                    pass
                 # Mark job done
                 try:
                     if job_id and SessionLocal is not None:
