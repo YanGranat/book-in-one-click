@@ -351,9 +351,9 @@ def generate_book(
     toc_lines: list[str] = ["## Оглавление" if (lang or "auto").lower().startswith("ru") else "## Table of Contents"]
     for i, sec in enumerate(toc_outline.sections, start=1):
         toc_lines.append(f"{i}. {sec.title}")
-        # Section title
+        # Section title (H2)
         body_lines.append("")
-        body_lines.append(f"# {sec.title}")
+        body_lines.append(f"## {sec.title}")
         # Section lead
         lead = (sec_leads.get(sec.id) or "").strip()
         if lead:
@@ -365,7 +365,7 @@ def generate_book(
             sub_title = (getattr(d, "title", "") or sub.title)
             sub_md = (getattr(d, "markdown", "") or "").strip()
             body_lines.append("")
-            body_lines.append(f"## {sub_title}")
+            body_lines.append(f"### {sub_title}")
             if sub_md:
                 body_lines.append("")
                 body_lines.append(sub_md)
