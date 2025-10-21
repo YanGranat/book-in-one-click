@@ -370,7 +370,7 @@ def generate_book(
         for j, sub in enumerate(getattr(sec, "subsections", []) or [], start=1):
             # Use NBSPs to increase visual indent without triggering Markdown code blocks
             _indent = "\u00A0\u00A0\u00A0\u00A0"  # 4×NBSP
-            toc_lines.append(f"{_indent}{i}.{j} {sub.title}")
+            toc_lines.append(f"{_indent}{i}.{j}. {sub.title}")
         # Section title (H2) with language-specific chapter label
         body_lines.append("")
         _lbl2 = _book_section_label(i)
