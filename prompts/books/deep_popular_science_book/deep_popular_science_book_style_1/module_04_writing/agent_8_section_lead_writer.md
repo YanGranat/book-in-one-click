@@ -12,6 +12,10 @@
 - topic: тема книги.
 - lang: ru|en|auto. Если lang=auto — используй язык topic.
 - main_idea: ключевой тезис книги.
+- section_id: id раздела, для которого нужен лид-абзац.
+- section_title: название раздела.
+- section_purpose: задача раздела (purpose).
+- section_markdown: полный текст раздела (собранный из подразделов).
 </input>
 
 <output>

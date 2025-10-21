@@ -14,6 +14,12 @@
 - topic: тема книги.
 - lang: ru|en|auto. Если lang=auto — используй язык topic.
 - main_idea: ключевой тезис книги.
+- toc_json: JSON оглавления (разделы/подразделы/purpose).
+- section_id: id раздела этого подраздела.
+- subsection_id: id подраздела, текст которого нужно написать.
+- subsection_plan_items: массив пунктов плана подраздела.
+- section_purpose: задача раздела (purpose).
+- subsection_purpose: задача подраздела (purpose).
 </input>
 
 <deep_understanding>

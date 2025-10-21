@@ -37,6 +37,7 @@
 - topic: тема книги.
 - lang: ru|en|auto. Если lang=auto — используй язык topic.
 - main_idea: ключевой тезис книги.
+- toc_json: JSON оглавления с разделами, подразделами и их purpose.
 </input>
 
 <output>

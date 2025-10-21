@@ -12,13 +12,15 @@
 - topic: тема книги.
 - lang: ru|en|auto. Если lang=auto — используй язык topic.
 - main_idea: ключевой тезис книги.
+- toc_json: JSON оглавления (разделы/подразделы/purpose).
+- book_markdown: полный текст книги (для контекста при написании лида).
 </input>
 
 <output>
 Верни строго JSON следующего вида:
 {
-  "title": "строка — название книги.
-  "lead_markdown": "строка — лид‑абзац в Markdown: 80–350 слов.
+  "title": "строка — название книги"
+  "lead_markdown": "строка — лид‑абзац в Markdown"
 }
 </output>
 
