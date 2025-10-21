@@ -11,6 +11,7 @@ import sys as _sys
 
 from utils.env import ensure_project_root_on_syspath as _ensure_root, load_env_from_root
 from utils.io import ensure_output_dir, save_markdown, next_available_filepath
+from utils.lang import detect_lang_from_text
 from utils.slug import safe_filename_base
 from utils.logging import create_logger
 
@@ -348,7 +349,10 @@ def generate_book(
 
     # Assemble body
     body_lines: list[str] = []
-    toc_lines: list[str] = ["## Оглавление" if (lang or "auto").lower().startswith("ru") else "## Table of Contents"]
+    # Resolve display language for headings (ru/en); if lang=auto, detect by topic
+    _lang_l = (lang or "auto").strip().lower()
+    _disp_lang = _lang_l if _lang_l in {"ru", "en"} else detect_lang_from_text(topic or "")
+    toc_lines: list[str] = ["## Оглавление" if _disp_lang == "ru" else "## Table of Contents"]
     for i, sec in enumerate(toc_outline.sections, start=1):
         toc_lines.append(f"{i}. {sec.title}")
         # Include subsections in ToC
