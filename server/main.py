@@ -1060,7 +1060,7 @@ async def result_view_ui_id(res_id: int):
         "#content ol,#content ul{margin:0;padding-left:1.25em;list-style-position:outside}#content ol li,#content ul li{line-height:1.35;margin-bottom:6px;white-space:pre-wrap}#content li p{margin:0}#content p{margin:4px 0}"
         "#content strong{color:#ffd479}#content em{color:#7cc7ff}#content h1,#content h2,#content h3,#content h4,#content h5,#content h6{color:var(--brand)}"
         "[data-theme='light'] #content strong{color:#b26b00}[data-theme='light'] #content em{color:#0a84ff}"
-        ".meta{opacity:.8;font-size:12px;margin:0 0 8px}code{background:#0f121a;color:inherit;padding:0 2px;font-size:12px}pre{white-space:pre-wrap;word-wrap:break-word;background:#0f121a;border-radius:8px;padding:12px;border:1px solid var(--line)}"
+        ".meta{opacity:.8;font-size:12px;margin:0 0 8px}code{background:#0f121a;color:inherit;padding:0 2px;font-size:12px}pre{white-space:pre-wrap;word-wrap:break-word;background:#0f121a;border-radius:8px;padding:12px;border:1px solid var(--line)}#content p{white-space:pre-wrap}"
         "[data-theme='light'] code{background:#f5f7fb;color:inherit}"
         "[data-theme='light'] pre{background:#f5f7fb;border:1px solid #e5e9f0;color:#0f172a}"
         "</style></head><body>"
