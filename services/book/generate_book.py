@@ -44,6 +44,9 @@ def generate_book(
 
     Agent, Runner = _try_import_sdk()
 
+    # Resolve provider early (used in initial logs)
+    _prov = (provider or "openai").strip().lower()
+
     def _emit(stage: str) -> None:
         if on_progress:
             try:
@@ -90,7 +93,7 @@ def generate_book(
         build_agent_9_title_lead_writer,
     )
 
-    _prov = (provider or "openai").strip().lower()
+    # _prov already resolved above
 
     # Agent 1: Main idea
     logger.stage("Agent 1 · Main Idea", total_stages=5, current_stage=1)
