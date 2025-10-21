@@ -353,8 +353,18 @@ def generate_book(
     _lang_l = (lang or "auto").strip().lower()
     _disp_lang = _lang_l if _lang_l in {"ru", "en"} else detect_lang_from_text(topic or "")
     toc_lines: list[str] = ["## Оглавление" if _disp_lang == "ru" else "## Table of Contents"]
+    def _book_section_label(idx: int) -> str | None:
+        if _disp_lang == "ru":
+            return f"Глава {idx}."
+        if _disp_lang == "en":
+            return f"Chapter {idx}."
+        return None
     for i, sec in enumerate(toc_outline.sections, start=1):
-        toc_lines.append(f"{i}. {sec.title}")
+        _lbl = _book_section_label(i)
+        if _lbl:
+            toc_lines.append(f"{_lbl} {sec.title}")
+        else:
+            toc_lines.append(f"{i}. {sec.title}")
         # Include subsections in ToC
         for j, sub in enumerate(getattr(sec, "subsections", []) or [], start=1):
             toc_lines.append(f"  {i}.{j} {sub.title}")
