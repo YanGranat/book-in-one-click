@@ -1090,9 +1090,13 @@ async def _list_meme_results() -> list[dict]:
     try:
         async with SessionLocal() as s:
             from sqlalchemy import select
+            from sqlalchemy import or_
             res = await s.execute(
                 select(ResultDoc)
-                .where(ResultDoc.kind == "meme_extract")
+                .where(
+                    ResultDoc.kind == "meme_extract",
+                    or_(ResultDoc.hidden == 0, ResultDoc.hidden.is_(None)),
+                )
                 .order_by(ResultDoc.created_at.desc(), ResultDoc.id.desc())
             )
             rows = res.scalars().all()
@@ -1295,6 +1299,17 @@ async def meme_result_view_ui_id(res_id: int):
     data = await get_result(res_id)
     if isinstance(data, dict) and data.get("error"):
         return HTMLResponse("<h1>Not found</h1>", status_code=404)
+    # Hide incognito meme docs from UI if needed
+    try:
+        if SessionLocal is not None:
+            async with SessionLocal() as s:
+                from sqlalchemy import select
+                res = await s.execute(select(ResultDoc).where(ResultDoc.id == res_id))
+                row = res.scalar_one_or_none()
+                if row is not None and getattr(row, "hidden", 0) == 1:
+                    return HTMLResponse("<h1>Not found</h1>", status_code=404)
+    except Exception:
+        pass
     content = data.get("content", "") if isinstance(data, dict) else ""
     # Ensure newline for parser safety
     if content and not content.endswith("\n"):

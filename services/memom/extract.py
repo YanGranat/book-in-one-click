@@ -246,7 +246,7 @@ def extract_memes(
                     provider=pnorm,
                     lang=detected_lang,  # Store detected language for metadata
                     content=final_content,
-                    hidden=0,
+                    hidden=1 if ((job_meta or {}).get("incognito") is True) else 0,
                 )
                 try:
                     s.add(rd)

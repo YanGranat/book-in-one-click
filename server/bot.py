@@ -334,11 +334,11 @@ def build_yesno_inline_with_check(current: bool, ui_lang: str) -> InlineKeyboard
     """Build yes/no keyboard with checkmark on current selection and Back button."""
     kb = InlineKeyboardMarkup()
     if _is_ru(ui_lang):
-        kb.add(InlineKeyboardButton(text="Да" + (" ✓" if current else ""), callback_data="set:incognito:yes"))
-        kb.add(InlineKeyboardButton(text="Нет" + (" ✓" if not current else ""), callback_data="set:incognito:no"))
+        kb.add(InlineKeyboardButton(text="Да" + (" ✓" if current else ""), callback_data="set:incog:yes"))
+        kb.add(InlineKeyboardButton(text="Нет" + (" ✓" if not current else ""), callback_data="set:incog:no"))
     else:
-        kb.add(InlineKeyboardButton(text="Yes" + (" ✓" if current else ""), callback_data="set:incognito:yes"))
-        kb.add(InlineKeyboardButton(text="No" + (" ✓" if not current else ""), callback_data="set:incognito:no"))
+        kb.add(InlineKeyboardButton(text="Yes" + (" ✓" if current else ""), callback_data="set:incog:yes"))
+        kb.add(InlineKeyboardButton(text="No" + (" ✓" if not current else ""), callback_data="set:incog:no"))
     kb.add(InlineKeyboardButton(text=("⬅ Назад" if _is_ru(ui_lang) else "⬅ Back"), callback_data="settings:back"))
     return kb
 
@@ -860,8 +860,14 @@ def create_dispatcher() -> Dispatcher:
         from services.memom.extract import extract_memes
         loop = _asyncio.get_running_loop()
         try:
-            # Pass job_meta with user ids for DB linkage
-            job_meta = {"user_id": int(message.from_user.id) if message.from_user else 0}
+            # Pass job_meta with user ids and incognito flag for DB linkage/visibility
+            inc_flag = False
+            try:
+                if message.from_user:
+                    inc_flag = await get_incognito(message.from_user.id)
+            except Exception:
+                inc_flag = False
+            job_meta = {"user_id": int(message.from_user.id) if message.from_user else 0, "incognito": bool(inc_flag)}
             def _run():
                 return extract_memes(text=text, source_name=name, lang=gen_lang or 'auto', provider=prov or 'openai', job_meta=job_meta)
             result = await loop.run_in_executor(None, _run)
@@ -1669,10 +1675,20 @@ def create_dispatcher() -> Dispatcher:
         )
         await message.answer(prompt, reply_markup=build_yesno_inline("incog", ui_lang))
 
-    @dp.callback_query_handler(lambda c: c.data and c.data.startswith("set:incog:"))  # type: ignore
+    @dp.callback_query_handler(lambda c: c.data and (c.data.startswith("set:incog:") or c.data.startswith("set:incognito:")))  # type: ignore
     async def cb_set_incog(query: types.CallbackQuery, state: FSMContext):
-        val = (query.data or "").split(":")[-1]
-        enabled = (val == "enable")
+        data_raw = (query.data or "")
+        val = data_raw.split(":")[-1]
+        # Support both schemas:
+        # - set:incog:enable|disable (legacy, means incognito on/off)
+        # - set:incog:yes|no (new, answer to "Make results public?"; yes→public→incognito off)
+        if val in ("enable", "disable"):
+            enabled = (val == "enable")  # enable incognito → private
+        elif val in ("yes", "no"):
+            # yes to public → incognito should be OFF; no to public → incognito ON
+            enabled = (val == "no")
+        else:
+            enabled = False
         data = await state.get_data()
         ui_lang = (data.get("ui_lang") or "ru").strip()
         try:
