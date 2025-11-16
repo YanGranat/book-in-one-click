@@ -166,6 +166,8 @@ def generate_series(
     except Exception:
         asyncio.set_event_loop(asyncio.new_event_loop())
 
+    # Initialize structured logger early (used by provider adapter)
+    logger = create_logger("series", show_debug=bool(os.getenv("DEBUG_LOGS")))
     Agent, Runner = _try_import_sdk()
     pr = _ProviderAdapter(_prov, logger=logger)
 
@@ -181,8 +183,6 @@ def generate_series(
     started_at = datetime.utcnow()
     started_perf = time.perf_counter()
     
-    # Initialize structured logger
-    logger = create_logger("series", show_debug=bool(os.getenv("DEBUG_LOGS")))
     logger.info(f"Starting series generation: '{topic[:100]}'")
     logger.info(f"Configuration: provider={_prov}, lang={lang}, mode={mode}, count={count}")
     
